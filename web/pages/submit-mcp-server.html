@@ -16,7 +16,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/submit-mcp-server", "url": "https://neuronto.com/submit-mcp-server", "name": "Where to submit your MCP server so AI agents can find it", "description": "Every place you can list an MCP server in 2026, which ones accept open submissions, and which are curated with no route in. Measured, not guessed.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Where can I submit my MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "The official MCP Registry accepts direct publication. Glama, Smithery and mcpmarket index submissions. For ARD registries you do not submit at all: you publish an ard.json manifest on your own domain and crawlers pick it up. GitHub's Agent Finder is curated with no published submission route."}}, {"@type": "Question", "name": "Is there a single place to list an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "No single place covers everything, which is why federation exists. A federated ARD registry queries several indexes at once, so being in any of them makes you reachable through it."}}, {"@type": "Question", "name": "Do I need an account to be listed in an ARD registry?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native. You publish a manifest on a domain you control and registries crawl it. No account, no allowlist and no approval step."}}]}]}</script>
 <style>
 :root{
@@ -25,7 +25,7 @@
   --fg:#FAFAFA; --fg2:#A5A5AB; --mut:#6C6C74; --dim:#45454C;
   --pos:#4ADE80; --neg:#F87171; --blue:#5B8DEF;
   --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --serif:"Instrument Serif",Georgia,serif;
+  --display:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   --r:8px;
 }
 *{box-sizing:border-box}
@@ -68,9 +68,9 @@ nav .wrap{display:flex;align-items:center;gap:15px;width:100%}
 .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mut);margin:0 0 22px;display:flex;align-items:center;gap:10px}
 .eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
-h1.display{font-family:var(--serif);font-weight:400;font-size:clamp(2.7rem,6.4vw,4.5rem);
-  line-height:1.02;letter-spacing:-.018em;margin:0 0 22px}
-h1.display em{font-style:italic;color:var(--fg2)}
+h1.display{font-family:var(--display);font-weight:600;font-size:clamp(2.6rem,6.1vw,4.2rem);
+  line-height:1.04;letter-spacing:-.045em;margin:0 0 22px}
+h1.display em{font-style:normal;color:var(--mut);font-weight:600}
 .lede{font-size:17px;line-height:1.62;color:var(--fg2);font-weight:300;max-width:60ch;margin:0 0 30px}
 .lede b{color:var(--fg);font-weight:500}
 .heroBtns{display:flex;gap:9px;flex-wrap:wrap}
@@ -96,7 +96,7 @@ h1.display em{font-style:italic;color:var(--fg2)}
 
 section{padding:52px 0;border-top:1px solid var(--line)}
 .shead{display:flex;align-items:baseline;gap:14px;margin:0 0 20px;flex-wrap:wrap}
-.shead h2{font-family:var(--serif);font-size:1.85rem;font-weight:400;letter-spacing:-.012em;margin:0}
+.shead h2{font-family:var(--display);font-size:1.6rem;font-weight:600;letter-spacing:-.032em;margin:0}
 .shead .sp{margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
 .prose{max-width:68ch;color:var(--fg2);font-weight:300;font-size:14.5px}
@@ -159,12 +159,12 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 .doc .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mut);margin:0 0 18px;display:flex;align-items:center;gap:10px}
 .doc .eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
-.doc h1{font-family:var(--serif);font-weight:400;font-size:clamp(2.2rem,5vw,3.3rem);line-height:1.06;
-  letter-spacing:-.018em;margin:0 0 20px}
+.doc h1{font-family:var(--display);font-weight:600;font-size:clamp(2.1rem,4.8vw,3.1rem);line-height:1.07;
+  letter-spacing:-.042em;margin:0 0 20px}
 .doc .answer{font-size:18px;line-height:1.62;color:var(--fg);font-weight:300;margin:0 0 30px;
   padding-left:18px;border-left:2px solid var(--line2)}
 .doc .answer b{font-weight:500}
-.doc h2{font-family:var(--serif);font-weight:400;font-size:1.7rem;letter-spacing:-.012em;
+.doc h2{font-family:var(--display);font-weight:600;font-size:1.5rem;letter-spacing:-.03em;
   margin:44px 0 14px;padding-top:22px;border-top:1px solid var(--line)}
 .doc h3{font-size:14.5px;font-weight:600;margin:26px 0 7px}
 .doc p{color:var(--fg2);font-weight:300;font-size:14.8px;line-height:1.68;margin:0 0 1.05rem}

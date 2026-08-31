@@ -20,7 +20,7 @@
 <meta name="twitter:description" content="One search across every public ARD registry.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 
 <style>
 :root{
@@ -33,7 +33,7 @@
   --fg:#FAFAFA; --fg2:#A5A5AB; --mut:#6C6C74; --dim:#45454C;
   --pos:#4ADE80; --neg:#F87171; --blue:#5B8DEF;
   --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --serif:"Instrument Serif",Georgia,serif;
+  --display:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   --r:8px;
 }
 *{box-sizing:border-box}
@@ -76,9 +76,9 @@ nav .wrap{display:flex;align-items:center;gap:15px;width:100%}
 .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mut);margin:0 0 22px;display:flex;align-items:center;gap:10px}
 .eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
-h1.display{font-family:var(--serif);font-weight:400;font-size:clamp(2.7rem,6.4vw,4.5rem);
-  line-height:1.02;letter-spacing:-.018em;margin:0 0 22px}
-h1.display em{font-style:italic;color:var(--fg2)}
+h1.display{font-family:var(--display);font-weight:600;font-size:clamp(2.6rem,6.1vw,4.2rem);
+  line-height:1.04;letter-spacing:-.045em;margin:0 0 22px}
+h1.display em{font-style:normal;color:var(--mut);font-weight:600}
 .lede{font-size:17px;line-height:1.62;color:var(--fg2);font-weight:300;max-width:60ch;margin:0 0 30px}
 .lede b{color:var(--fg);font-weight:500}
 .heroBtns{display:flex;gap:9px;flex-wrap:wrap}
@@ -104,7 +104,7 @@ h1.display em{font-style:italic;color:var(--fg2)}
 
 section{padding:52px 0;border-top:1px solid var(--line)}
 .shead{display:flex;align-items:baseline;gap:14px;margin:0 0 20px;flex-wrap:wrap}
-.shead h2{font-family:var(--serif);font-size:1.85rem;font-weight:400;letter-spacing:-.012em;margin:0}
+.shead h2{font-family:var(--display);font-size:1.6rem;font-weight:600;letter-spacing:-.032em;margin:0}
 .shead .sp{margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
 .prose{max-width:68ch;color:var(--fg2);font-weight:300;font-size:14.5px}
@@ -165,7 +165,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 </style>
 <style>
 .grade{display:flex;align-items:center;gap:20px;margin:0 0 22px}
-.gnum{font-family:var(--serif);font-size:64px;line-height:1;letter-spacing:-.03em}
+.gnum{font-family:var(--display);font-size:60px;font-weight:600;line-height:1;letter-spacing:-.05em}
 .gsub{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
 .bar{height:5px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:8px;max-width:320px}
 .bar i{display:block;height:100%;background:#FAFAFA}
@@ -198,7 +198,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 <div class="wrap">
   <div class="hero" style="padding:70px 0 40px">
     <p class="eyebrow">ARD Console</p>
-    <h1 class="display" style="font-size:clamp(2.3rem,5.4vw,3.6rem)">Can AI agents<br><em>discover you?</em></h1>
+    <h1 class="display" style="font-size:clamp(2.2rem,5.1vw,3.4rem)">Can AI agents<br><em>discover you?</em></h1>
     <p class="lede">Check any domain: whether its manifest is reachable on all four discovery paths,
     whether it satisfies the specification, and <b>which registries actually return it</b>. That
     last one is what decides if an agent ever finds you, and nothing else measures it.</p>

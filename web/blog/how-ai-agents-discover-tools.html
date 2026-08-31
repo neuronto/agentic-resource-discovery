@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How AI agents discover tools at runtime</title>
+<meta name="description" content="Agents can only use what someone wired in beforehand. Runtime discovery changes that, and the mechanism is one JSON file.">
+<link rel="canonical" href="https://neuronto.com/blog/how-ai-agents-discover-tools">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="ard" href="https://neuronto.com/.well-known/ard.json">
+<link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
+<meta property="og:type" content="article">
+<meta property="og:title" content="How AI agents discover tools at runtime">
+<meta property="og:description" content="Agents can only use what someone wired in beforehand. Runtime discovery changes that, and the mechanism is one JSON file.">
+<meta property="og:url" content="https://neuronto.com/blog/how-ai-agents-discover-tools">
+<meta property="og:image" content="https://neuronto.com/img/discovery.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://neuronto.com/img/discovery.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/how-ai-agents-discover-tools#post", "headline": "How AI agents discover tools at runtime", "description": "Agents can only use what someone wired in beforehand. Runtime discovery changes that, and the mechanism is one JSON file.", "image": "https://neuronto.com/img/discovery.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/how-ai-agents-discover-tools", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/how-ai-agents-discover-tools"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do AI agents find tools at runtime?", "acceptedAnswer": {"@type": "Answer", "text": "Instead of hard-coding integrations, an agent queries a discovery service in plain language, receives ranked candidate resources, and connects to the one it picks using that resource's own protocol. The Agentic Resource Discovery specification standardises this: publishers describe resources at /.well-known/ard.json and registries index those descriptions and answer search queries."}}, {"@type": "Question", "name": "Why does loading every tool into the context window not scale?", "acceptedAnswer": {"@type": "Answer", "text": "Each tool description consumes context that would otherwise hold the task, and selection accuracy falls as the number of similar-sounding tools grows. Moving selection into a retrieval service keeps the context window for work and lets the number of reachable capabilities grow without bound."}}]}]}</script>
+<style>
+:root{
+  --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
+  --line:#1B1B1E; --line2:#26262A;
+  --fg:#FAFAFA; --fg2:#A5A5AB; --mut:#6C6C74; --dim:#45454C;
+  --pos:#4ADE80; --neg:#F87171; --blue:#5B8DEF;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --display:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --r:8px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  font-size:13.5px;line-height:1.62;font-weight:400;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+a{color:inherit;text-decoration:none}
+::selection{background:#FAFAFA;color:#09090A}
+.wrap{max-width:1140px;margin:0 auto;padding:0 30px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+nav{position:sticky;top:0;z-index:50;height:62px;display:flex;align-items:center;
+  background:rgba(9,9,10,.74);backdrop-filter:blur(18px) saturate(180%);
+  border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:15px;width:100%}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .wm{font-size:15px;font-weight:600;letter-spacing:-.035em}
+.navlinks{display:flex;gap:19px;margin-left:26px;font-size:13px;color:var(--mut)}
+.navlinks a:hover{color:var(--fg)}
+.navsearch{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:var(--r);padding:0 11px;height:34px;
+  min-width:210px;color:var(--mut);cursor:text;transition:border-color .15s}
+.navsearch:hover{border-color:#34343A}
+.navsearch input{flex:1;background:0;border:0;outline:0;color:var(--fg);font-family:inherit;font-size:13px}
+.kbd{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line2);
+  border-radius:4px;padding:1px 5px}
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 15px;border-radius:var(--r);
+  font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;border:1px solid transparent;
+  transition:opacity .15s,border-color .15s;white-space:nowrap}
+.btn--w{background:#FAFAFA;color:#09090A}.btn--w:hover{opacity:.86}
+.btn--g{background:var(--panel);color:var(--fg);border-color:var(--line2)}
+.btn--g:hover{border-color:#3C3C44}
+@media(max-width:860px){.navlinks{display:none}.navsearch{min-width:0;flex:1}}
+@media(max-width:600px){.nav-cta{display:none}}
+
+/* hero — editorial */
+.hero{padding:86px 0 56px;max-width:820px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--mut);margin:0 0 22px;display:flex;align-items:center;gap:10px}
+.eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
+h1.display{font-family:var(--display);font-weight:600;font-size:clamp(2.6rem,6.1vw,4.2rem);
+  line-height:1.04;letter-spacing:-.045em;margin:0 0 22px}
+h1.display em{font-style:normal;color:var(--mut);font-weight:600}
+.lede{font-size:17px;line-height:1.62;color:var(--fg2);font-weight:300;max-width:60ch;margin:0 0 30px}
+.lede b{color:var(--fg);font-weight:500}
+.heroBtns{display:flex;gap:9px;flex-wrap:wrap}
+
+.searchWrap{max-width:700px;margin:44px 0 0}
+.bigsearch{display:flex;align-items:center;gap:11px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:10px;padding:0 15px;height:50px;
+  transition:border-color .15s,box-shadow .15s}
+.bigsearch:focus-within{border-color:#41414A;box-shadow:0 0 0 4px rgba(250,250,250,.035)}
+.bigsearch input{flex:1;background:0;border:0;outline:0;color:var(--fg);font-family:inherit;
+  font-size:15px;font-weight:300}
+.bigsearch input::placeholder{color:var(--mut)}
+.exs{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
+.ex{font-family:var(--mono);font-size:11px;color:var(--mut);background:0;border:1px solid var(--line);
+  border-radius:99px;padding:4px 11px;cursor:pointer;transition:.15s}
+.ex:hover{color:var(--fg2);border-color:var(--line2)}
+
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px}
+.seg button{border:0;background:0;color:var(--mut);font-family:inherit;font-size:12px;font-weight:500;
+  padding:4px 13px;border-radius:99px;cursor:pointer;transition:.15s}
+.seg button[aria-selected="true"]{background:#FAFAFA;color:#09090A}
+.seg button:not([aria-selected="true"]):hover{color:var(--fg2)}
+
+section{padding:52px 0;border-top:1px solid var(--line)}
+.shead{display:flex;align-items:baseline;gap:14px;margin:0 0 20px;flex-wrap:wrap}
+.shead h2{font-family:var(--display);font-size:1.6rem;font-weight:600;letter-spacing:-.032em;margin:0}
+.shead .sp{margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+.prose{max-width:68ch;color:var(--fg2);font-weight:300;font-size:14.5px}
+.prose p{margin:0 0 1.05rem}
+.prose b,.prose strong{color:var(--fg);font-weight:500}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(206px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:17px 18px 12px;background:var(--panel)}
+.card .k{font-size:12.5px;color:var(--fg2)}
+.card .v{font-size:29px;font-weight:500;letter-spacing:-.03em;margin:5px 0 12px;
+  font-variant-numeric:tabular-nums;line-height:1}
+.spark{display:block;width:100%;height:54px}
+
+.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:11px}
+.qbox{border:1px solid var(--line);border-radius:var(--r);padding:19px 21px;background:var(--panel)}
+.qbox h3{font-size:14.5px;font-weight:500;margin:0 0 8px;color:var(--fg)}
+.qbox p{margin:0;color:var(--fg2);font-size:13.5px;font-weight:300;line-height:1.6}
+
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{font-size:11.5px;font-weight:400;color:var(--mut);text-align:left;padding:0 14px 11px;
+  border-bottom:1px solid var(--line)}
+.tbl td{padding:13px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:#0D0D0F}
+.tbl .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
+.tbl .nm{font-weight:500}
+.tbl .ds{color:var(--mut);font-size:12px;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.ico{width:30px;height:30px;border:1px solid var(--line2);border-radius:6px;display:grid;
+  place-items:center;flex:none;background:var(--panel2)}
+.cellflex{display:flex;align-items:center;gap:12px}
+.scroll{overflow-x:auto}.scroll table{min-width:620px}
+.us td{background:#101013}.us td:first-child{color:#FAFAFA;font-weight:500}
+.ok{color:var(--pos)}.no{color:var(--neg)}.dimc{color:var(--dim)}
+
+#out{min-height:20px}
+.rmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px;
+  font-family:var(--mono);font-size:11px;color:var(--mut)}
+.tick{border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+.tick.on{color:var(--fg2);border-color:var(--line2)}.tick.off{color:var(--dim)}
+.tick.hi{color:#09090A;background:#FAFAFA;border-color:#FAFAFA}
+.sc{font-family:var(--mono);font-size:15px;font-weight:500;width:38px;text-align:right;flex:none}
+.badge{font-family:var(--mono);font-size:10px;color:var(--fg2);border:1px solid var(--line2);
+  border-radius:4px;padding:1px 6px;margin-left:7px}
+.src{font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap}
+.empty{color:var(--mut);font-family:var(--mono);font-size:12px;padding:18px 0}
+.dots::after{content:"";animation:d 1.2s steps(4,end) infinite}
+@keyframes d{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
+pre{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:15px 17px;
+  overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.75;margin:0;color:var(--fg2)}
+pre b{color:var(--fg);font-weight:400}pre .u{color:var(--blue)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);font-size:12px}
+.fl{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--mono);font-size:11.5px}
+.fl a:hover{color:var(--fg2)}
+</style><style>
+.art{max-width:74ch;padding:52px 0 40px}
+.art .kick{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--mut);margin:0 0 16px;display:flex;align-items:center;gap:10px}
+.art .kick::before{content:"";width:22px;height:1px;background:var(--line2)}
+.art h1{font-family:var(--display);font-weight:600;font-size:clamp(2.1rem,4.9vw,3.15rem);
+  line-height:1.07;letter-spacing:-.043em;margin:0 0 16px}
+.art .meta{font-family:var(--mono);font-size:11.5px;color:var(--mut);margin:0 0 30px}
+.art .hero{width:100%;aspect-ratio:1344/768;object-fit:cover;border-radius:10px;
+  border:1px solid var(--line);display:block;margin:0 0 34px;background:#000}
+.art .stand{font-size:18px;line-height:1.6;color:var(--fg);font-weight:300;margin:0 0 28px;
+  padding-left:18px;border-left:2px solid var(--line2)}
+.art .stand b{font-weight:500}
+.art h2{font-family:var(--display);font-weight:600;font-size:1.48rem;letter-spacing:-.03em;
+  margin:42px 0 13px;padding-top:22px;border-top:1px solid var(--line)}
+.art h3{font-size:14.5px;font-weight:600;margin:26px 0 7px}
+.art p{color:var(--fg2);font-weight:300;font-size:14.9px;line-height:1.7;margin:0 0 1.05rem}
+.art b,.art strong{color:var(--fg);font-weight:500}
+.art ul,.art ol{color:var(--fg2);font-weight:300;font-size:14.9px;padding-left:20px;margin:0 0 1.05rem}
+.art li{margin-bottom:.5rem}
+.art pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:15px 17px;
+  overflow-x:auto;font-family:var(--mono);font-size:12.3px;line-height:1.72;margin:0 0 1.2rem;color:var(--fg2)}
+.art pre b{color:var(--fg);font-weight:400}
+.art table{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 1.2rem}
+.art th{font-size:11px;font-weight:400;color:var(--mut);text-align:left;padding:0 12px 10px;
+  border-bottom:1px solid var(--line);font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.art td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--fg2)}
+.art tr:last-child td{border-bottom:0}
+.art .pull{font-family:var(--display);font-size:1.32rem;font-weight:500;letter-spacing:-.03em;
+  color:var(--fg);line-height:1.32;margin:32px 0;padding:0 0 0 20px;border-left:2px solid var(--fg)}
+.try{border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:22px 24px;margin:34px 0}
+.try h4{font-family:var(--display);font-size:14.5px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;color:var(--fg)}
+.try p{margin:0 0 12px;font-size:13.8px}
+.try pre{margin:0 0 12px}
+.try .row{display:flex;gap:9px;flex-wrap:wrap}
+.cards3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:11px;margin:28px 0 0}
+.pc{border:1px solid var(--line);border-radius:9px;padding:17px 18px;background:var(--panel);display:block}
+.pc:hover{border-color:var(--line2)}
+.pc .t{font-weight:500;font-size:13.8px;margin-bottom:4px;letter-spacing:-.01em}
+.pc .d{color:var(--mut);font-size:12.5px;font-weight:300}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
+    <span class="wm">neuronto</span></a>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a>
+    <a href="/blog">Blog</a><a href="/console">Console</a></div>
+  <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
+</div></nav>
+<div class="wrap"><article class="art">
+<p class="kick">Discovery</p>
+<h1>How AI agents discover tools at runtime</h1>
+<p class="meta">31 August 2026 · 6 min read</p>
+<img class="hero" src="/img/discovery.jpg" alt="A vast dark grid seen in perspective with a scattered few cells glowing white" width="1344" height="768">
+<p class="stand">An agent today can only use capabilities somebody installed for it in advance, and every tool description competes for room in the context window. <b>Runtime discovery moves tool selection out of the model and into a search service</b>, the same shift the web made when it stopped curating link directories and started indexing.</p>
+
+<h2>The install-time model, and where it breaks</h2>
+<p>Every agent framework in use today assumes the same thing: before an agent can do something, a
+human wires that capability in. You add an MCP server to a config file, restart, and now the model
+sees another tool description in its context.</p>
+<p>That works at ten tools. At a hundred it starts to hurt, because every description competes for
+the same context the actual task needs. At a thousand it stops working entirely, and not only for
+context reasons: selection accuracy falls as candidates get more similar, which is a retrieval
+problem wearing a prompt-engineering costume.</p>
+<p class="pull">Pre-installing every capability an agent might need is the same bet as bookmarking
+every page you might read.</p>
+
+<h2>What runtime discovery does instead</h2>
+<p>The agent does not carry the catalogue. It asks a question when it needs something:</p>
+<pre>POST /search
+{"query": {"text": "scrape a website behind cloudflare"}}</pre>
+<p>Back comes a ranked list of resources that can do it, each with an endpoint and the protocol it
+speaks. The agent connects to whichever it picks. Nothing was installed in advance, and nothing
+occupied the context window until it was relevant.</p>
+<p>This is what the <a href="/what-is-ard">Agentic Resource Discovery specification</a> standardises.
+It is deliberately small: it describes how resources are published and searched, then gets out of the
+way so invocation happens over MCP, A2A or plain HTTP as it already does.</p>
+
+<h2>Two sides, both trivial</h2>
+<h3>Publishers describe what they offer</h3>
+<p>A JSON manifest at <code>/.well-known/ard.json</code> on your own domain. Each entry names one
+resource and, crucially, carries <b>representative queries</b>: the requests it can serve, phrased
+the way a person would ask.</p>
+<p>Nobody approves this. There is no marketplace to apply to. Publishing on a domain you control is
+the entire mechanism, which is why the specification calls the model web-native.</p>
+<h3>Registries index and answer</h3>
+<p>A registry crawls those manifests and exposes a search API. The interesting design decision is
+that the specification expects <b>many</b> registries rather than one, and defines a federation mode
+so a client can reach them all through any single one.</p>
+<div class="try">
+<h4>Try it on your own resource</h4>
+<p>Publishing takes one file. This checks whether it worked, across every public registry rather
+than only ours.</p>
+<pre>pip install ard-publish
+python -m ard_publish <b>check</b> yourdomain.com</pre>
+<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
+<a class="btn btn--g" href="/publish">Publishing guide</a></div>
+</div>
+<h2>Why representative queries decide everything</h2>
+<p>This is the part publishers get wrong, and the failure is silent.</p>
+<p>Registries build their semantic index from <code>representativeQueries</code>. An entry without
+them is a valid catalogue entry that <b>no search will ever return</b>. The manifest validates, it
+serves a 200, and it is unfindable. There is no error to notice.</p>
+<table><thead><tr><th>Written for a brochure</th><th>Written for retrieval</th></tr></thead><tbody>
+<tr><td>enterprise document intelligence</td><td>read this PDF and pull out the invoice total</td></tr>
+<tr><td>scalable web extraction platform</td><td>scrape a website that blocks bots</td></tr>
+<tr><td>unified communications API</td><td>send a text message to a phone number</td></tr>
+</tbody></table>
+<p>The right-hand column matches what an agent is actually holding when it goes looking: a task, in
+the user's words, not a category.</p>
+
+<h2>What this changes</h2>
+<p>For agent builders, integrations stop being a build-time decision. You ask for a capability and
+connect to whatever currently serves it best, which also means you are no longer locked to whichever
+vendor you happened to wire in last year.</p>
+<p>For tool vendors, distribution stops depending on being accepted somewhere. You publish on your
+own domain and you are eligible everywhere at once.</p>
+<p>Neither is fully true yet. The ecosystem is early and most clients still ship a fixed tool list.
+But the mechanism exists, it is specified, and it costs one JSON file to join.</p>
+<div class="try">
+<h4>Use Neuronto from your agent</h4>
+<p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
+<pre>curl -s <b>https://neuronto.com/search</b> \
+  -H 'content-type: application/json' \
+  -d '{"query":{"text":"scrape a website"},"federation":"auto"}'</pre>
+<pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
+<div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
+<a class="btn btn--g" href="/console">Audit your domain</a></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public ARD registries the same 26 queries. Their combined index was 68…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify registries return you. Plus the mista…</div></a><a class="pc" href="/blog/most-of-the-agent-web-points-at-nothing"><div class="t">Most of the agent web points at nothing</div><div class="d">We probed registered agent endpoints. On one chain, one of 55 answered. Discovery withou…</div></a></div></article></div>
+<footer><div class="wrap">
+  <div class="fl"><a href="/">Index</a><a href="/blog">Blog</a><a href="/what-is-ard">What is ARD</a>
+    <a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a>
+    <a href="https://github.com/neuronto/neuronto">source</a></div>
+  <div>An Agentic Resource Discovery registry, index and publisher.</div>
+</div></footer>
+</body></html>
