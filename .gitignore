@@ -34,3 +34,13 @@ leakscan.sh
 
 # the scanner lives outside this project; it must never ship with it
 **/leakscan.sh
+
+# internal operational docs: paths, ports, hosts, service names, box layout.
+# NEVER published. This directory is both the deployment AND the git repo,
+# so anything not ignored here goes public on the next push.
+internal/
+
+# build artefacts, never committed
+*.egg-info/
+dist/
+build/

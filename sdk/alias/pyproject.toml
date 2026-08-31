@@ -1,0 +1,33 @@
+[project]
+name = "agentic-resource-discovery"
+version = "1.0.1"
+description = "Neuronto - Agentic Resource Discovery (ARD) Index. Make your API, MCP server or AI agent discoverable by AI agents. Alias for ard-publish."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+dependencies = ["ard-publish>=1.0.1"]
+keywords = ["agentic-resource-discovery", "ard", "ard-index", "ard-registry",
+            "agent-discovery", "ai-agent-discovery", "mcp", "mcp-server",
+            "mcp-index", "model-context-protocol", "ai-agents", "a2a",
+            "discovery", "registry", "well-known", "ard-manifest", "ai-catalog",
+            "agent-tools", "tool-discovery", "llm-tools", "agentic-ai"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://neuronto.com"
+Documentation = "https://neuronto.com/publish"
+Repository = "https://github.com/neuronto/ard-publish"
+Specification = "https://agenticresourcediscovery.org/spec"
+
+[project.scripts]
+agentic-resource-discovery = "ard_publish.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

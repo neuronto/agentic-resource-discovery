@@ -3,7 +3,7 @@
 Spec §5.4 defines three federation modes and makes `auto` the default: query
 upstream registries, merge their results with your own, return one set. We
 benchmarked all four registries that exist on 2026-08-31 and none of them
-implements it — `auto` returned byte-identical results to `none` on every one.
+implements it, `auto` returned byte-identical results to `none` on every one.
 
 Two properties matter here. The fan-out is concurrent and hard-bounded, because
 GitHub's finder answers in ~2.0 s and Hugging Face in ~1.7 s, and no client

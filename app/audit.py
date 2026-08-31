@@ -7,12 +7,12 @@ returns nothing. This module answers those questions.
 
 Three parts, in ascending order of what they are worth to the publisher:
 
-  1. **Discovery** — is the manifest reachable, on how many of the four paths a
+  1. **Discovery**, is the manifest reachable, on how many of the four paths a
      consumer may check? A catalogue served on one path is invisible to any
      client that checks another.
-  2. **Conformance** — does it satisfy the specification, entry by entry, with
+  2. **Conformance**, does it satisfy the specification, entry by entry, with
      findings written as instructions rather than error codes.
-  3. **Coverage** — do the registries that exist actually return this domain?
+  3. **Coverage**, do the registries that exist actually return this domain?
      This is the part nobody else measures, and it is the only one that decides
      whether an agent will ever find them.
 """
