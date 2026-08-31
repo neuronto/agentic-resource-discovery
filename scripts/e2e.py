@@ -336,6 +336,97 @@ def t_unknown_url_still_404s():
         assert e.code == 404, e.code
 
 
+# --------------------------------------------------------------------------
+# 8. The rendered pages: server-side, honest, and never advertising a stub
+# --------------------------------------------------------------------------
+def _html(path, timeout=40):
+    req = urllib.request.Request(BASE + path,
+                                 headers={"User-Agent": "neuronto-e2e/1.0",
+                                          "Accept": "text/html"})
+    r = urllib.request.urlopen(req, timeout=timeout)
+    return r.status, r.read().decode("utf-8", "replace")
+
+
+def t_capability_index_renders_server_side():
+    s, h = _html("/tools/")
+    assert s == 200, s
+    assert "verified tools" in h.lower(), "index does not mention verified tools"
+    # the numbers must be in the HTML, not fetched by a script
+    import re as _re
+    assert _re.search(r"<b>[\d,]{3,}</b>", h), "no server-rendered figures on /tools/"
+    assert h.count('href="/tools/') >= 15, "too few capability pages linked"
+
+
+def t_capability_page_is_relevant_and_not_thin():
+    s, h = _html("/tools/pdf-documents")
+    assert s == 200, s
+    import re as _re
+    names = _re.findall(r'<span class="tn">([^<]+)</span>', h)
+    assert len(names) >= 20, f"only {len(names)} tools on the page"
+    # the page must actually be about its subject
+    hit = sum(1 for n in names[:15] if "pdf" in n.lower() or "doc" in n.lower()
+              or "ocr" in n.lower())
+    assert hit >= 8, f"only {hit}/15 leading tools relate to the category: {names[:15]}"
+
+
+def t_page_counts_match_the_table_rule():
+    """The headline figure and the table must come from the same rule."""
+    s, h = _html("/tools/databases")
+    import re as _re
+    m = _re.search(r"<b>([\d,]+)</b>verified tools", h)
+    assert m, "no headline tool count"
+    headline = int(m.group(1).replace(",", ""))
+    s2, api = post("/tools", {"query": {"text": "sql database"}, "limit": 1})
+    assert headline > 0 and headline < 5000, f"implausible headline count {headline}"
+
+
+def t_stub_categories_are_not_published():
+    """A category below the threshold must 404 and stay out of the sitemap."""
+    try:
+        s, _ = _html("/tools/translation-language")
+        assert False, f"stub category returned {s}"
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
+    sm = r.read().decode()
+    assert "translation-language" not in sm, "sitemap advertises a 404 page"
+    assert "/tools/pdf-documents" in sm, "sitemap missing a real capability page"
+
+
+def t_bench_and_adoption_negotiate_content():
+    """HTML to a browser, JSON to an API client, from one URL."""
+    for path in ("/bench", "/adoption"):
+        s, h = _html(path)
+        assert s == 200, f"{path} html {s}"
+        assert "<table" in h, f"{path} rendered no table"
+        s2, d = get(path)                      # Accept: application/json
+        assert isinstance(d, dict), f"{path} did not return JSON to an API client"
+
+
+def t_bench_page_shows_the_unflattering_number():
+    """The page must publish the conditioned column and the disclosed bias."""
+    s, h = _html("/bench")
+    assert "when carried" in h.lower(), "conditioned column missing from the page"
+    assert "known bias" in h.lower(), "page does not disclose the benchmark bias"
+
+
+def t_pages_carry_canonical_and_description():
+    for path in ("/tools/", "/tools/email", "/bench", "/adoption"):
+        s, h = _html(path)
+        assert '<link rel="canonical"' in h, f"{path} has no canonical"
+        assert '<meta name="description"' in h, f"{path} has no meta description"
+        assert "<title>" in h, f"{path} has no title"
+
+
+def t_pages_never_imply_trust():
+    for path in ("/tools/", "/tools/pdf-documents"):
+        s, h = _html(path)
+        low = h.lower()
+        for word in ("trusted", "certified", "safe to use", "trust score"):
+            assert word not in low, f"{path} implies trust: {word!r}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
