@@ -266,7 +266,7 @@ async def run(conn, k: int | None = None, n: int | None = None,
                        "by our choice of ground truth. Read the absolute numbers "
                        "with that in mind; the harness is published so the task set "
                        "can be replaced."),
-        "harness": "https://github.com/neuronto/neuronto/blob/main/app/bench.py",
+        "harness": "https://github.com/neuronto/agentic-resource-discovery/blob/main/app/bench.py",
         "targets": targets,
     }
     _save(conn, payload, len(tasks), k)
