@@ -1,4 +1,4 @@
-"""Neuronto — an ARD registry, publisher and index.
+"""Neuronto - an ARD registry, publisher and index.
 
 Implements the Registry REST API of the Agentic Resource Discovery
 specification v0.91, including the parts nobody else does:
@@ -27,7 +27,8 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import audit, config, federation, ingest, liveness, search, store
+from . import (adoption, audit, bench, config, embed, federation, ingest,
+               liveness, search, store, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
@@ -65,7 +66,7 @@ async def _timing(request: Request, call_next):
 
 @app.post("/search")
 async def search_endpoint(body: dict) -> JSONResponse:
-    """POST /search — the one endpoint the spec mandates.
+    """POST /search - the one endpoint the spec mandates.
 
     Every result carries `identifier`, `score` (0-100) and `source`, which are
     the three fields the conformance tool requires of a SearchResultItem.
@@ -110,7 +111,7 @@ async def search_endpoint(body: dict) -> JSONResponse:
 
 @app.post("/explore")
 async def explore_endpoint(body: dict) -> JSONResponse:
-    """POST /explore — optional introspection over facets (§5.3.3).
+    """POST /explore - optional introspection over facets (§5.3.3).
 
     Explore does not federate; it is scoped to this registry's own index.
     """
@@ -130,12 +131,23 @@ async def explore_endpoint(body: dict) -> JSONResponse:
               "publisher": "publisher", "host": "publisher", "source": "sources",
               "tags": "tags", "capabilities": "capabilities"}
     out: dict[str, Any] = {}
+    if not isinstance(facets, list):
+        facets = [facets]
     for f in facets:
-        field = f.get("field")
+        # Accept both the object form, {"field":"type","limit":20}, and the bare
+        # string shorthand, "type". The shorthand is the obvious thing to send
+        # and it used to raise, which returned 500 to a caller who had simply
+        # guessed a reasonable shape. A registry that crashes on plausible
+        # input breaks federation for everyone downstream of it.
+        if isinstance(f, str):
+            field, limit = f, 50
+        elif isinstance(f, dict):
+            field, limit = f.get("field"), int(f.get("limit") or 50)
+        else:
+            continue
         col = COLUMN.get(field)
         if not col:
             continue
-        limit = int(f.get("limit") or 50)
         counts: dict[str, int] = {}
         for r in conn.execute(f"SELECT key, {col} AS v FROM entries"):
             if keys is not None and r["key"] not in keys:
@@ -159,7 +171,7 @@ async def agents_endpoint(
     pageSize: int = Query(20, ge=1, le=100),
     pageToken: str | None = Query(None),
 ) -> JSONResponse:
-    """GET /agents — deterministic, paginated browsing (§5.3.4).
+    """GET /agents - deterministic, paginated browsing (§5.3.4).
 
     Optional in the spec, but the conformance tool checks the shape when it is
     answered: GitHub's Agent Finder returns 200 with a body that has no `items`
@@ -208,14 +220,14 @@ def _manifest() -> dict:
     B = config.PUBLIC_BASE
     return {
         "specVersion": "1.0",
-        "host": {"displayName": "Neuronto — Agentic Resource Discovery (ARD) index",
+        "host": {"displayName": "Neuronto Agentic Resource Discovery (ARD) index",
                  "identifier": "did:web:neuronto.com",
                  "documentationUrl": f"{B}/about"},
         "entries": [{
             # §5.3: a registry's base URL is discovered by finding an entry of
             # this type. This is how Neuronto becomes findable AS a registry.
             "identifier": "urn:air:neuronto.com:registry:neuronto",
-            "displayName": "Neuronto — Agentic Resource Discovery (ARD) registry",
+            "displayName": "Neuronto Agentic Resource Discovery (ARD) registry",
             "type": "application/ai-registry+json",
             "url": f"{B}/search",
             "description": ("A federated ARD registry and index. Implements "
@@ -232,7 +244,7 @@ def _manifest() -> dict:
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:tool:ard-publish",
-            "displayName": "ard-publish — build and verify an ARD manifest",
+            "displayName": "ard-publish - build and verify an ARD manifest",
             "type": "application/ai-catalog+json",
             "url": f"{B}/publish",
             "description": ("Open source tool that builds, validates and verifies an Agentic "
@@ -247,7 +259,7 @@ def _manifest() -> dict:
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:mcp:discovery",
-            "displayName": "Neuronto — ARD & MCP discovery (MCP server)",
+            "displayName": "Neuronto - ARD & MCP discovery (MCP server)",
             "type": "application/mcp-server-card+json",
             "url": f"{B}/.well-known/mcp/server-card.json",
             "description": ("The same federated discovery as an MCP server, so an agent can "
@@ -388,8 +400,10 @@ no allowlist.
 @app.get("/health")
 async def health():
     c = store.counts(db())
+    t = store.tool_counts(db())
     return {"status": "ok", "entries": c["entries"], "publishers": c["publishers"],
-            "live": c["live"], "dead": c["dead"]}
+            "live": c["live"], "dead": c["dead"],
+            "verified_tools": t["tools"], "servers_introspected": t["introspected"]}
 
 @app.get("/stats")
 async def stats(days: int = Query(30, ge=7, le=90)):
@@ -400,6 +414,8 @@ async def stats(days: int = Query(30, ge=7, le=90)):
         "SELECT COUNT(*) n, AVG(ms) avg_ms FROM searches WHERE ts > ?",
         (int(time.time()) - 7 * 86400,)).fetchone()
     return {**c, "upstreams": regs,
+            "verified": store.tool_counts(conn),
+            "dense": embed.status(conn),
             "searches_7d": q["n"] or 0,
             "avg_search_ms": round(q["avg_ms"] or 0, 1),
             "series": store.daily_series(conn, days),
@@ -418,8 +434,8 @@ def _render_home() -> str:
     """Serve the page with its numbers already in the HTML.
 
     Everything on this page used to be drawn client side, which meant any
-    consumer that does not execute JavaScript — most answer-engine crawlers
-    among them — saw empty tables and concluded the index was empty. The figures
+    consumer that does not execute JavaScript - most answer-engine crawlers
+    among them - saw empty tables and concluded the index was empty. The figures
     that are the whole argument have to survive without a script running.
     """
     f = WEB / "index.html"
@@ -589,6 +605,71 @@ async def image(name: str):
         return JSONResponse(status_code=404, content={"error": "not_found"})
     return Response(f.read_bytes(), media_type="image/jpeg",
                     headers={"Cache-Control": "public, max-age=604800, immutable"})
+
+
+# ---------------------------------------------------------------------------
+# Tool-level search. The complement to /search: when an agent already knows the
+# shape of the call it needs, the server hosting it is an implementation
+# detail. Every tool here was read back from a live tools/list, so the name and
+# schema are what the server exposes, not what its description claims.
+# ---------------------------------------------------------------------------
+
+@app.post("/tools")
+async def tools_endpoint(body: dict) -> JSONResponse:
+    q = body.get("query") or {}
+    text = (q.get("text") if isinstance(q, dict) else str(q)) or body.get("q") or ""
+    text = str(text).strip()
+    if not text:
+        return JSONResponse(status_code=400,
+                            content={"error": "invalid_request",
+                                     "detail": "query.text is required"})
+    limit = max(1, min(int(body.get("pageSize") or body.get("limit") or 20),
+                       config.PAGE_SIZE_MAX))
+    with_schema = bool(body.get("withSchema"))
+    hits = tools_index.search_tools(db(), text, limit)
+    if not with_schema:
+        hits = [{k: v for k, v in h.items() if k != "inputSchema"} for h in hits]
+    return JSONResponse({
+        "query": text, "results": hits, "count": len(hits),
+        "verification": ("each tool was read from the server's own tools/list; "
+                         "score is relevance only, never a trust or safety rating"),
+    }, headers={"Cache-Control": "public, max-age=60"})
+
+
+@app.get("/tools")
+async def tools_get(q: str = Query(..., min_length=1),
+                    limit: int = Query(20, ge=1, le=100),
+                    withSchema: bool = Query(False)) -> JSONResponse:
+    """GET form, so a tool search is a URL an agent can be handed."""
+    return await tools_endpoint({"query": {"text": q}, "limit": limit,
+                                 "withSchema": withSchema})
+
+
+# ---------------------------------------------------------------------------
+# ARD-Bench. The first head-to-head retrieval measurement across ARD
+# registries, published with its ground truth and its losses. Serving the last
+# stored run keeps the endpoint cheap; running one is an operator action.
+# ---------------------------------------------------------------------------
+
+@app.get("/bench")
+async def bench_endpoint() -> JSONResponse:
+    got = bench.latest(db())
+    if not got:
+        return JSONResponse(status_code=404,
+                            content={"error": "no_run_yet",
+                                     "detail": "no benchmark has been run on this index"})
+    return JSONResponse(got, headers={"Cache-Control": "public, max-age=900"})
+
+
+# ---------------------------------------------------------------------------
+# ARD adoption. Who publishes a manifest and who does not, including the
+# organisations associated with the working group.
+# ---------------------------------------------------------------------------
+
+@app.get("/adoption")
+async def adoption_endpoint() -> JSONResponse:
+    return JSONResponse(adoption.report(db()),
+                        headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/blog", include_in_schema=False)

@@ -2,11 +2,11 @@
 
 Measured on the live registries, 2026-08-31:
 
-  * Three MCP media types are in circulation at once — `application/mcp-server`
+  * Three MCP media types are in circulation at once, `application/mcp-server`
     (most common in WellKnown's index), `application/mcp-server+json` (GitHub
     Agent Finder, and the filter the official connector skill documents), and
     `application/mcp-server-card+json` (the conformance tool's allowlist).
-  * Two URN prefixes — `urn:air:` per the spec, `urn:ai:` at GitHub.
+  * Two URN prefixes, `urn:air:` per the spec, `urn:ai:` at GitHub.
 
 Filters are exact-match, so this fragmentation makes them miss silently: asking
 WellKnown for `application/mcp-server+json` returns three results and drops

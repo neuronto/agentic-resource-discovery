@@ -54,10 +54,38 @@ TOOLS = [
         },
     },
     {
+        "name": "find_tool",
+        "title": "Find a specific verified tool",
+        "description": (
+            "Search individual MCP tools by name and behaviour, not the servers that "
+            "host them. Every tool returned here was read back from a live server's "
+            "tools/list, so the name and input schema are what the server actually "
+            "exposes rather than what its description claims. Use this when you know "
+            "the shape of the call you need; use find_resource when you are looking "
+            "for a service."),
+        "annotations": {"title": "Find a specific verified tool", "readOnlyHint": True,
+                        "destructiveHint": False, "idempotentHint": True,
+                        "openWorldHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "What the tool should do. For example: "
+                                         "'extract text from a pdf'."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "with_schema": {"type": "boolean", "default": False,
+                                "description": "Include each tool's full JSON input "
+                                               "schema. Verbose; off by default."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "registry_stats",
         "title": "Index statistics",
-        "description": "How large this index is, what it holds, and which upstream "
-                       "registries are federated.",
+        "description": "How large this index is, what it holds, how much of it has been "
+                       "verified by introspection, and which upstream registries are "
+                       "federated.",
         "annotations": {"title": "Index statistics", "readOnlyHint": True,
                         "destructiveHint": False, "idempotentHint": True},
         "inputSchema": {"type": "object", "properties": {}},
@@ -68,12 +96,12 @@ TOOLS = [
 def server_card() -> dict:
     B = config.PUBLIC_BASE
     return {
-        "serverInfo": {"name": "neuronto", "version": "1.0.0", "title": "Neuronto — ARD & MCP Discovery",
+        "serverInfo": {"name": "neuronto", "version": "1.0.0", "title": "Neuronto Agentic Resource Discovery (ARD) Index",
                        "description": "Agentic Resource Discovery (ARD) index. Search every public ARD "
                                       "registry and the MCP ecosystem at once for a server, skill or "
                                       "agent that can do a task.",
                        "websiteUrl": B},
-        "name": "neuronto", "title": "Neuronto — ARD & MCP Discovery",
+        "name": "neuronto", "title": "Neuronto Agentic Resource Discovery (ARD) Index",
         "description": "Federated Agentic Resource Discovery (ARD) index. One search across every "
                        "public ARD registry and the MCP ecosystem.",
         "protocolVersion": PROTOCOL,
@@ -121,11 +149,33 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
 
         if name == "registry_stats":
             c = store.counts(conn)
+            t = store.tool_counts(conn)
             return 200, {"jsonrpc": "2.0", "id": rid, "result": _text({
                 "entries": c["entries"], "publishers": c["publishers"],
                 "live": c["live"], "dead": c["dead"], "by_kind": c["families"],
                 "sources": c["sources"],
+                "verified_tools": t["tools"],
+                "servers_introspected": t["introspected"],
+                "servers_with_tools": t["servers_with_tools"],
+                "servers_requiring_auth": t["auth_required"],
                 "federates": [u[1] for u in config.UPSTREAMS]})}
+
+        if name == "find_tool":
+            q = (args.get("query") or "").strip()
+            if not q:
+                return 200, {"jsonrpc": "2.0", "id": rid,
+                             "result": {**_text({"error": "query is required"}),
+                                        "isError": True}}
+            limit = max(1, min(int(args.get("limit") or 10), 50))
+            with_schema = bool(args.get("with_schema"))
+            from . import tools_index
+            hits = tools_index.search_tools(conn, q, limit)
+            if not with_schema:
+                hits = [{k: v for k, v in h.items() if k != "inputSchema"} for h in hits]
+            return 200, {"jsonrpc": "2.0", "id": rid, "result": _text({
+                "query": q, "tools": hits,
+                "note": ("every tool listed was read from the server's own tools/list; "
+                         "score is semantic relevance only, not a trust or safety rating")})}
 
         if name == "find_resource":
             q = (args.get("query") or "").strip()
@@ -143,7 +193,7 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             out = await search.search(conn, q, flt, limit, mode)
             results = []
             for e in search.clean(out["results"]):
-                results.append({
+                r = {
                     "name": e.get("displayName") or e.get("identifier"),
                     "identifier": e.get("identifier"),
                     "kind": e.get("type"),
@@ -151,11 +201,21 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                     "description": e.get("description"),
                     "score": e.get("score"),
                     "found_in": e.get("source"),
-                })
+                }
+                # What we verified, kept as its own field so it can never be
+                # read as part of the relevance score.
+                v = e.get("verification")
+                if v:
+                    r["verified"] = {k: v[k] for k in
+                                     ("reachable", "tools", "authRequired") if k in v}
+                results.append(r)
             fed = [f["name"] for f in (out.get("_federated") or []) if f.get("ok")]
+            dense = (out.get("_dense") or {}).get("state")
             return 200, {"jsonrpc": "2.0", "id": rid, "result": _text({
                 "query": q, "results": results,
                 "searched": ["Neuronto"] + fed,
+                "retrieval": ("lexical + semantic + federated" if dense == "ok"
+                              else "lexical + federated"),
                 "note": "score is semantic relevance only, not a trust or safety rating"})}
 
         return 200, {"jsonrpc": "2.0", "id": rid,

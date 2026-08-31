@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the blog.
 
-Distinct from the guide pages on purpose. The guides are reference — one
+Distinct from the guide pages on purpose. The guides are reference, one
 question, answered at the top, evergreen. These are analysis and walkthroughs
 built on measurements we actually took, because original data is the thing an
 answer engine has a reason to cite and a competitor cannot copy.
@@ -156,7 +156,7 @@ def build(a, style, others):
 
 
 def build_index(arts, style):
-    html = HEAD.format(title="Neuronto Blog — Agentic Resource Discovery, measured",
+    html = HEAD.format(title="Neuronto Blog, Agentic Resource Discovery, measured",
                        desc="Analysis and walkthroughs on Agentic Resource Discovery, built on our own "
                             "measurements of every public ARD registry and the MCP ecosystem.",
                        base=BASE, path="/blog", img="discovery",

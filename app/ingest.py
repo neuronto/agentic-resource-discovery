@@ -159,7 +159,7 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
 
     This is where an index is actually won. The only other general crawler in
     the ecosystem covers the Tranco top 100K, so every publisher below that rank
-    is invisible everywhere — and those are precisely the ones who need finding.
+    is invisible everywhere, and those are precisely the ones who need finding.
 
     Resumable by design: a run over hundreds of thousands of domains will be
     interrupted, and re-fetching what we checked yesterday wastes the budget that

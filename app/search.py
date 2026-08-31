@@ -1,6 +1,7 @@
 """The search engine: local retrieval, filtering, and federated fusion."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
@@ -103,7 +104,8 @@ def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
     for r in kept:
         base = -float(r["bm"])
         n_src = len(json.loads(r["sources"] or "[]"))
-        raw.append(base * rank.source_bonus(n_src))
+        raw.append(base * rank.source_bonus(n_src)
+                        * rank.verified_bonus(_col(r, "mcp_tools")))
     scores = rank.scale_scores(raw)
 
     out = []
@@ -113,19 +115,59 @@ def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
         e["source"] = config.PUBLIC_BASE
         e["_key"] = r["key"]
         e["_live"] = r["live"]
+        _attach_verification(e, r)
         out.append(e)
     out.sort(key=lambda x: -x["score"])
     return out[:limit]
 
 
+def _col(row: sqlite3.Row, name: str):
+    """Read a column that may not exist on an older row object."""
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return None
+
+
+def _attach_verification(entry: dict, row: sqlite3.Row) -> None:
+    """Expose what we verified, plainly separated from relevance.
+
+    `verified` says we handshook with this endpoint and read its tool list. It
+    is a statement about reachability and capability, never about trustworthi-
+    ness: the spec decouples trust evaluation from discovery and so do we.
+    """
+    n = _col(row, "mcp_tools")
+    status = _col(row, "mcp_status")
+    if status is None:
+        return
+    v: dict[str, Any] = {"checked": _col(row, "mcp_checked")}
+    if status.startswith("ok"):
+        v["reachable"] = True
+        v["tools"] = n or 0
+    elif status == "auth":
+        v["reachable"] = True
+        v["authRequired"] = True
+        v["tools"] = 0
+    else:
+        v["reachable"] = False
+        v["tools"] = 0
+    entry["verification"] = v
+
+
 async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
-                 page_size: int, mode: str) -> dict:
+                 page_size: int, mode: str, use_dense: bool | None = None) -> dict:
     """Run a search in the requested federation mode (§5.4).
 
-    `none`       our index only.
+    `none`       our index only, lexical only. The fast path, tens of ms.
     `referrals`  our index, plus pointers to the other registries.
-    `auto`       our index fused with live upstream results. The default, and
-                 the mode nobody else implements.
+    `auto`       our index fused with the dense leg and with live upstream
+                 results. The default, and the mode nobody else implements.
+
+    The dense leg rides inside the federation budget rather than on the fast
+    path. Embedding a query is a network call, and the latency claim is the
+    product; in `auto` we are already awaiting upstreams, so the embedding runs
+    concurrently with them and costs no extra wall clock. If it is unavailable
+    or slow it contributes an empty ranking, which changes nothing.
     """
     mode = (mode or "auto").lower()
     if mode not in ("auto", "referrals", "none"):
@@ -134,13 +176,34 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     local = local_search(conn, text, flt, max(page_size, 10) * 3)
 
     if mode == "none":
-        return {"results": local[:page_size], "_federated": []}
+        return {"results": local[:page_size], "_federated": [], "_dense": None}
     if mode == "referrals":
         return {"results": local[:page_size],
-                "referrals": federation.referral_entries(), "_federated": []}
+                "referrals": federation.referral_entries(),
+                "_federated": [], "_dense": None}
 
-    # auto: fuse our ordering with each upstream's ordering via RRF.
+    # auto: fuse our ordering, the dense ordering, and each upstream's
+    # ordering, all through RRF. Sparse and dense are launched together so the
+    # dense leg is free in wall-clock terms.
+    want_dense = config.DENSE_ENABLED if use_dense is None else bool(use_dense)
+    dense_task = None
+    if want_dense:
+        dense_task = asyncio.ensure_future(
+            _dense_keys(conn, text, max(page_size, 20) * 3))
+
     ups = await federation.fan_out(text, page_size=max(page_size, 20))
+
+    dense_order: list[str] = []
+    dense_state = "off"
+    if dense_task is not None:
+        try:
+            dense_order = await asyncio.wait_for(
+                dense_task, timeout=config.EMBED_QUERY_TIMEOUT_S)
+            dense_state = "ok" if dense_order else "empty"
+        except (asyncio.TimeoutError, Exception):
+            dense_task.cancel()
+            dense_order, dense_state = [], "timeout"
+
     rankings = [[e["_key"] for e in local]]
     by_key: dict[str, dict] = {e["_key"]: e for e in local}
     fam_filter = expand_type_filter(flt.get("type", [])) if flt and flt.get("type") else None
@@ -176,6 +239,26 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         if order:
             rankings.append(order)
 
+    # The dense ranking joins the fusion as one more ordering. Entries it
+    # surfaces that lexical search missed are the whole point, so they are
+    # hydrated from our own index rather than dropped.
+    if dense_order:
+        dense_keep = []
+        for k in dense_order:
+            if k in by_key:
+                dense_keep.append(k)
+                continue
+            r = conn.execute("SELECT * FROM entries WHERE key=?", (k,)).fetchone()
+            if not r or not _passes_filter(r, flt):
+                continue
+            e = store.row_to_entry(r)
+            e.update({"source": config.PUBLIC_BASE, "_key": k, "_live": r["live"]})
+            _attach_verification(e, r)
+            by_key[k] = e
+            dense_keep.append(k)
+        if dense_keep:
+            rankings.append(dense_keep)
+
     fused = rank.rrf(rankings)
     scored = rank.fuse_to_scores(fused)
     results = []
@@ -187,7 +270,17 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         e["score"] = rank.apply_liveness(s, e.get("_live"))
         results.append(e)
     results.sort(key=lambda x: -x["score"])
-    return {"results": results[:page_size], "_federated": ups}
+    return {"results": results[:page_size], "_federated": ups,
+            "_dense": {"state": dense_state, "candidates": len(dense_order)}}
+
+
+async def _dense_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
+    """Dense ranking, isolated so a failure here can never fail a search."""
+    try:
+        from . import embed
+        return await embed.dense_ranking(conn, text, limit)
+    except Exception:
+        return []
 
 
 def clean(entries: list[dict]) -> list[dict]:

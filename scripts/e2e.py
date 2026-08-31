@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""End-to-end tests against a running Neuronto.
+
+Exercises the live HTTP surface, not the internals, because the thing that
+matters is what an agent actually receives. Every assertion is about integrity
+between the features rather than each feature alone: that verified tools reach
+lexical ranking, that a tool found by /tools belongs to a server findable by
+/search, that MCP and REST agree, that the dense leg changes results without
+breaking the fast path, and that relevance is never presented as trust.
+
+  python3 scripts/e2e.py [base_url]
+"""
+from __future__ import annotations
+
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://neuronto.com").rstrip("/")
+UA = {"User-Agent": "neuronto-e2e/1.0", "Content-Type": "application/json",
+      "Accept": "application/json, text/event-stream"}
+
+_passed: list[str] = []
+_failed: list[tuple[str, str]] = []
+
+
+def get(path, timeout=30):
+    r = urllib.request.urlopen(urllib.request.Request(BASE + path, headers=UA), timeout=timeout)
+    return r.status, json.loads(r.read() or b"{}")
+
+
+def post(path, payload, timeout=40):
+    req = urllib.request.Request(BASE + path, data=json.dumps(payload).encode(),
+                                 headers=UA, method="POST")
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+        body = r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+    for line in body.splitlines():          # tolerate an SSE frame
+        if line.startswith("data: "):
+            body = line[6:]
+    return r.status, json.loads(body or "{}")
+
+
+def check(name, fn):
+    try:
+        fn()
+        _passed.append(name)
+        print(f"  PASS  {name}", flush=True)
+    except AssertionError as e:
+        _failed.append((name, str(e)))
+        print(f"  FAIL  {name}\n          {e}", flush=True)
+    except Exception as e:
+        _failed.append((name, f"{type(e).__name__}: {e}"))
+        print(f"  ERROR {name}\n          {type(e).__name__}: {e}", flush=True)
+
+
+# --------------------------------------------------------------------------
+# 1. The index is there and reports the new subsystems
+# --------------------------------------------------------------------------
+def t_health():
+    s, d = get("/health")
+    assert s == 200, s
+    assert d["entries"] > 5000, d["entries"]
+    assert d["verified_tools"] > 0, "health does not report verified tools"
+    assert d["servers_introspected"] > 0, "health does not report introspection"
+
+
+def t_stats_subsystems():
+    s, d = get("/stats")
+    assert s == 200, s
+    v = d.get("verified") or {}
+    assert v.get("tools", 0) > 1000, f"too few verified tools: {v}"
+    assert v.get("auth_required", 0) > 0, "auth-required facet missing"
+    dn = d.get("dense") or {}
+    assert dn.get("configured") is True, "dense leg not configured"
+    assert dn.get("coverage", 0) > 0.9, f"dense coverage low: {dn.get('coverage')}"
+
+
+# --------------------------------------------------------------------------
+# 2. Tool-level index, and its integrity with the entry index
+# --------------------------------------------------------------------------
+def t_tools_search():
+    s, d = post("/tools", {"query": {"text": "extract text from a pdf"}, "limit": 5})
+    assert s == 200, s
+    assert d["results"], "no tools returned"
+    for t in d["results"]:
+        assert t.get("tool"), "tool row without a name"
+        assert t.get("endpoint"), "tool row without an endpoint"
+        assert t.get("verified") is True, "tool not marked verified"
+
+
+def t_tools_get_form_matches_post():
+    s1, d1 = post("/tools", {"query": {"text": "send an email"}, "limit": 5})
+    s2, d2 = get("/tools?q=send%20an%20email&limit=5")
+    assert s1 == s2 == 200
+    assert [t["tool"] for t in d1["results"]] == [t["tool"] for t in d2["results"]], \
+        "GET and POST forms of /tools disagree"
+
+
+def t_tool_schema_on_demand():
+    s, d = post("/tools", {"query": {"text": "read a file"}, "limit": 3})
+    assert not any("inputSchema" in t for t in d["results"]), \
+        "schema returned when it was not asked for"
+    s, d2 = post("/tools", {"query": {"text": "read a file"}, "limit": 3,
+                            "withSchema": True})
+    assert any("inputSchema" in t for t in d2["results"]), \
+        "schema withheld when it was asked for"
+
+
+def t_tool_server_is_findable_as_entry():
+    """A tool's server must be a real entry, reachable through the entry API."""
+    s, d = post("/tools", {"query": {"text": "database query"}, "limit": 5})
+    assert d["results"], "no tools to cross-check"
+    ident = d["results"][0]["identifier"]
+    s, e = post("/search", {"query": {"text": d["results"][0]["server"]},
+                            "federation": "none", "pageSize": 25})
+    assert s == 200, s
+    got = {r.get("identifier") for r in e["results"]}
+    assert ident in got, f"tool's server {ident} not findable via /search"
+
+
+def t_verified_tools_reach_lexical_ranking():
+    """The tool text must be inside the entry index, not a side table.
+
+    Search for a distinctive verified tool name and expect its own server back.
+    """
+    s, d = post("/tools", {"query": {"text": "screenshot"}, "limit": 10})
+    assert d["results"], "no tools for the probe"
+    pick = next((t for t in d["results"] if len(t["tool"]) > 8), d["results"][0])
+    s, e = post("/search", {"query": {"text": pick["tool"]},
+                            "federation": "none", "pageSize": 20})
+    got = {r.get("identifier") for r in e["results"]}
+    assert pick["identifier"] in got, (
+        f"tool name {pick['tool']!r} does not retrieve its own server; "
+        "tool_text is not reaching the FTS index")
+
+
+# --------------------------------------------------------------------------
+# 3. Search integrity: verification is exposed and is never trust
+# --------------------------------------------------------------------------
+def t_search_exposes_verification():
+    s, d = post("/search", {"query": {"text": "pdf"}, "federation": "none",
+                            "pageSize": 25})
+    assert s == 200, s
+    withv = [r for r in d["results"] if "verification" in r]
+    assert withv, "no result carried a verification block"
+    v = withv[0]["verification"]
+    assert "reachable" in v and "tools" in v, v
+    assert isinstance(v.get("checked"), int), v
+
+
+def t_relevance_is_not_trust():
+    s, d = post("/search", {"query": {"text": "pdf"}, "federation": "none"})
+    blob = json.dumps(d).lower()
+    for word in ("trust score", "safety score", "trusted", "certified"):
+        assert word not in blob, f"response implies trust: {word!r}"
+    for r in d["results"]:
+        v = r.get("verification") or {}
+        assert "trust" not in json.dumps(v).lower(), "verification implies trust"
+
+
+def t_auth_required_is_surfaced():
+    s, d = get("/stats")
+    assert (d["verified"]["auth_required"] or 0) > 0, \
+        "auth-required servers are not counted anywhere"
+
+
+# --------------------------------------------------------------------------
+# 4. Retrieval modes: the fast path stays fast, dense adds recall
+# --------------------------------------------------------------------------
+def t_fast_path_is_lexical_only_and_fast():
+    t0 = time.perf_counter()
+    s, d = post("/search", {"query": {"text": "convert markdown to html"},
+                            "federation": "none", "pageSize": 10})
+    ms = (time.perf_counter() - t0) * 1000
+    assert s == 200, s
+    assert ms < 2500, f"fast path took {ms:.0f} ms including network"
+
+
+def t_dense_leg_runs_in_auto():
+    s, d = post("/search", {"query": {"text": "understand a research paper"},
+                            "federation": "auto", "pageSize": 10}, timeout=60)
+    assert s == 200, s
+    assert d["results"], "auto returned nothing"
+
+
+def t_modes_are_consistent():
+    """Every mode must return well-formed entries with an identifier."""
+    for mode in ("none", "referrals", "auto"):
+        s, d = post("/search", {"query": {"text": "weather forecast"},
+                                "federation": mode, "pageSize": 5}, timeout=60)
+        assert s == 200, f"{mode}: {s}"
+        for r in d["results"]:
+            assert r.get("identifier"), f"{mode}: entry without identifier"
+        if mode == "referrals":
+            assert d.get("referrals"), "referrals mode returned no referrals"
+
+
+# --------------------------------------------------------------------------
+# 5. MCP surface agrees with REST
+# --------------------------------------------------------------------------
+def _rpc(method, params=None, rid=1):
+    return post("/mcp", {"jsonrpc": "2.0", "id": rid, "method": method,
+                         "params": params or {}}, timeout=60)
+
+
+def t_mcp_lists_all_three_tools():
+    s, d = _rpc("tools/list")
+    assert s == 200, s
+    names = {t["name"] for t in d["result"]["tools"]}
+    assert names == {"find_resource", "find_tool", "registry_stats"}, names
+
+
+def t_mcp_find_tool_matches_rest():
+    s, d = _rpc("tools/call", {"name": "find_tool",
+                               "arguments": {"query": "extract text from a pdf",
+                                             "limit": 5}})
+    assert s == 200, s
+    payload = json.loads(d["result"]["content"][0]["text"])
+    s2, rest = post("/tools", {"query": {"text": "extract text from a pdf"},
+                               "limit": 5})
+    assert [t["tool"] for t in payload["tools"]] == \
+           [t["tool"] for t in rest["results"]], "MCP find_tool disagrees with /tools"
+
+
+def t_mcp_stats_match_rest():
+    s, d = _rpc("tools/call", {"name": "registry_stats", "arguments": {}})
+    payload = json.loads(d["result"]["content"][0]["text"])
+    s2, st = get("/stats")
+    assert payload["verified_tools"] == st["verified"]["tools"], \
+        "MCP and /stats disagree on verified tool count"
+    assert payload["entries"] == st["entries"], "MCP and /stats disagree on entries"
+
+
+def t_mcp_find_resource_carries_verification():
+    s, d = _rpc("tools/call", {"name": "find_resource",
+                               "arguments": {"query": "pdf", "limit": 10,
+                                             "federate": False}})
+    payload = json.loads(d["result"]["content"][0]["text"])
+    assert payload["results"], "find_resource returned nothing"
+    assert any("verified" in r for r in payload["results"]), \
+        "no result carried the verified block"
+    assert "not a trust or safety rating" in payload["note"]
+
+
+# --------------------------------------------------------------------------
+# 6. Benchmark and adoption are published and honest
+# --------------------------------------------------------------------------
+def t_bench_published():
+    s, d = get("/bench")
+    assert s == 200, f"/bench returned {s}"
+    assert d["tasks"] > 0 and d["targets"], d
+    assert "known_bias" in d, "benchmark does not disclose its bias"
+    assert "harness" in d, "benchmark does not link its harness"
+    # It must measure somebody other than us.
+    others = [k for k in d["targets"] if "neuronto" not in k.lower()]
+    assert len(others) >= 3, f"benchmark only measured {others}"
+
+
+def t_bench_matching_is_normalised():
+    s, d = get("/bench")
+    assert "urn:ai" in d.get("identifier_matching", ""), \
+        "benchmark does not state how identifiers are matched"
+    gh = next((v for k, v in d["targets"].items() if "GitHub" in k), None)
+    assert gh is not None, "GitHub Agent Finder not measured"
+    assert gh["answered"] > 0, "GitHub answered nothing; check the harness"
+
+
+def t_adoption_published():
+    s, d = get("/adoption")
+    assert s == 200, s
+    w = d["watchlist"]
+    assert w["hosts"] >= 15, w
+    assert "detail" in w and w["detail"], "no per-host detail"
+    assert d["crawl"]["hosts_seen"] > 0, d["crawl"]
+    assert "method" in d, "adoption does not state its method"
+
+
+# --------------------------------------------------------------------------
+# 7. Nothing regressed: conformance-critical surfaces still correct
+# --------------------------------------------------------------------------
+def t_manifest_still_valid_and_clean():
+    s, d = get("/.well-known/ard.json")
+    assert s == 200, s
+    assert d["specVersion"] and d["entries"], d
+    # The characters are written as escapes on purpose. A blanket dash sweep
+    # over the source once rewrote the literals inside this very assertion into
+    # plain hyphens, which made it assert that no URL contains "-" and fail
+    # against a perfectly clean manifest. A test about a character must not
+    # spell that character literally.
+    import re as _re
+    bad = []
+    def _walk(o, path=""):
+        if isinstance(o, dict):
+            for kk, vv in o.items():
+                _walk(vv, path + "." + kk)
+        elif isinstance(o, list):
+            for i, vv in enumerate(o):
+                _walk(vv, f"{path}[{i}]")
+        elif isinstance(o, str) and _re.search("[\u2014\u2013]", o):
+            bad.append(f"{path} = {o[:90]!r}")
+    _walk(d)
+    assert not bad, "manifest contains an em or en dash at: " + "; ".join(bad)
+
+
+def t_agents_is_paginated_object():
+    s, d = get("/agents")
+    assert s == 200, s
+    assert isinstance(d, dict) and isinstance(d.get("items"), list), \
+        "GET /agents is not a paginated object"
+
+
+def t_explore_still_works():
+    s, d = post("/explore", {"resultType": {"facets": ["type"]}})
+    assert s == 200, s
+    assert d.get("facets"), d
+
+
+def t_openapi_documents_new_endpoints():
+    s, d = get("/openapi.json")
+    assert s == 200, s
+    paths = set(d["paths"])
+    for p in ("/tools", "/bench", "/adoption"):
+        assert p in paths, f"{p} missing from openapi.json"
+
+
+def t_unknown_url_still_404s():
+    try:
+        s, _ = get("/definitely-not-a-real-page-xyz")
+        assert False, f"unknown URL returned {s}, expected 404"
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
+
+
+def main():
+    print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
+    for name, fn in list(globals().items()):
+        if name.startswith("t_") and callable(fn):
+            check(name[2:].replace("_", " "), fn)
+    print("  " + "-" * 62)
+    print(f"  {len(_passed)} passed, {len(_failed)} failed")
+    if _failed:
+        print("\n  FAILURES:")
+        for n, e in _failed:
+            print(f"   - {n}: {e}")
+    return 1 if _failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

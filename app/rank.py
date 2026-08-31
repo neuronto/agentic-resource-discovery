@@ -6,8 +6,8 @@ set, which means its ordering carries almost no information for the client. A
 score is only useful if the gap between first and fifth is legible.
 
 Second, fuse result lists from several registries when federating. Reciprocal
-rank fusion is the right tool because upstream scores are not comparable —
-GitHub crams everything into 90-100, Desvela spreads 21-85 — so fusing on
+rank fusion is the right tool because upstream scores are not comparable.
+GitHub crams everything into 90-100 and Desvela spreads 21-85, so fusing on
 score would just import their calibration. RRF uses only the ordering each
 registry produced, which is the part they are each competent about.
 """
@@ -18,11 +18,16 @@ from typing import Iterable, Sequence
 from . import config
 
 # Field weights for bm25(). FTS5 wants one weight per indexed column, in
-# declaration order: display_name, description, rep_queries, tags, capabilities.
-# `rep_queries` is weighted highest on purpose — the spec calls it "the signal a
+# declaration order: display_name, description, rep_queries, tags, capabilities,
+# tool_text.
+# `rep_queries` is weighted highest on purpose, the spec calls it "the signal a
 # registry builds its semantic index from", and it is the publisher stating in
 # the user's own words what they should be found for.
-FTS_WEIGHTS = (6.0, 2.0, 9.0, 3.0, 4.0)
+# `tool_text` sits just under it: the verified tool names read off the running
+# server are evidence rather than prose, but they are terse and machine-shaped
+# (`extract_pdf_text`), so they must not outrank the sentence a person wrote
+# about what the thing is for.
+FTS_WEIGHTS = (6.0, 2.0, 9.0, 3.0, 4.0, 7.0)
 
 # How hard to stretch relative relevance across the 0-100 range. Below 1.0 the
 # curve lifts mid-ranked results away from the floor, so a genuinely relevant
@@ -88,6 +93,21 @@ def fuse_to_scores(fused: dict[str, float]) -> dict[str, int]:
     keys = list(fused)
     scaled = scale_scores([fused[k] for k in keys])
     return dict(zip(keys, scaled))
+
+
+def verified_bonus(n_tools: int | None) -> float:
+    """A small lift for an entry whose capability we have actually verified.
+
+    An entry where we handshook with the endpoint and read back real tools is
+    strictly better evidence than one that is only prose. Deliberately small,
+    and capped: it breaks ties and nudges, it never promotes a weak match over
+    a strong one, and it must never become a proxy for trust. Entries we have
+    not yet introspected are left alone rather than punished for our own
+    backlog, exactly as liveness treats unprobed entries.
+    """
+    if not n_tools:
+        return 1.0
+    return 1.0 + min(0.10, 0.02 * n_tools)
 
 
 def source_bonus(n_sources: int) -> float:

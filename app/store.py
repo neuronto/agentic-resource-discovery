@@ -53,8 +53,14 @@ CREATE INDEX IF NOT EXISTS idx_entries_updated   ON entries(updated_at);
 -- Separate columns so rank.py can weight them independently. An entry is found
 -- through its representative queries far more often than through its name, and
 -- FTS5 cannot express that without the split.
+--
+-- `tool_text` is the verified tool surface: the real tool names and descriptions
+-- read back off the running server, not the publisher's prose. Every other
+-- registry indexes the marketing blurb; this column is the thing an agent
+-- actually has to match on.
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
   key UNINDEXED, display_name, description, rep_queries, tags, capabilities,
+  tool_text,
   tokenize='porter unicode61 remove_diacritics 2'
 );
 
@@ -78,7 +84,71 @@ CREATE TABLE IF NOT EXISTS searches (
   q TEXT, mode TEXT, results INTEGER, ms INTEGER, federated INTEGER, ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_searches_ts ON searches(ts);
+
+-- Verified tools. One row per tool actually returned by `tools/list` on a live
+-- MCP endpoint. Every registry in this field indexes servers; the tool names and
+-- input schemas an agent must match on exist in no other index. A tool here is
+-- evidence, not a claim: it was read off the running server at `checked`.
+CREATE TABLE IF NOT EXISTS tools (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_key    TEXT NOT NULL,          -- FK to entries.key
+  name         TEXT NOT NULL,
+  title        TEXT,
+  description  TEXT,
+  input_schema TEXT,                   -- json, verbatim
+  checked      INTEGER,
+  UNIQUE(entry_key, name)
+);
+CREATE INDEX IF NOT EXISTS idx_tools_entry ON tools(entry_key);
+CREATE INDEX IF NOT EXISTS idx_tools_name  ON tools(name);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS tools_fts USING fts5(
+  tool_id UNINDEXED, entry_key UNINDEXED, name, title, description,
+  tokenize='porter unicode61 remove_diacritics 2'
+);
+
+-- Dense vectors for the semantic leg. Stored as raw float32 so the whole matrix
+-- loads with one read and no per-row parse.
+CREATE TABLE IF NOT EXISTS vectors (
+  key   TEXT PRIMARY KEY,
+  model TEXT,
+  dim   INTEGER,
+  vec   BLOB,
+  ts    INTEGER
+);
+
+-- ARD adoption: does a host that ships a callable resource also publish a
+-- manifest? Measured, not asserted.
+CREATE TABLE IF NOT EXISTS adoption (
+  host        TEXT PRIMARY KEY,
+  has_manifest INTEGER,               -- 1 yes, 0 no
+  status       INTEGER,
+  entries      INTEGER,
+  notable      INTEGER DEFAULT 0,     -- 1 = on the watchlist we publish
+  checked      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_adoption_notable ON adoption(notable);
+
+-- Benchmark runs. Kept so a published number can always be traced to the run
+-- that produced it.
+CREATE TABLE IF NOT EXISTS bench_runs (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts       INTEGER,
+  tasks    INTEGER,
+  k        INTEGER,
+  results  TEXT                       -- json: per-target metrics
+);
 """
+
+# Columns added after the first deployment. SQLite has no "ADD COLUMN IF NOT
+# EXISTS", so this is applied by inspection in `init`.
+_ADD_COLUMNS = {
+    "mcp_checked":     "INTEGER",   # when we last introspected
+    "mcp_tools":       "INTEGER",   # verified tool count
+    "mcp_auth":        "INTEGER",   # 1 = endpoint demanded credentials
+    "mcp_server_name": "TEXT",      # serverInfo.name it reported
+    "mcp_status":      "TEXT",      # ok | auth | error:<kind>
+}
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -92,7 +162,41 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring an existing database up to the current shape.
+
+    Two kinds of change. New `entries` columns are added by inspection. The FTS
+    table is different: adding an indexed column changes its arity, and FTS5
+    cannot alter one in place, so it is dropped and rebuilt from `entries`,
+    which is safe because every byte in it is derived data.
+    """
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}
+    for col, decl in _ADD_COLUMNS.items():
+        if col not in have:
+            conn.execute(f"ALTER TABLE entries ADD COLUMN {col} {decl}")
+
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries_fts)")]
+    if "tool_text" not in cols:
+        conn.execute("DROP TABLE IF EXISTS entries_fts")
+        conn.executescript(_SCHEMA)
+        rebuild_fts(conn)
+
+
+def rebuild_fts(conn: sqlite3.Connection) -> int:
+    """Reindex every entry. Used after a schema change to entries_fts."""
+    conn.execute("DELETE FROM entries_fts")
+    n = 0
+    for r in conn.execute("SELECT key FROM entries").fetchall():
+        _reindex(conn, r["key"])
+        n += 1
+        if n % 2000 == 0:
+            conn.commit()
+    conn.commit()
+    return n
 
 
 def _s(v: Any) -> str | None:
@@ -190,11 +294,94 @@ def _reindex(conn: sqlite3.Connection, key: str) -> None:
     def flat(js: str) -> str:
         try: return " ".join(json.loads(js or "[]"))
         except Exception: return ""
+    # The verified tool surface, folded into the entry's own document so a
+    # server-level query matches on what the server can actually do.
+    tt = conn.execute(
+        """SELECT GROUP_CONCAT(name || ' ' || COALESCE(title,'') || ' '
+                               || COALESCE(description,''), ' ')
+           FROM tools WHERE entry_key=?""", (key,)).fetchone()[0] or ""
     conn.execute("DELETE FROM entries_fts WHERE key=?", (key,))
-    conn.execute("""INSERT INTO entries_fts(key,display_name,description,rep_queries,tags,capabilities)
-                    VALUES(?,?,?,?,?,?)""",
+    conn.execute("""INSERT INTO entries_fts(key,display_name,description,rep_queries,
+                                            tags,capabilities,tool_text)
+                    VALUES(?,?,?,?,?,?,?)""",
                  (r["key"], r["display_name"] or "", r["description"] or "",
-                  flat(r["rep_queries"]), flat(r["tags"]), flat(r["capabilities"])))
+                  flat(r["rep_queries"]), flat(r["tags"]), flat(r["capabilities"]),
+                  tt[:20000]))
+
+
+def replace_tools(conn: sqlite3.Connection, entry_key: str,
+                  tools: list[dict]) -> int:
+    """Record the tools an endpoint actually exposed, replacing what we had.
+
+    Replacement rather than merge is deliberate: a tool that has disappeared
+    from `tools/list` is gone, and keeping it would recreate exactly the stale
+    catalogue problem this whole feature exists to fix.
+    """
+    now = int(time.time())
+    old = [r["id"] for r in conn.execute(
+        "SELECT id FROM tools WHERE entry_key=?", (entry_key,))]
+    if old:
+        conn.executemany("DELETE FROM tools_fts WHERE tool_id=?", [(i,) for i in old])
+    conn.execute("DELETE FROM tools WHERE entry_key=?", (entry_key,))
+    n = 0
+    for t in tools:
+        name = _s(t.get("name"))
+        if not name:
+            continue
+        schema = t.get("inputSchema") or t.get("input_schema")
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO tools(entry_key,name,title,description,
+                                           input_schema,checked)
+               VALUES(?,?,?,?,?,?)""",
+            (entry_key, name[:200], _s(t.get("title")),
+             _s(t.get("description")),
+             json.dumps(schema, ensure_ascii=False)[:8000] if schema else None, now))
+        if cur.rowcount:
+            conn.execute("""INSERT INTO tools_fts(tool_id,entry_key,name,title,description)
+                            VALUES(?,?,?,?,?)""",
+                         (cur.lastrowid, entry_key, name[:200],
+                          _s(t.get("title")) or "", _s(t.get("description")) or ""))
+            n += 1
+    _reindex(conn, entry_key)
+    return n
+
+
+def mark_introspection(conn: sqlite3.Connection, key: str, status: str,
+                       n_tools: int, auth: bool, server_name: str | None) -> None:
+    conn.execute("""UPDATE entries SET mcp_checked=?, mcp_tools=?, mcp_auth=?,
+                                       mcp_server_name=?, mcp_status=?
+                    WHERE key=?""",
+                 (int(time.time()), n_tools, 1 if auth else 0,
+                  _s(server_name), status, key))
+
+
+def tools_for(conn: sqlite3.Connection, entry_key: str) -> list[dict]:
+    rows = conn.execute("""SELECT name,title,description,input_schema
+                           FROM tools WHERE entry_key=? ORDER BY name""",
+                        (entry_key,)).fetchall()
+    out = []
+    for r in rows:
+        d = {"name": r["name"]}
+        if r["title"]: d["title"] = r["title"]
+        if r["description"]: d["description"] = r["description"]
+        if r["input_schema"]:
+            try: d["inputSchema"] = json.loads(r["input_schema"])
+            except Exception: pass
+        out.append(d)
+    return out
+
+
+def tool_counts(conn: sqlite3.Connection) -> dict:
+    q = lambda s: conn.execute(s).fetchone()[0]
+    return {
+        "tools":             q("SELECT COUNT(*) FROM tools"),
+        "servers_with_tools": q("SELECT COUNT(DISTINCT entry_key) FROM tools"),
+        "introspected":      q("SELECT COUNT(*) FROM entries WHERE mcp_checked IS NOT NULL"),
+        "auth_required":     q("SELECT COUNT(*) FROM entries WHERE mcp_auth=1"),
+        "by_status":         {r["mcp_status"]: r["n"] for r in conn.execute(
+            "SELECT mcp_status, COUNT(*) n FROM entries WHERE mcp_status IS NOT NULL "
+            "GROUP BY mcp_status ORDER BY n DESC")},
+    }
 
 
 def mark_liveness(conn: sqlite3.Connection, key: str, alive: bool,
