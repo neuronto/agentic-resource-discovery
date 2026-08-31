@@ -290,7 +290,11 @@ async def robots():
 async def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
-            "/registries", "/console", "/api-docs"]
+            "/registries", "/console", "/blog"]
+    blog = WEB / "blog"
+    if blog.exists():
+        urls += sorted(f"/blog/{p.stem}" for p in blog.glob("*.html")
+                       if p.stem != "index")
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
             + "\n".join(f"  <url><loc>{B}{u}</loc></url>" for u in urls)
@@ -531,6 +535,34 @@ GUIDES = {
     "submit-mcp-server": "submit-mcp-server.html",
     "registries": "registries.html",
 }
+
+
+@app.get("/img/{name}", include_in_schema=False)
+async def image(name: str):
+    f = WEB / "img" / name
+    if "/" in name or ".." in name or not f.exists():
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return Response(f.read_bytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=604800, immutable"})
+
+
+@app.get("/blog", include_in_schema=False)
+@app.get("/blog/", include_in_schema=False)
+async def blog_index():
+    f = WEB / "blog" / "index.html"
+    if not f.exists():
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return HTMLResponse(f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/blog/{slug}", include_in_schema=False)
+async def blog_post(slug: str):
+    f = WEB / "blog" / f"{slug}.html"
+    if "/" in slug or ".." in slug or not f.exists():
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return HTMLResponse(f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "public, max-age=1800"})
 
 
 @app.get("/{slug}", include_in_schema=False)
