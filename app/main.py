@@ -27,8 +27,9 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import (adoption, audit, bench, catalog, config, embed, federation,
-               ingest, liveness, render, search, store, tools_index)
+from . import (adoption, audit, badge, bench, catalog, config, embed,
+               federation, ingest, liveness, render, search, store,
+               tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
@@ -722,6 +723,44 @@ async def adoption_endpoint(request: Request):
                                             "Vary": "Accept"})
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=3600",
                                       "Vary": "Accept"})
+
+
+# ---------------------------------------------------------------------------
+# Verification badges. Measured mechanism: 2,107 Glama badges sit in one
+# awesome-list README, 60.5% of its entries, while its directory pages rank for
+# nothing. The badge is the distribution channel; the pages never were.
+# ---------------------------------------------------------------------------
+
+@app.get("/badge/{publisher}.svg", include_in_schema=False)
+async def badge_svg(publisher: str) -> Response:
+    pub = publisher.strip().lower()
+    # A hostname or reverse-DNS publisher id, nothing else. This is a public,
+    # unauthenticated SVG generator; without the allowlist it is a text-echo
+    # service wearing our domain.
+    if not pub or len(pub) > 100 or not all(
+            c.isalnum() or c in ".-_" for c in pub):
+        return Response(status_code=404)
+    svg = badge.render(db(), pub)
+    return Response(svg, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=3600",
+                             # GitHub proxies images through Camo and honours
+                             # cache headers; an hour keeps badge fetches from
+                             # ever being load while staying fresh enough.
+                             "ETag": f'W/"{hash(svg) & 0xffffffff:x}"'})
+
+
+@app.get("/badge", include_in_schema=False)
+@app.get("/badge/", include_in_schema=False)
+async def badge_help():
+    return JSONResponse({
+        "what": "README badge showing your server's verified tool count",
+        "url": f"{config.PUBLIC_BASE}/badge/<your-publisher-id>.svg",
+        "publisher_id": "the publisher segment of your URN, or your domain",
+        "markdown": badge.snippet("your.domain"),
+        "note": ("the badge states what was observed: how many tools your server "
+                 "returned to tools/list and whether the endpoint answers. It is "
+                 "never a trust, safety or quality rating"),
+    })
 
 
 @app.get("/blog", include_in_schema=False)

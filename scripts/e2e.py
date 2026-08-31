@@ -427,6 +427,48 @@ def t_pages_never_imply_trust():
             assert word not in low, f"{path} implies trust: {word!r}"
 
 
+# --------------------------------------------------------------------------
+# 9. Badges: the distribution mechanism
+# --------------------------------------------------------------------------
+def t_badge_renders_for_known_publisher():
+    req = urllib.request.Request(BASE + "/badge/com.jojapi.svg",
+                                 headers={"User-Agent": "e2e"})
+    r = urllib.request.urlopen(req, timeout=30)
+    body = r.read().decode()
+    assert r.headers.get("Content-Type", "").startswith("image/svg"), \
+        r.headers.get("Content-Type")
+    assert "verified tool" in body, "badge does not state the tool count"
+    assert "<svg" in body and "</svg>" in body, "not an svg"
+
+
+def t_badge_unknown_is_neutral_not_error():
+    req = urllib.request.Request(BASE + "/badge/never.indexed.example.svg",
+                                 headers={"User-Agent": "e2e"})
+    r = urllib.request.urlopen(req, timeout=30)
+    assert r.status == 200, "unknown publisher must get a neutral badge, not a broken image"
+    assert "not indexed" in r.read().decode()
+
+
+def t_badge_rejects_garbage_input():
+    import urllib.parse as _up
+    for bad in ("..%2F..%2Fetc%2Fpasswd", "a b c", "<script>"):
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                BASE + f"/badge/{_up.quote(bad)}.svg",
+                headers={"User-Agent": "e2e"}), timeout=20)
+            raise AssertionError(f"badge accepted {bad!r}")
+        except urllib.error.HTTPError as e:
+            assert e.code == 404, e.code
+
+
+def t_badge_never_implies_trust():
+    req = urllib.request.Request(BASE + "/badge/com.jojapi.svg",
+                                 headers={"User-Agent": "e2e"})
+    body = urllib.request.urlopen(req, timeout=30).read().decode().lower()
+    for word in ("trusted", "certified", "score", "safe"):
+        assert word not in body, f"badge implies trust: {word!r}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

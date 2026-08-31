@@ -1,5 +1,38 @@
 [
  {
+  "slug": "half-of-mcp-servers-dont-answer",
+  "path": "/blog/half-of-mcp-servers-dont-answer",
+  "img": "introspection",
+  "date": "2026-08-31",
+  "date_h": "31 August 2026",
+  "read": 6,
+  "kicker": "Measurement",
+  "alt": "Rows of dark server outlines, less than a third lit, the rest fading into black",
+  "title": "We asked 7,708 MCP servers to say hello. 46% couldn't.",
+  "desc": "We ran a standard initialize handshake against every MCP endpoint in the public registries. 3,547 of 7,708 failed it, 1,918 demanded credentials, and the working third returned 31,411 real tools.",
+  "h1": "We asked 7,708 MCP servers to say hello. 46% couldn't.",
+  "stand": "Public MCP registries list thousands of servers, and every listing is a claim someone typed. We tested the claims: a standard <b>initialize</b> handshake and a <b>tools/list</b> against every endpoint we index. <b>Almost half failed the first message of their own protocol</b>, a quarter demanded credentials no registry records, and the third that worked handed us the largest verified tool corpus that exists.",
+  "faq": [
+   [
+    "How was the 46% figure measured?",
+    "Two read-only JSON-RPC calls per endpoint, initialize and then tools/list, over streamable HTTP with a short timeout and no retries. 3,547 of 7,708 endpoints failed the handshake: 1,150 returned 404, 1,122 returned 422, 428 returned 405, and the rest were connection errors, rate limits and timeouts. No tool was ever called."
+   ],
+   [
+    "Does failing the handshake mean a server is fake?",
+    "Not necessarily. A 404 usually means a stale listing, a 422 usually means a wrapper that does not implement the protocol, and a connection error means the host is gone. What they share is that an agent following the listing gets nothing, and no registry surfaced that before it tried."
+   ],
+   [
+    "What does auth required mean on a listing?",
+    "The endpoint answered 401 or 403 to a standard handshake: a real server that wants credentials before exposing its tools. Legitimate, but previously invisible: no public registry recorded it, so agents discovered it by failing."
+   ],
+   [
+    "Where does the verified tool data come from?",
+    "From the servers themselves. Each of the 31,411 tools was returned by a live server's own tools/list response, including its name, description and JSON input schema, and is searchable at neuronto.com/tools."
+   ]
+  ],
+  "body": "<h2>What we did</h2>\n<p>Neuronto indexes MCP servers from public ARD manifests, the official MCP Registry and every\npublic ARD registry. Each entry arrives as a claim: a name, an endpoint URL, a description of what\nit can do. Claims are cheap, so we started asking. Two read-only JSON-RPC calls per endpoint,\n<code>initialize</code> and then <code>tools/list</code>, over streamable HTTP, with a short\ntimeout and no retries. No tool was ever called. The whole sweep across 7,708 endpoints took\nabout six minutes.</p>\n\n<h2>The result</h2>\n<table>\n<tr><th>outcome</th><th>servers</th><th>share</th></tr>\n<tr><td>answered and returned tools</td><td>2,223</td><td>28.8%</td></tr>\n<tr><td>answered, no tools exposed</td><td>20</td><td>0.3%</td></tr>\n<tr><td>demanded credentials first</td><td>1,918</td><td>24.9%</td></tr>\n<tr><td><b>failed the handshake entirely</b></td><td><b>3,547</b></td><td><b>46.0%</b></td></tr>\n</table>\n\n<p class=\"pull\">Almost half of the MCP servers listed in public registries do not answer the\nfirst message of their own protocol.</p>\n\n<h2>How they fail</h2>\n<p>The failures are not one thing. The two biggest buckets are instructive:</p>\n<table>\n<tr><th>failure</th><th>count</th><th>what it usually means</th></tr>\n<tr><td>HTTP 404</td><td>1,150</td><td>the manifest points at a path that does not exist. The domain is alive; the endpoint was never there or has moved</td></tr>\n<tr><td>HTTP 422</td><td>1,122</td><td>the endpoint exists but rejects a standard <code>initialize</code>, usually a framework wrapper that never spoke MCP</td></tr>\n<tr><td>HTTP 405</td><td>428</td><td>something is at the URL but does not accept POST, often a docs page listed as an endpoint</td></tr>\n<tr><td>connection refused / DNS</td><td>318</td><td>the host itself is gone</td></tr>\n<tr><td>HTTP 429</td><td>210</td><td>rate limited before one handshake, which for an agent-facing service is its own finding</td></tr>\n<tr><td>HTTP 402</td><td>67</td><td>payment required before hello</td></tr>\n<tr><td>everything else</td><td>252</td><td>timeouts, malformed replies, TLS and origin errors</td></tr>\n</table>\n<p>A 404 and a 422 are different lies. The 404 is a stale listing, the ordinary rot of any\ndirectory built on self-published metadata. The 422 is stranger and more interesting: someone\ndeployed a thing, registered it as an MCP server, and it cannot complete the protocol's opening\nmessage. Both look identical in every registry that lists them, because no registry checks.</p>\n\n<h2>The quarter nobody records</h2>\n<p>1,918 endpoints, one in four, answered with 401 or 403: real servers, running, that want\ncredentials before they will list their tools. That is a perfectly legitimate design. What is\nstrange is that <b>no public registry records it</b>. An agent picking a server from a listing\ncannot tell an open endpoint from a gated one until it has already tried, which at agent speed\nmeans thousands of doomed handshakes a day across the ecosystem.</p>\n<p>We now store it as a field. It is queryable, and it is on the badge.</p>\n\n<h2>What the working third gave us</h2>\n<p>The 2,223 servers that answered returned <b>31,411 tools</b> between them: names, descriptions\nand JSON input schemas, read from the running server rather than from its marketing copy. That\ncorpus is the part of this measurement with lasting value, because tool retrieval research\n(ToolRet, ACL Findings 2025) keeps finding that retrieval models do poorly at exactly this\nmatching task, and it has been benchmarked so far on assembled datasets rather than the live,\nmessy ecosystem: the 400-tool grab-bag servers, the promotional descriptions, the truncated\nschemas. We publish the whole thing as a dataset, and it powers\n<a href=\"/tools/\">tool-level search</a> on this index.</p>\n\n<h2>What this says about discovery</h2>\n<p>Every registry in this space, ours included, is downstream of self-published metadata. The\nmeasurement above is what that metadata is worth unchecked: for every two servers a listing\nshows an agent, one does not exist. Liveness checking is not a nice-to-have for agent\ninfrastructure, it is the difference between a directory and a rumour mill.</p>\n<p>Neuronto probes every indexed endpoint and demotes what does not answer rather than deleting\nit, because services come back. Verified tool counts, reachability and the auth requirement are\nall fields on our <a href=\"/api-docs\">search API</a>, and all statements about what we observed,\nnever about trust.</p>"
+ },
+ {
   "slug": "how-ai-agents-discover-tools",
   "path": "/blog/how-ai-agents-discover-tools",
   "img": "discovery",

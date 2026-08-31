@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Most of the agent web points at nothing | ARD index quality</title>
-<meta name="description" content="We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds an index of dead links.">
-<link rel="canonical" href="https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing">
+<title>We asked 7,708 MCP servers to say hello. 46% couldn't.</title>
+<meta name="description" content="We ran a standard initialize handshake against every MCP endpoint in the public registries. 3,547 of 7,708 failed it, 1,918 demanded credentials, and the working third returned 31,411 real tools.">
+<link rel="canonical" href="https://neuronto.com/blog/half-of-mcp-servers-dont-answer">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Most of the agent web points at nothing | ARD index quality">
-<meta property="og:description" content="We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds an index of dead links.">
-<meta property="og:url" content="https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing">
-<meta property="og:image" content="https://neuronto.com/img/what-is-ard.jpg">
+<meta property="og:title" content="We asked 7,708 MCP servers to say hello. 46% couldn't.">
+<meta property="og:description" content="We ran a standard initialize handshake against every MCP endpoint in the public registries. 3,547 of 7,708 failed it, 1,918 demanded credentials, and the working third returned 31,411 real tools.">
+<meta property="og:url" content="https://neuronto.com/blog/half-of-mcp-servers-dont-answer">
+<meta property="og:image" content="https://neuronto.com/img/introspection.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://neuronto.com/img/what-is-ard.jpg">
+<meta name="twitter:image" content="https://neuronto.com/img/introspection.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing#post", "headline": "Most of the agent web points at nothing | ARD index quality", "description": "We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds an index of dead links.", "image": "https://neuronto.com/img/what-is-ard.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do AI agent registries verify that listed resources work?", "acceptedAnswer": {"@type": "Answer", "text": "Most do not. Registries built on self-published manifests index what publishers declare without probing whether the endpoints respond. Neuronto probes indexed endpoints and demotes non-responding ones in ranking rather than deleting them, since services can come back."}}, {"@type": "Question", "name": "Why do so many registered agent endpoints not respond?", "acceptedAnswer": {"@type": "Answer", "text": "Self-published registration has no ongoing cost, so entries persist long after the service behind them stops. Where registration is cheap or incentivised, a large share of entries are created in bulk and never point at a running service."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/half-of-mcp-servers-dont-answer#post", "headline": "We asked 7,708 MCP servers to say hello. 46% couldn't.", "description": "We ran a standard initialize handshake against every MCP endpoint in the public registries. 3,547 of 7,708 failed it, 1,918 demanded credentials, and the working third returned 31,411 real tools.", "image": "https://neuronto.com/img/introspection.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/half-of-mcp-servers-dont-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/half-of-mcp-servers-dont-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How was the 46% figure measured?", "acceptedAnswer": {"@type": "Answer", "text": "Two read-only JSON-RPC calls per endpoint, initialize and then tools/list, over streamable HTTP with a short timeout and no retries. 3,547 of 7,708 endpoints failed the handshake: 1,150 returned 404, 1,122 returned 422, 428 returned 405, and the rest were connection errors, rate limits and timeouts. No tool was ever called."}}, {"@type": "Question", "name": "Does failing the handshake mean a server is fake?", "acceptedAnswer": {"@type": "Answer", "text": "Not necessarily. A 404 usually means a stale listing, a 422 usually means a wrapper that does not implement the protocol, and a connection error means the host is gone. What they share is that an agent following the listing gets nothing, and no registry surfaced that before it tried."}}, {"@type": "Question", "name": "What does auth required mean on a listing?", "acceptedAnswer": {"@type": "Answer", "text": "The endpoint answered 401 or 403 to a standard handshake: a real server that wants credentials before exposing its tools. Legitimate, but previously invisible: no public registry recorded it, so agents discovered it by failing."}}, {"@type": "Question", "name": "Where does the verified tool data come from?", "acceptedAnswer": {"@type": "Answer", "text": "From the servers themselves. Each of the 31,411 tools was returned by a live server's own tools/list response, including its name, description and JSON input schema, and is searchable at neuronto.com/tools."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -206,68 +206,75 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="art">
-<p class="kick">Index quality, original measurement</p>
-<h1>Most of the agent web points at nothing</h1>
+<p class="kick">Measurement</p>
+<h1>We asked 7,708 MCP servers to say hello. 46% couldn't.</h1>
 <p class="meta">31 August 2026 · 6 min read</p>
-<img class="hero" src="/img/what-is-ard.jpg" alt="A dark lattice of fine white lines converging toward a single bright aperture" width="1344" height="768">
-<p class="stand">We sampled registered agent endpoints and asked a simple question: does anything answer? On one chain, <b>one of 55 declared endpoints responded</b>. Self-published discovery scales beautifully and rots just as fast, and an index that does not check becomes a directory of dead links.</p>
+<img class="hero" src="/img/introspection.jpg" alt="Rows of dark server outlines, less than a third lit, the rest fading into black" width="1344" height="768">
+<p class="stand">Public MCP registries list thousands of servers, and every listing is a claim someone typed. We tested the claims: a standard <b>initialize</b> handshake and a <b>tools/list</b> against every endpoint we index. <b>Almost half failed the first message of their own protocol</b>, a quarter demanded credentials no registry records, and the third that worked handed us the largest verified tool corpus that exists.</p>
+<h2>What we did</h2>
+<p>Neuronto indexes MCP servers from public ARD manifests, the official MCP Registry and every
+public ARD registry. Each entry arrives as a claim: a name, an endpoint URL, a description of what
+it can do. Claims are cheap, so we started asking. Two read-only JSON-RPC calls per endpoint,
+<code>initialize</code> and then <code>tools/list</code>, over streamable HTTP, with a short
+timeout and no retries. No tool was ever called. The whole sweep across 7,708 endpoints took
+about six minutes.</p>
 
-<h2>The measurement</h2>
-<p>Discovery systems built on self-publication share a structural weakness: registering costs almost
-nothing and staying alive costs real money, so the two diverge. We wanted to know by how much, so we
-sampled registered agent endpoints and probed them.</p>
-<table><thead><tr><th>Source</th><th>Sampled</th><th>Declared an endpoint</th><th>Endpoint answered</th></tr></thead><tbody>
-<tr><td>Chain A</td><td>60</td><td>6</td><td>6</td></tr>
-<tr><td>Chain B</td><td>60</td><td>29</td><td>29</td></tr>
-<tr><td>Chain C</td><td>60</td><td>55</td><td><b>1</b></td></tr>
-</tbody></table>
-<p>The third row is the interesting one. Ninety-two per cent of that sample published a well-formed
-registration file with a service endpoint, and <b>one of them answered</b>. Well-formed metadata
-pointing at nothing is what bulk registration looks like when it is cheap enough to do properly.</p>
-<p class="pull">Registration counts measure the price of registering, not the existence of a service.</p>
+<h2>The result</h2>
+<table>
+<tr><th>outcome</th><th>servers</th><th>share</th></tr>
+<tr><td>answered and returned tools</td><td>2,223</td><td>28.8%</td></tr>
+<tr><td>answered, no tools exposed</td><td>20</td><td>0.3%</td></tr>
+<tr><td>demanded credentials first</td><td>1,918</td><td>24.9%</td></tr>
+<tr><td><b>failed the handshake entirely</b></td><td><b>3,547</b></td><td><b>46.0%</b></td></tr>
+</table>
 
-<h2>Why headline numbers mislead</h2>
-<p>The same pattern shows up in registration figures themselves. One contract, deployed at the same
-address across chains, held <b>320,000 registrations on one and 16 on another</b>, and the one with
-16 was the chain where real activity happens. The difference was gas price, not adoption.</p>
-<p>Any figure of the form "N agents registered" is measuring the cost of the write.</p>
+<p class="pull">Almost half of the MCP servers listed in public registries do not answer the
+first message of their own protocol.</p>
 
-<h2>What this means for a registry</h2>
-<p>An index that reports what publishers declared, without checking, converges on a directory of dead
-links. The failure is quiet: search still returns results, they still look plausible, and the agent
-only discovers the problem at connection time, after it has committed to a plan.</p>
-<div class="try">
-<h4>Try it on your own resource</h4>
-<p>Publishing takes one file. This checks whether it worked, across every public registry rather
-than only ours.</p>
-<pre>pip install ard-publish
-python -m ard_publish <b>check</b> yourdomain.com</pre>
-<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
-<a class="btn btn--g" href="/publish">Publishing guide</a></div>
-</div>
-<h2>What we do instead</h2>
-<p>Indexed endpoints are probed on a schedule, and non-responding ones are <b>demoted in ranking
-rather than deleted</b>. Two deliberate choices there:</p>
-<ul>
-<li><b>Demote, do not delete.</b> Services come back. An index that forgets is its own kind of
-unreliable, and a resource that was down for an hour should not have to be rediscovered.</li>
-<li><b>Any answer below a server error counts as alive.</b> A 401, 403 or 405 means something is
-there and talking, which is the question being asked. Requiring a 200 would punish every endpoint
-that correctly demands authentication.</li>
-</ul>
-<p>Entries never yet probed are left alone rather than penalised, because a crawl backlog is our
-problem and not the publisher's.</p>
+<h2>How they fail</h2>
+<p>The failures are not one thing. The two biggest buckets are instructive:</p>
+<table>
+<tr><th>failure</th><th>count</th><th>what it usually means</th></tr>
+<tr><td>HTTP 404</td><td>1,150</td><td>the manifest points at a path that does not exist. The domain is alive; the endpoint was never there or has moved</td></tr>
+<tr><td>HTTP 422</td><td>1,122</td><td>the endpoint exists but rejects a standard <code>initialize</code>, usually a framework wrapper that never spoke MCP</td></tr>
+<tr><td>HTTP 405</td><td>428</td><td>something is at the URL but does not accept POST, often a docs page listed as an endpoint</td></tr>
+<tr><td>connection refused / DNS</td><td>318</td><td>the host itself is gone</td></tr>
+<tr><td>HTTP 429</td><td>210</td><td>rate limited before one handshake, which for an agent-facing service is its own finding</td></tr>
+<tr><td>HTTP 402</td><td>67</td><td>payment required before hello</td></tr>
+<tr><td>everything else</td><td>252</td><td>timeouts, malformed replies, TLS and origin errors</td></tr>
+</table>
+<p>A 404 and a 422 are different lies. The 404 is a stale listing, the ordinary rot of any
+directory built on self-published metadata. The 422 is stranger and more interesting: someone
+deployed a thing, registered it as an MCP server, and it cannot complete the protocol's opening
+message. Both look identical in every registry that lists them, because no registry checks.</p>
 
-<h2>The wider point</h2>
-<p>Every discovery system that lets anyone publish accumulates this. It is the cost of being open,
-and openness is worth the cost: the alternative is a curated marketplace with a submission queue,
-which is the thing ARD exists to avoid.</p>
-<p>But open publication and unverified indexing are separate decisions, and only the first is
-required. You can accept anyone and still check whether what they published is there.</p>
-<p>If you publish agentic resources, the same logic applies to you: a stale entry in your manifest
-costs you a result you would otherwise have won. The <a href="/console">console</a> reports which of
-your endpoints answer, alongside which registries return you.</p>
-<div class="try">
+<h2>The quarter nobody records</h2>
+<p>1,918 endpoints, one in four, answered with 401 or 403: real servers, running, that want
+credentials before they will list their tools. That is a perfectly legitimate design. What is
+strange is that <b>no public registry records it</b>. An agent picking a server from a listing
+cannot tell an open endpoint from a gated one until it has already tried, which at agent speed
+means thousands of doomed handshakes a day across the ecosystem.</p>
+<p>We now store it as a field. It is queryable, and it is on the badge.</p>
+
+<h2>What the working third gave us</h2>
+<p>The 2,223 servers that answered returned <b>31,411 tools</b> between them: names, descriptions
+and JSON input schemas, read from the running server rather than from its marketing copy. That
+corpus is the part of this measurement with lasting value, because tool retrieval research
+(ToolRet, ACL Findings 2025) keeps finding that retrieval models do poorly at exactly this
+matching task, and it has been benchmarked so far on assembled datasets rather than the live,
+messy ecosystem: the 400-tool grab-bag servers, the promotional descriptions, the truncated
+schemas. We publish the whole thing as a dataset, and it powers
+<a href="/tools/">tool-level search</a> on this index.</p>
+
+<h2>What this says about discovery</h2>
+<p>Every registry in this space, ours included, is downstream of self-published metadata. The
+measurement above is what that metadata is worth unchecked: for every two servers a listing
+shows an agent, one does not exist. Liveness checking is not a nice-to-have for agent
+infrastructure, it is the difference between a directory and a rumour mill.</p>
+<p>Neuronto probes every indexed endpoint and demotes what does not answer rather than deleting
+it, because services come back. Verified tool counts, reachability and the auth requirement are
+all fields on our <a href="/api-docs">search API</a>, and all statements about what we observed,
+never about trust.</p><div class="try">
 <h4>Use Neuronto from your agent</h4>
 <p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
 <pre>curl -s <b>https://neuronto.com/search</b> \
@@ -276,7 +283,7 @@ your endpoints answer, alongside which registries return you.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/half-of-mcp-servers-dont-answer"><div class="t">We asked 7,708 MCP servers to say hello. 46% couldn't.</div><div class="d">We ran a standard initialize handshake against every MCP endpoint in the public registri…</div></a><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes…</div></a><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public Agentic Resource Discovery registries the same 26 queries. Thei…</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes…</div></a><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public Agentic Resource Discovery registries the same 26 queries. Thei…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify that registries return you. Plus the …</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>
