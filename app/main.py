@@ -208,14 +208,14 @@ def _manifest() -> dict:
     B = config.PUBLIC_BASE
     return {
         "specVersion": "1.0",
-        "host": {"displayName": "Neuronto",
+        "host": {"displayName": "Neuronto — Agentic Resource Discovery (ARD) index",
                  "identifier": "did:web:neuronto.com",
                  "documentationUrl": f"{B}/about"},
         "entries": [{
             # §5.3: a registry's base URL is discovered by finding an entry of
             # this type. This is how Neuronto becomes findable AS a registry.
             "identifier": "urn:air:neuronto.com:registry:neuronto",
-            "displayName": "Neuronto ARD Registry",
+            "displayName": "Neuronto — Agentic Resource Discovery (ARD) registry",
             "type": "application/ai-registry+json",
             "url": f"{B}/search",
             "description": ("A federated ARD registry and index. Implements "
@@ -232,7 +232,7 @@ def _manifest() -> dict:
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:mcp:discovery",
-            "displayName": "Neuronto Discovery (MCP)",
+            "displayName": "Neuronto — ARD & MCP discovery (MCP server)",
             "type": "application/mcp-server-card+json",
             "url": f"{B}/.well-known/mcp/server-card.json",
             "description": ("The same federated discovery as an MCP server, so an agent can "
