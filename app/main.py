@@ -309,9 +309,18 @@ async def mcp_card():
 @app.get("/robots.txt", include_in_schema=False)
 async def robots():
     B = config.PUBLIC_BASE
-    lines = ["User-agent: *", "Allow: /", "",
-             f"Sitemap: {B}/sitemap.xml",
-             f"Agentmap: {B}/.well-known/ard.json", ""]
+    # Social crawlers named explicitly. They fetch a URL to build the preview
+    # card when a link is shared, and several of them do not follow the wildcard
+    # rule reliably. A link shared without a card is a link nobody clicks, and
+    # sharing is the channel that demonstrably works in this ecosystem.
+    social = ["Twitterbot", "facebookexternalhit", "Redditbot", "LinkedInBot",
+              "Slackbot", "Slackbot-LinkExpanding", "Discordbot", "TelegramBot",
+              "WhatsApp", "Applebot"]
+    lines = ["User-agent: *", "Allow: /", ""]
+    for ua in social:
+        lines += [f"User-agent: {ua}", "Allow: /", ""]
+    lines += [f"Sitemap: {B}/sitemap.xml",
+              f"Agentmap: {B}/.well-known/ard.json", ""]
     return PlainTextResponse("\n".join(lines),
                              headers={"Cache-Control": "public, max-age=300"})
 
@@ -325,6 +334,8 @@ async def sitemap():
             # are the pages most worth discovering.
             "/tools/", "/bench", "/adoption"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
+    urls += ["/publishers/"] + [f"/publishers/{p['publisher']}"
+                                for p in catalog.publisher_list(db())]
     blog = WEB / "blog"
     if blog.exists():
         urls += sorted(f"/blog/{p.stem}" for p in blog.glob("*.html")
@@ -432,6 +443,12 @@ async def stats(days: int = Query(30, ge=7, le=90)):
             "federation": {"enabled": config.FEDERATION_ENABLED,
                            "budget_ms": config.FEDERATION_BUDGET_MS,
                            "upstreams": [u[1] for u in config.UPSTREAMS]}}
+
+
+def _x(v) -> str:
+    """XML-escape. A stray ampersand in a publisher name breaks the whole feed."""
+    return (str(v or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 def _fmt(n: int) -> str:
@@ -763,6 +780,70 @@ async def badge_help():
                  "returned to tools/list and whether the endpoint answers. It is "
                  "never a trust, safety or quality rating"),
     })
+
+
+@app.get("/publishers", include_in_schema=False)
+@app.get("/publishers/", include_in_schema=False)
+async def publishers_index():
+    html_ = render.cached("pubs-index", 1800,
+                          lambda: catalog.render_publishers_index(db()))
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/publishers/{host}", include_in_schema=False)
+async def publisher_page(host: str):
+    h = host.strip().lower()
+    if not h or len(h) > 100 or not all(c.isalnum() or c in ".-_" for c in h):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    html_ = render.cached(f"pub-{h}", 1800, lambda: catalog.render_publisher(db(), h))
+    if not html_:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/feed.xml", include_in_schema=False)
+async def feed():
+    """What changed in the agentic web, as a feed.
+
+    The one distribution mechanism we can run perpetually without asking anyone
+    for anything. Glama posts every newly indexed server; we publish something
+    they cannot, because it comes from probing rather than listing: an endpoint
+    that started answering, a server that gained or lost tools, a domain that
+    began publishing a manifest. A feed of verification events, not of listings.
+    """
+    conn = db()
+    rows = conn.execute(
+        """SELECT o.ts, o.kind, o.live, o.tools, o.detail,
+                  e.display_name, e.identifier, e.publisher, e.url
+           FROM observations o JOIN entries e ON e.key = o.entry_key
+           ORDER BY o.id DESC LIMIT 60""").fetchall()
+    B = config.PUBLIC_BASE
+    items = []
+    for r in rows:
+        name = r["display_name"] or r["identifier"]
+        if r["kind"] == "liveness":
+            what = "started answering" if r["live"] == 1 else "stopped answering"
+        elif r["detail"] == "auth":
+            what = "now requires credentials"
+        elif (r["tools"] or 0) > 0:
+            what = f"exposes {r['tools']} verified tools"
+        else:
+            what = "was re-checked"
+        link = f"{B}/publishers/{r['publisher']}" if r["publisher"] else B
+        when = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(r["ts"] or 0))
+        items.append(
+            f"<item><title>{_x(name)} {_x(what)}</title>"
+            f"<link>{_x(link)}</link><guid isPermaLink=\"false\">{r['ts']}-{_x(r['identifier'])}</guid>"
+            f"<pubDate>{when}</pubDate>"
+            f"<description>{_x(name)} ({_x(r['publisher'] or '')}) {_x(what)}.</description></item>")
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
+           f"<title>Neuronto: verification events across the agentic web</title>"
+           f"<link>{B}</link>"
+           "<description>Endpoints that started or stopped answering, servers that gained "
+           "or lost tools, and domains that began publishing an ARD manifest.</description>"
+           + "".join(items) + "</channel></rss>")
+    return Response(xml, media_type="application/rss+xml",
+                    headers={"Cache-Control": "public, max-age=900"})
 
 
 @app.get("/blog", include_in_schema=False)

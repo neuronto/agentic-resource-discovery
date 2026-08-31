@@ -499,6 +499,84 @@ def t_stats_exposes_history_counts():
     assert "impressions" in h, "impressions not reported"
 
 
+# --------------------------------------------------------------------------
+# 11. ARD publisher pages, feed, and social preview
+# --------------------------------------------------------------------------
+def t_publishers_index():
+    s, h = _html("/publishers/")
+    assert s == 200, s
+    assert h.count('href="/publishers/') >= 40, "too few publishers listed"
+    assert "ard.json" in h, "page does not explain what a manifest is"
+
+
+def t_publisher_page_renders():
+    s, h = _html("/publishers/zapier.com")
+    assert s == 200, s
+    assert "zapier.com" in h and "declared resources" in h
+
+
+def t_publisher_page_never_claims_an_unmade_check():
+    """A publisher we have not probed must not render as zero answering.
+
+    Saying '0 answering' about a real business we never tested is a false
+    statement about somebody else's service, which is worse than saying nothing.
+    """
+    s, h = _html("/publishers/gstcranes.com")
+    assert s == 200, s
+    assert "not yet checked" in h.lower(), \
+        "unprobed publisher does not say the check was not made"
+    import re as _re
+    assert not _re.search(r"<b>0</b>answering", h), \
+        "renders 0 answering for a publisher that was never probed"
+
+
+def t_unknown_publisher_404s():
+    try:
+        _html("/publishers/definitely-not-real.example")
+        raise AssertionError("unknown publisher did not 404")
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
+
+
+def t_feed_is_valid_rss():
+    import xml.etree.ElementTree as _ET
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/feed.xml", headers={"User-Agent": "e2e"}), timeout=30)
+    assert r.headers.get("Content-Type", "").startswith("application/rss"), \
+        r.headers.get("Content-Type")
+    root = _ET.fromstring(r.read())
+    items = root.findall(".//item")
+    assert len(items) >= 5, f"feed has only {len(items)} items"
+    for it in items[:5]:
+        assert it.find("title") is not None and it.find("title").text
+        assert it.find("link") is not None
+
+
+def t_social_preview_tags_present():
+    for path in ("/tools/", "/publishers/", "/bench"):
+        s, h = _html(path)
+        assert 'property="og:image"' in h, f"{path} has no og:image"
+        assert 'name="twitter:card" content="summary_large_image"' in h, \
+            f"{path} has no large twitter card"
+        assert 'type="application/rss+xml"' in h, f"{path} does not advertise the feed"
+
+
+def t_robots_allows_social_crawlers():
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/robots.txt", headers={"User-Agent": "e2e"}), timeout=30)
+    body = r.read().decode()
+    for ua in ("Redditbot", "Twitterbot", "LinkedInBot", "Slackbot", "Discordbot"):
+        assert ua in body, f"{ua} not named in robots.txt"
+
+
+def t_sitemap_lists_publishers():
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
+    sm = r.read().decode()
+    assert "/publishers/" in sm, "sitemap missing publisher pages"
+    assert sm.count("<loc>") >= 100, f"sitemap only has {sm.count('<loc>')} urls"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
