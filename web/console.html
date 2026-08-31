@@ -4,28 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ARD Console — check if AI agents can discover your domain</title>
-<meta name="description" content="Free ARD console. Check whether AI agents can discover your domain: manifest validation, conformance findings, and which registries actually return you.">
+<meta name="description" content="Free ARD console. Check whether AI agents can discover your domain, and which registries actually return you.">
 <link rel="canonical" href="https://neuronto.com/console">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/favicon.svg">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Neuronto">
-<meta property="og:title" content="Neuronto — the Agentic Resource Discovery index">
-<meta property="og:description" content="One search across every public ARD registry. Find the MCP servers, skills, agents and APIs that can do a task.">
-<meta property="og:url" content="https://neuronto.com/">
+<meta property="og:title" content="ARD Console — can AI agents discover your domain?">
+<meta property="og:description" content="Check your manifest, your conformance, and which registries actually return you.">
+<meta property="og:url" content="https://neuronto.com/console">
+<meta property="og:image" content="https://neuronto.com/img/discovery.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Neuronto — the Agentic Resource Discovery index">
-<meta name="twitter:description" content="One search across every public ARD registry.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-
-<style>
-:root{
-  --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
-  --line:#1B1B1E; --line2:#26262A;
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -190,9 +182,8 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 <nav><div class="wrap">
   <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span></a>
-  <div class="navlinks"><a href="/#what">What is ARD</a><a href="/console">Console</a>
-    <a href="/#compare">Registries</a><a href="/#api">API</a></div>
-  <a class="btn btn--w nav-cta" href="/#api" style="margin-left:auto">Use the API</a>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a></div>
+  <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 
 <div class="wrap">
@@ -212,9 +203,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 </div>
 
 <footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/.well-known/ard.json">ard.json</a>
-    <a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a>
-    <a href="https://github.com/neuronto/neuronto">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
   <div>The console is read-only. It fetches what you already publish and asks the public
   registries whether they return you.</div>
 </div></footer>

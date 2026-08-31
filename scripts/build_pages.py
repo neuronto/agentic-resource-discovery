@@ -44,8 +44,7 @@ SHELL_HEAD = """<!doctype html>
 <nav><div class="wrap">
   <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span></a>
-  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a>
-    <a href="/console">Console</a><a href="/registries">Registries</a></div>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a></div>
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
@@ -53,10 +52,7 @@ SHELL_HEAD = """<!doctype html>
 
 SHELL_FOOT = """</article></div>
 <footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a>
-    <a href="/publish">Publish</a><a href="/console">Console</a>
-    <a href="/registries">Registries</a><a href="/llms.txt">llms.txt</a>
-    <a href="https://github.com/neuronto/neuronto">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>
 </div></footer>
 </body></html>
