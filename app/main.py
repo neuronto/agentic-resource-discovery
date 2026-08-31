@@ -231,6 +231,21 @@ def _manifest() -> dict:
             "tags": ["registry", "discovery", "ard", "federation", "index", "mcp"],
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
+            "identifier": "urn:air:neuronto.com:tool:ard-publish",
+            "displayName": "ard-publish — build and verify an ARD manifest",
+            "type": "application/ai-catalog+json",
+            "url": f"{B}/publish",
+            "description": ("Open source tool that builds, validates and verifies an Agentic "
+                            "Resource Discovery manifest, then checks which registries actually "
+                            "return your domain. pip install ard-publish."),
+            "representativeQueries": [
+                "how do I publish an ARD manifest",
+                "make my API discoverable by AI agents",
+                "validate my ai-catalog.json",
+            ],
+            "tags": ["ard", "sdk", "publishing", "validation", "python", "open-source"],
+            "trustManifest": {"identity": "did:web:neuronto.com"},
+        }, {
             "identifier": "urn:air:neuronto.com:mcp:discovery",
             "displayName": "Neuronto — ARD & MCP discovery (MCP server)",
             "type": "application/mcp-server-card+json",
