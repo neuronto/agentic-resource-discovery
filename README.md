@@ -163,8 +163,11 @@ and costs far more latency.
 
 `GET /adoption` tracks adoption of the specification itself: a named watchlist of
 organisations, and the manifest rate across every host the crawler has seen. At the time
-of writing, none of the twenty organisations on the watchlist serves an `ard.json`,
-including two that operate ARD registries of their own.
+of writing, three of the twenty organisations on the watchlist publish a manifest:
+Hugging Face, Vercel and Zapier. All three serve it at `/.well-known/ai-catalog.json`,
+the path v0.91 renamed. Of 178 publishers our crawler has found, **157 serve the older
+`ai-catalog.json` and only 14 serve `ard.json`**, which is why the tracker checks both:
+measuring the path rather than the practice gets the answer wrong.
 
 ## The badge
 

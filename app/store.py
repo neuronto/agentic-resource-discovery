@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS registries (
 );
 
 CREATE TABLE IF NOT EXISTS crawl_seen (
-  domain TEXT PRIMARY KEY, last_crawl INTEGER, status TEXT, entries INTEGER
+  domain TEXT PRIMARY KEY, last_crawl INTEGER, status TEXT, entries INTEGER,
+  manifest_path TEXT           -- which well-known path actually served it
 );
 
 CREATE TABLE IF NOT EXISTS stats (k TEXT PRIMARY KEY, v TEXT);
@@ -125,7 +126,8 @@ CREATE TABLE IF NOT EXISTS adoption (
   status       INTEGER,
   entries      INTEGER,
   notable      INTEGER DEFAULT 0,     -- 1 = on the watchlist we publish
-  checked      INTEGER
+  checked      INTEGER,
+  path         TEXT                   -- which well-known path actually served it
 );
 CREATE INDEX IF NOT EXISTS idx_adoption_notable ON adoption(notable);
 
@@ -219,6 +221,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cannot alter one in place, so it is dropped and rebuilt from `entries`,
     which is safe because every byte in it is derived data.
     """
+    cs = {r["name"] for r in conn.execute("PRAGMA table_info(crawl_seen)")}
+    if cs and "manifest_path" not in cs:
+        conn.execute("ALTER TABLE crawl_seen ADD COLUMN manifest_path TEXT")
+
+    ad = {r["name"] for r in conn.execute("PRAGMA table_info(adoption)")}
+    if ad and "path" not in ad:
+        conn.execute("ALTER TABLE adoption ADD COLUMN path TEXT")
+
     have = {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}
     for col, decl in _ADD_COLUMNS.items():
         if col not in have:

@@ -593,6 +593,34 @@ def t_sitemap_lists_publishers():
     assert sm.count("<loc>") >= 100, f"sitemap only has {sm.count('<loc>')} urls"
 
 
+def t_publisher_page_states_the_real_manifest_path():
+    """Never assert a path we did not see serve this publisher's manifest.
+
+    Every page once said /.well-known/ard.json. Every publisher checked serves
+    the pre-v0.91 /.well-known/ai-catalog.json and 404s on ard.json, so the page
+    was wrong about 178 named companies and would have sent readers to a 404.
+    """
+    s, h = _html("/publishers/clickhouse.com")
+    assert s == 200, s
+    assert "ai-catalog.json" in h, "page does not state the path actually served"
+    import re as _re
+    assert not _re.search(r"manifest at\s*<code>/\.well-known/ard\.json</code>", h), \
+        "page asserts ard.json for a publisher that serves ai-catalog.json"
+
+
+def t_adoption_checks_both_paths():
+    """Measuring the path instead of the practice under-counts adoption ~10x."""
+    s, d = get("/adoption")
+    assert "ai-catalog" in d.get("method", ""), \
+        "adoption method does not mention the legacy path"
+    w = d["watchlist"]
+    assert w["publishing"] >= 1, \
+        "watchlist reports zero publishers; the legacy path is probably not being checked"
+    for x in w["detail"]:
+        if x["publishes"]:
+            assert x.get("path"), "a publishing host records no manifest path"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

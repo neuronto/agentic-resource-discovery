@@ -671,6 +671,13 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
     kindline = " · ".join(f"{fmt(v)} {KIND_LABEL.get(k, k).lower()}"
                           for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))
     seen_h = (time.strftime("%d %B %Y", time.gmtime(first)) if first else "recently")
+    # Never assert a path we have not seen serve this manifest. Stating
+    # /.well-known/ard.json for every publisher was wrong for every publisher
+    # checked: they serve the pre-v0.91 ai-catalog.json and 404 on ard.json.
+    mp = conn.execute("SELECT manifest_path FROM crawl_seen WHERE domain=?",
+                      (host.lower(),)).fetchone()
+    mpath = (mp["manifest_path"] if mp and mp["manifest_path"]
+             else "/.well-known/ai-catalog.json")
     title = f"{host}: what it publishes for AI agents (ARD manifest)"
     desc = (f"{host} publishes an ARD manifest declaring {fmt(n)} agentic resources: "
             f"{kindline}. Endpoints, identifiers, and what each is published to be found "
@@ -680,7 +687,7 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
   <div class="crumb"><a href="/">Index</a> / <a href="/publishers/">ARD publishers</a> / {esc(host)}</div>
   <h1>{esc(host)}</h1>
   <p class="lede">{esc(host)} publishes an Agentic Resource Discovery manifest at
-  <code>/.well-known/ard.json</code>, declaring what an AI agent can call on this domain.
+  <code>{esc(mpath)}</code>, declaring what an AI agent can call on this domain.
   Everything below is read from that file. First seen by our crawler on {seen_h}.</p>
   <ul class="statline">
     <li><b>{fmt(n)}</b>declared resources</li>
@@ -697,8 +704,11 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
 </table>
 
 <div class="note">
-  <b>Source</b>: <code>https://{esc(host)}/.well-known/ard.json</code>, this publisher's own
-  file. Identifiers are reproduced exactly as published.
+  <b>Source</b>: <code>https://{esc(host)}{esc(mpath)}</code>, this publisher's own file.
+  Identifiers are reproduced exactly as published.
+  {("Note: this is the pre-v0.91 path. The specification renamed the manifest to "
+    "<code>/.well-known/ard.json</code>, and most of the ecosystem still serves the older "
+    "name.") if mpath.endswith("ai-catalog.json") else ""}
   {("Of the resources listed, " + fmt(probed) + " have been probed for reachability.")
    if probed else "None of these endpoints has been probed for reachability yet, so nothing here says whether they answer."}
   "Answers" and "no response" describe only whether an endpoint replied when last probed:

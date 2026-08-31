@@ -213,6 +213,12 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 <p class="stand">Three steps: write one JSON file, advertise it four ways, then <b>verify that registries actually return you</b>, because publishing and being indexed are different things and only one of them gets you found.</p>
 
 <h2>Step 1, write the manifest</h2>
+<p><b>Serve it at both paths.</b> The specification renamed the file to
+<code>/.well-known/ard.json</code> in v0.91, but the ecosystem has not moved: of 178
+publishers we have crawled, <b>157 still serve the older
+<code>/.well-known/ai-catalog.json</code> and only 14 serve <code>ard.json</code></b>.
+Registries differ in which they request, so serving the same bytes at both paths is the
+only way to be certain you are found. It costs one alias.</p>
 <p>One file, served at <code>/.well-known/ard.json</code>.</p>
 <pre>{
   "specVersion": "1.0",
