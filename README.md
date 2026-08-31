@@ -166,6 +166,20 @@ organisations, and the manifest rate across every host the crawler has seen. At 
 of writing, none of the twenty organisations on the watchlist serves an `ard.json`,
 including two that operate ARD registries of their own.
 
+## The badge
+
+If your MCP server is in the index, a badge states what we verified: how many tools your
+server returned to `tools/list`, and whether the endpoint answers.
+
+```markdown
+[![Neuronto verified tools](https://neuronto.com/badge/your.publisher.id.svg)](https://neuronto.com/console?domain=your.publisher.id)
+```
+
+The publisher id is the publisher segment of your URN, or your domain. The badge is a
+statement about what was observed, never a trust, safety or quality rating. Not indexed
+yet? Publish a manifest and the crawler will find you, or run the
+[console audit](https://neuronto.com/console).
+
 ## Publishing your own resources
 
 Serve a manifest at `/.well-known/ard.json` on your domain describing what you offer.
