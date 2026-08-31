@@ -154,9 +154,14 @@ _ADD_COLUMNS = {
 def connect(path: Path | None = None) -> sqlite3.Connection:
     p = Path(path or config.DB_PATH)
     p.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(str(p), timeout=15, check_same_thread=False)
+    c = sqlite3.connect(str(p), timeout=45, check_same_thread=False)
     c.row_factory = sqlite3.Row
-    c.execute("PRAGMA busy_timeout=8000")
+    # Long maintenance jobs run alongside a web process that writes a row on
+    # every search. Eight seconds was not enough patience: it killed a domain
+    # crawl at 62,000 of 372,058 and lost a nine minute benchmark run, both on
+    # `database is locked`. WAL already allows concurrent readers, so waiting
+    # here costs nothing that matters and prevents losing hours of work.
+    c.execute("PRAGMA busy_timeout=45000")
     return c
 
 
