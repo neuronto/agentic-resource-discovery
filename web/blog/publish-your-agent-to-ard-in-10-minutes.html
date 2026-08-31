@@ -230,7 +230,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   }]
 }</pre>
 <p>Or generate it, which validates as you go:</p>
-<pre>pip install ard-publish   # github.com/neuronto/ard-publish
+<pre>pip install git+https://github.com/neuronto/ard-publish
 python -m ard_publish <b>init</b> example.com &gt; .well-known/ard.json</pre>
 <p>The identifier is domain-anchored: <code>urn:air:&lt;your-domain&gt;:&lt;namespace&gt;:&lt;name&gt;</code>.
 The publisher segment must be a domain you control, because that is what publisher-authority binding
@@ -250,7 +250,7 @@ path and crawlers written against the earlier draft still look there. It costs o
 <h4>Try it on your own resource</h4>
 <p>Publishing takes one file. This checks whether it worked, across every public registry rather
 than only ours.</p>
-<pre>pip install ard-publish   # github.com/neuronto/ard-publish
+<pre>pip install git+https://github.com/neuronto/ard-publish
 python -m ard_publish <b>check</b> yourdomain.com</pre>
 <div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
 <a class="btn btn--g" href="/publish">Publishing guide</a></div>

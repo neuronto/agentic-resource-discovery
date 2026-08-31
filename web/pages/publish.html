@@ -249,7 +249,7 @@ name, and crawlers written against the earlier draft still look there.</p>
 <h2>Step 4: check that it worked</h2>
 <p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and
 asks every public registry whether they actually return you.</p>
-<pre>pip install ard-publish   # github.com/neuronto/ard-publish
+<pre>pip install git+https://github.com/neuronto/ard-publish
 python -m ard_publish validate .well-known/ard.json
 python -m ard_publish check example.com</pre>
 
