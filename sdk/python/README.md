@@ -2,23 +2,25 @@
 
 **Make your API, MCP server or AI agent discoverable by AI agents.**
 
+[![PyPI](https://img.shields.io/pypi/v/ard-publish)](https://pypi.org/project/ard-publish/)
+[![Python](https://img.shields.io/pypi/pyversions/ard-publish)](https://pypi.org/project/ard-publish/)
+[![Licence](https://img.shields.io/pypi/l/ard-publish)](https://github.com/neuronto/ard-publish/blob/main/LICENSE)
+
 Build, validate and verify an **Agentic Resource Discovery (ARD)** manifest — the
-`/.well-known/ard.json` file that lets AI agents find what you offer at runtime.
+`/.well-known/ard.json` file that lets AI agents find what you offer at runtime,
+without anyone installing your tool in advance.
 
 ```bash
-pip install git+https://github.com/neuronto/ard-publish
+pip install ard-publish
 ```
 
-## What this solves
+---
 
-Publishing an ARD manifest is a small job that is easy to get subtly wrong, and the
-failures are silent. A catalogue with a malformed URN, or entries with no
-representative queries, validates as JSON, serves a 200, and is **never returned by
-any search**. There is no error to notice.
+## How do I make my API discoverable by AI agents?
 
-This builds one that works, then checks whether registries actually return you.
-
-## Quick start
+Serve an ARD manifest on your own domain describing what you offer, with 2 to 5
+representative queries per entry. Registries crawl it. There is no submission form,
+no marketplace to apply to and no allowlist.
 
 ```python
 from ard_publish import Manifest, Entry
@@ -36,19 +38,31 @@ m.add(Entry.mcp_server(
 m.save(".well-known/ard.json")     # raises if it would not be findable
 ```
 
-Then advertise it, which `robots_line()` and `link_tags()` write for you:
+## What is ARD?
 
-```
-Agentmap: https://example.com/.well-known/ard.json
-<link rel="ard" href="https://example.com/.well-known/ard.json">
-```
+**ARD** stands for **Agentic Resource Discovery**: an open specification for how AI
+agents find the tools, skills, agents and APIs they need, published in June 2026 by a
+working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia,
+Salesforce and Snowflake.
+
+It answers one question — *"what is available for this task?"* — then gets out of the
+way. It is a discovery layer, not a runtime, and it does not replace MCP or A2A.
+
+## Why this package exists
+
+Publishing a manifest is a small job that is easy to get subtly wrong, and **the
+failures are silent**. A malformed URN, or entries with no representative queries,
+validates as JSON, serves a 200, and is never returned by any search. There is no
+error to notice.
+
+`save()` refuses to write a manifest that would not be findable.
 
 ## Command line
 
 ```bash
-python -m ard_publish init example.com > .well-known/ard.json   # scaffold
-python -m ard_publish validate .well-known/ard.json             # check it locally
-python -m ard_publish check example.com                         # check it for real
+ard-publish init example.com > .well-known/ard.json   # scaffold a valid manifest
+ard-publish validate .well-known/ard.json             # check it locally
+ard-publish check example.com                         # check it for real
 ```
 
 `check` is the one that matters. It fetches your live manifest, validates it, and asks
@@ -56,41 +70,87 @@ python -m ard_publish check example.com                         # check it for r
 representative queries — because publishing and being indexed are different things.
 
 ```
-example.com  grade B  76/100
+example.com  grade B  82/100
 
    15/15   Serves a manifest                found
    10/10   Advertised on all four paths     4 of 4
    25/25   Conformance                      0 errors, 0 warnings
-   20/20   Entries are searchable           2 of 2 carry representativeQueries
-    6/30   Returned by registries           1 of 5 return this domain
+   20/20   Entries are searchable           3 of 3 carry representativeQueries
+   12/30   Returned by registries           2 of 5 return this domain
+
+  registries returning you:
+    yes  Neuronto
+     no  GitHub Agent Finder
+    yes  WellKnown
 ```
 
-## The mistake this exists to prevent
+## How do I publish my MCP server so agents can find it?
+
+Three steps, about ten minutes.
+
+**1. Write the manifest** — `ard-publish init yourdomain.com`
+
+**2. Advertise it on all four discovery paths.** Serving only one makes you invisible
+to any client that checks another:
+
+```
+/.well-known/ard.json          the path a consumer MUST fetch
+Agentmap: <url>                in robots.txt, the agent-facing Sitemap:
+<link rel="ard" href="...">    in your page head
+DNS service records            optional
+```
+
+`Manifest.robots_line()` and `.link_tags()` generate two of those for you.
+
+**3. Verify** — `ard-publish check yourdomain.com`
+
+## The mistake that costs you everything
 
 Leaving out `representativeQueries`. It is the field registries build their semantic
-index from, so an entry without it is a valid catalogue entry that no search will ever
-return. `save()` refuses by default rather than letting you publish something
-unfindable.
+index from, so an entry without it is a valid catalogue entry that **no search will
+ever return**.
 
 Write 2 to 5 per entry, phrased as the request someone would actually make:
 
 | Written for a brochure | Written for retrieval |
-|---|---|
+| --- | --- |
 | enterprise document intelligence | read this PDF and pull out the invoice total |
 | scalable web extraction platform | scrape a website that blocks bots |
+| unified communications API | send a text message to a phone number |
 
 ## Media types
 
-Three spellings for MCP servers are in circulation and filters match exactly, so the
-wrong one gets you silently dropped. `Entry.mcp_server()` uses
-`application/mcp-server-card+json`, the one the official conformance tool accepts.
+Three spellings for MCP servers are in circulation, and because filters match exactly,
+the wrong one gets you silently dropped by registries that do not normalise.
+`Entry.mcp_server()` uses `application/mcp-server-card+json`, the spelling the official
+conformance tool accepts.
+
+Helpers are provided for each resource kind:
+
+| Helper | Media type |
+| --- | --- |
+| `Entry.mcp_server()` | `application/mcp-server-card+json` |
+| `Entry.agent()` | `application/a2a-agent-card+json` |
+| `Entry.skill()` | `application/agent-skills+gzip` |
+
+## API
+
+| | |
+| --- | --- |
+| `Manifest(host, display_name, documentation_url, did)` | the catalogue |
+| `.add(entry)` | attach an entry, inheriting host and identity |
+| `.validate()` | list of problems, as plain instructions |
+| `.save(path, strict=True)` | write, refusing an unfindable manifest |
+| `.robots_line()` / `.link_tags()` | the advertisement snippets |
+| `validate(dict)` | validate a manifest you built elsewhere |
 
 ## Links
 
 - [Agentic Resource Discovery specification](https://agenticresourcediscovery.org/spec)
 - [Publishing guide](https://neuronto.com/publish)
-- [Free ARD audit](https://neuronto.com/console)
-- [Neuronto ARD index](https://neuronto.com)
+- [Free ARD audit — which registries return you](https://neuronto.com/console)
+- [Neuronto, the federated ARD index](https://neuronto.com)
+- [Source](https://github.com/neuronto/ard-publish)
 
 ## Licence
 

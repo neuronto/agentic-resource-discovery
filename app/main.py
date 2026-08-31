@@ -237,7 +237,7 @@ def _manifest() -> dict:
             "url": f"{B}/publish",
             "description": ("Open source tool that builds, validates and verifies an Agentic "
                             "Resource Discovery manifest, then checks which registries actually "
-                            "return your domain. Open source, Apache-2.0."),
+                            "return your domain. pip install ard-publish."),
             "representativeQueries": [
                 "how do I publish an ARD manifest",
                 "make my API discoverable by AI agents",

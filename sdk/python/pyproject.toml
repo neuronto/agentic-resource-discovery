@@ -1,13 +1,15 @@
 [project]
 name = "ard-publish"
-version = "1.0.0"
-description = "Make your API, MCP server or AI agent discoverable by AI agents. Build, validate and verify an Agentic Resource Discovery (ARD) manifest."
+version = "1.0.1"
+description = "Make your API, MCP server or AI agent discoverable by AI agents: build, validate and verify an Agentic Resource Discovery (ARD) manifest."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 keywords = ["ard", "agentic-resource-discovery", "agent-discovery", "mcp",
             "mcp-server", "model-context-protocol", "ai-agents", "a2a",
-            "discovery", "registry", "well-known", "llm-tools", "agentic-ai"]
+            "discovery", "registry", "well-known", "llm-tools", "agentic-ai",
+            "ai-agent-discovery", "agent-registry", "ard-manifest",
+            "ai-catalog", "agent-tools", "tool-discovery"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",
