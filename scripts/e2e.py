@@ -505,7 +505,7 @@ def t_stats_exposes_history_counts():
 def t_publishers_index():
     s, h = _html("/publishers/")
     assert s == 200, s
-    assert h.count('href="/publishers/') >= 40, "too few publishers listed"
+    assert h.count('href="/publishers/') >= 150, "publisher list is not complete"
     assert "ard.json" in h, "page does not explain what a manifest is"
 
 
@@ -513,6 +513,22 @@ def t_publisher_page_renders():
     s, h = _html("/publishers/zapier.com")
     assert s == 200, s
     assert "zapier.com" in h and "declared resources" in h
+
+
+def t_publisher_page_shows_the_full_record():
+    """The page exists because the manifest is machine-only. Show the manifest."""
+    s, h = _html("/publishers/clickhouse.com")
+    assert s == 200, s
+    for needed in ("endpoint:", "identifier:", "urn:air:", "published to be found for",
+                   "with a callable endpoint"):
+        assert needed in h, f"publisher page omits {needed!r}"
+
+
+def t_every_ard_publisher_is_listed():
+    """No editorial filter. A publisher without descriptions is still a publisher."""
+    for host in ("padlet.com", "supademo.com", "dribba.com"):
+        st, _ = _html(f"/publishers/{host}")
+        assert st == 200, f"{host} missing from the list ({st})"
 
 
 def t_publisher_page_never_claims_an_unmade_check():
