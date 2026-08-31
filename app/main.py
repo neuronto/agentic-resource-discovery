@@ -27,8 +27,8 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import (adoption, audit, bench, config, embed, federation, ingest,
-               liveness, search, store, tools_index)
+from . import (adoption, audit, bench, catalog, config, embed, federation,
+               ingest, liveness, render, search, store, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
@@ -317,7 +317,12 @@ async def robots():
 async def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
-            "/registries", "/console", "/blog"]
+            "/registries", "/console", "/blog",
+            # The capability pages and the two measurement pages. These carry
+            # the verified tool surface, which exists on no other site, so they
+            # are the pages most worth discovering.
+            "/tools/", "/bench", "/adoption"]
+    urls += [f"/tools/{slug}" for slug in catalog.published(db())]
     blog = WEB / "blog"
     if blog.exists():
         urls += sorted(f"/blog/{p.stem}" for p in blog.glob("*.html")
@@ -637,12 +642,36 @@ async def tools_endpoint(body: dict) -> JSONResponse:
 
 
 @app.get("/tools")
-async def tools_get(q: str = Query(..., min_length=1),
+async def tools_get(q: str | None = Query(None),
                     limit: int = Query(20, ge=1, le=100),
-                    withSchema: bool = Query(False)) -> JSONResponse:
-    """GET form, so a tool search is a URL an agent can be handed."""
-    return await tools_endpoint({"query": {"text": q}, "limit": limit,
-                                 "withSchema": withSchema})
+                    withSchema: bool = Query(False)):
+    """With `q`, the JSON search API. Without it, the human capability index.
+
+    One URL serving both is deliberate: an agent handed `/tools?q=...` gets data,
+    and a crawler handed `/tools` gets a page it can read.
+    """
+    if q:
+        return await tools_endpoint({"query": {"text": q}, "limit": limit,
+                                     "withSchema": withSchema})
+    html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/tools/", include_in_schema=False)
+async def tools_index_slash():
+    html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/tools/{slug}", include_in_schema=False)
+async def tools_category(slug: str):
+    if slug not in catalog.published(db()):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    html_ = render.cached(f"cat-{slug}", 1800,
+                          lambda: catalog.render_category(db(), slug))
+    if not html_:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
 
 
 # ---------------------------------------------------------------------------
@@ -651,14 +680,31 @@ async def tools_get(q: str = Query(..., min_length=1),
 # stored run keeps the endpoint cheap; running one is an operator action.
 # ---------------------------------------------------------------------------
 
+def _wants_html(request: Request) -> bool:
+    """Content negotiation, biased to JSON.
+
+    A browser or crawler sends `text/html` and gets the page; anything else,
+    including a bare request with no Accept header, gets JSON. Biasing to JSON
+    keeps the published harness link and every existing API client working
+    exactly as before.
+    """
+    a = (request.headers.get("accept") or "").lower()
+    return "text/html" in a and "application/json" not in a
+
+
 @app.get("/bench")
-async def bench_endpoint() -> JSONResponse:
+async def bench_endpoint(request: Request):
     got = bench.latest(db())
     if not got:
         return JSONResponse(status_code=404,
                             content={"error": "no_run_yet",
                                      "detail": "no benchmark has been run on this index"})
-    return JSONResponse(got, headers={"Cache-Control": "public, max-age=900"})
+    if _wants_html(request):
+        html_ = render.cached("bench-html", 900, lambda: catalog.render_bench(got))
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=900",
+                                            "Vary": "Accept"})
+    return JSONResponse(got, headers={"Cache-Control": "public, max-age=900",
+                                      "Vary": "Accept"})
 
 
 # ---------------------------------------------------------------------------
@@ -667,9 +713,15 @@ async def bench_endpoint() -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 @app.get("/adoption")
-async def adoption_endpoint() -> JSONResponse:
-    return JSONResponse(adoption.report(db()),
-                        headers={"Cache-Control": "public, max-age=3600"})
+async def adoption_endpoint(request: Request):
+    rep = adoption.report(db())
+    if _wants_html(request):
+        html_ = render.cached("adoption-html", 3600,
+                              lambda: catalog.render_adoption(rep))
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
+                                            "Vary": "Accept"})
+    return JSONResponse(rep, headers={"Cache-Control": "public, max-age=3600",
+                                      "Vary": "Accept"})
 
 
 @app.get("/blog", include_in_schema=False)
