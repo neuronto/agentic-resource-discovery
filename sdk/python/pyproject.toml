@@ -1,0 +1,16 @@
+[project]
+name = "ard-publish"
+version = "1.0.0"
+description = "Make your API discoverable by AI agents. Build, validate and check an Agentic Resource Discovery manifest."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+keywords = ["ard", "agentic-resource-discovery", "mcp", "ai-agents", "discovery", "a2a"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License"]
+
+[project.scripts]
+ard-publish = "ard_publish.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

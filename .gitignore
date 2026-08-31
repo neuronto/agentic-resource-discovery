@@ -1,0 +1,36 @@
+# local tooling and OS noise
+.claude/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+
+
+# runtime state and anything with credentials in it
+.env
+*.db
+*.db-wal
+*.db-shm
+
+# working notes for outbound submissions, not part of the product
+submissions/
+
+# Deployment configuration stays private. Service units, nginx vhosts and the
+# sync script describe the machine this runs on: paths, ports, resource limits,
+# certificate locations. None of that is any part of the product, and publishing
+# it hands an attacker a map for nothing in return.
+deploy/
+
+# internal working guidance, never published
+CLAUDE.md
+submissions/
+
+# names our own estate, never committed
+.leakpatterns
+
+# internal tooling, never published
+leakscan.sh
+.leakpatterns
+
+# the scanner lives outside this project; it must never ship with it
+**/leakscan.sh
