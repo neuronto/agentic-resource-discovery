@@ -6,7 +6,7 @@ Build, validate and verify an **Agentic Resource Discovery (ARD)** manifest — 
 `/.well-known/ard.json` file that lets AI agents find what you offer at runtime.
 
 ```bash
-pip install ard-publish
+pip install git+https://github.com/neuronto/ard-publish
 ```
 
 ## What this solves
