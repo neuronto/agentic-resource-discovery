@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neuronto — Agentic Resource Discovery (ARD) & MCP index</title>
+<meta name="description" content="Federated Agentic Resource Discovery index. One search finds every MCP server, skill and agent that can do a task, across every public ARD registry.">
+<link rel="canonical" href="https://neuronto.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+<link rel="ard" href="https://neuronto.com/.well-known/ard.json">
+<link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Neuronto">
+<meta property="og:title" content="Neuronto — Agentic Resource Discovery (ARD) registry and MCP index">
+<meta property="og:description" content="One search across every public ARD registry. Find the MCP servers, skills, agents and APIs that can do a task.">
+<meta property="og:url" content="https://neuronto.com/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Neuronto — Agentic Resource Discovery (ARD) registry and MCP index">
+<meta name="twitter:description" content="One search across every public ARD registry.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"Organization","@id":"https://neuronto.com/#org","name":"Neuronto",
+ "url":"https://neuronto.com/","logo":"https://neuronto.com/favicon.svg",
+ "description":"A federated Agentic Resource Discovery registry and index for AI agents."},
+{"@type":"WebSite","@id":"https://neuronto.com/#site","url":"https://neuronto.com/",
+ "name":"Neuronto","publisher":{"@id":"https://neuronto.com/#org"},
+ "potentialAction":{"@type":"SearchAction",
+   "target":{"@type":"EntryPoint","urlTemplate":"https://neuronto.com/?q={search_term_string}"},
+   "query-input":"required name=search_term_string"}},
+{"@type":"WebAPI","@id":"https://neuronto.com/#api","name":"Neuronto Registry API",
+ "description":"Agentic Resource Discovery v0.91 Registry REST API. Search, explore and list agentic resources across every public ARD registry.",
+ "documentation":"https://neuronto.com/api-docs","url":"https://neuronto.com/search",
+ "provider":{"@id":"https://neuronto.com/#org"}},
+{"@type":"SoftwareApplication","name":"Neuronto","applicationCategory":"DeveloperApplication",
+ "operatingSystem":"Any","url":"https://neuronto.com/",
+ "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},
+ "description":"Federated ARD registry and index. Search every public Agentic Resource Discovery registry in one call."},
+{"@type":"FAQPage","@id":"https://neuronto.com/#faq","mainEntity":[
+ {"@type":"Question","name":"What is ARD?","acceptedAnswer":{"@type":"Answer",
+  "text":"ARD stands for Agentic Resource Discovery. It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. ARD answers the question 'what is available for this task?' and then gets out of the way: it is a discovery layer, not a runtime, and it does not replace MCP or A2A."}},
+ {"@type":"Question","name":"What is an agentic resource?","acceptedAnswer":{"@type":"Answer",
+  "text":"An agentic resource is anything an AI client can call to get work done: an MCP server, an A2A agent, a skill, an API or a workflow. ARD describes them in one common envelope so a client can find them regardless of which protocol they speak."}},
+ {"@type":"Question","name":"What is an ARD registry?","acceptedAnswer":{"@type":"Answer",
+  "text":"An ARD registry indexes the resource descriptions that publishers serve on their own domains and answers search queries over them. Publishers describe what they offer at /.well-known/ard.json; registries crawl those manifests and expose a search API. Neuronto is both a registry and a publisher."}},
+ {"@type":"Question","name":"How do AI agents discover tools at runtime?","acceptedAnswer":{"@type":"Answer",
+  "text":"Instead of hard-coding integrations and loading every tool description into the context window, an agent asks a discovery service what can do the task, receives ranked candidates, and connects to the chosen one using that resource's own native protocol. This moves tool selection out of the context window, which is what allows an agent to reach thousands of capabilities."}},
+ {"@type":"Question","name":"How do I make my API discoverable by AI agents?","acceptedAnswer":{"@type":"Answer",
+  "text":"Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, and include representativeQueries on every entry, because that is the field registries build their semantic index from. Neuronto's crawler picks it up automatically; there is no submission form and no allowlist."}},
+ {"@type":"Question","name":"What does federation: auto mean in ARD?","acceptedAnswer":{"@type":"Answer",
+  "text":"The ARD specification defines three federation modes and makes auto the default: a registry queries its peer registries, merges their results with its own, and returns a single unified set. Neuronto implements it with concurrent fan-out under a time budget and reciprocal rank fusion, and reports which upstream registries answered."}}
+]}]}
+</script>
+<style>
+:root{
+  --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
+  --line:#1B1B1E; --line2:#26262A;
+  --fg:#FAFAFA; --fg2:#A5A5AB; --mut:#6C6C74; --dim:#45454C;
+  --pos:#4ADE80; --neg:#F87171; --blue:#5B8DEF;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --display:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --r:8px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  font-size:13.5px;line-height:1.62;font-weight:400;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+a{color:inherit;text-decoration:none}
+::selection{background:#FAFAFA;color:#09090A}
+.wrap{max-width:1140px;margin:0 auto;padding:0 30px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+nav{position:sticky;top:0;z-index:50;height:62px;display:flex;align-items:center;
+  background:rgba(9,9,10,.74);backdrop-filter:blur(18px) saturate(180%);
+  border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:15px;width:100%}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .wm{font-size:15px;font-weight:600;letter-spacing:-.035em}
+.navlinks{display:flex;gap:19px;margin-left:26px;font-size:13px;color:var(--mut)}
+.navlinks a:hover{color:var(--fg)}
+.navsearch{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:var(--r);padding:0 11px;height:34px;
+  min-width:210px;color:var(--mut);cursor:text;transition:border-color .15s}
+.navsearch:hover{border-color:#34343A}
+.navsearch input{flex:1;background:0;border:0;outline:0;color:var(--fg);font-family:inherit;font-size:13px}
+.kbd{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line2);
+  border-radius:4px;padding:1px 5px}
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 15px;border-radius:var(--r);
+  font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;border:1px solid transparent;
+  transition:opacity .15s,border-color .15s;white-space:nowrap}
+.btn--w{background:#FAFAFA;color:#09090A}.btn--w:hover{opacity:.86}
+.btn--g{background:var(--panel);color:var(--fg);border-color:var(--line2)}
+.btn--g:hover{border-color:#3C3C44}
+@media(max-width:860px){.navlinks{display:none}.navsearch{min-width:0;flex:1}}
+@media(max-width:600px){.nav-cta{display:none}}
+
+/* hero — editorial */
+.hero{padding:86px 0 56px;max-width:820px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--mut);margin:0 0 22px;display:flex;align-items:center;gap:10px}
+.eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
+h1.display{font-family:var(--display);font-weight:600;font-size:clamp(2.6rem,6.1vw,4.2rem);
+  line-height:1.04;letter-spacing:-.045em;margin:0 0 22px}
+h1.display em{font-style:normal;color:var(--mut);font-weight:600}
+.lede{font-size:17px;line-height:1.62;color:var(--fg2);font-weight:300;max-width:60ch;margin:0 0 30px}
+.lede b{color:var(--fg);font-weight:500}
+.heroBtns{display:flex;gap:9px;flex-wrap:wrap}
+
+.searchWrap{max-width:700px;margin:44px 0 0}
+.bigsearch{display:flex;align-items:center;gap:11px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:10px;padding:0 15px;height:50px;
+  transition:border-color .15s,box-shadow .15s}
+.bigsearch:focus-within{border-color:#41414A;box-shadow:0 0 0 4px rgba(250,250,250,.035)}
+.bigsearch input{flex:1;background:0;border:0;outline:0;color:var(--fg);font-family:inherit;
+  font-size:15px;font-weight:300}
+.bigsearch input::placeholder{color:var(--mut)}
+.exs{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
+.ex{font-family:var(--mono);font-size:11px;color:var(--mut);background:0;border:1px solid var(--line);
+  border-radius:99px;padding:4px 11px;cursor:pointer;transition:.15s}
+.ex:hover{color:var(--fg2);border-color:var(--line2)}
+
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px}
+.seg button{border:0;background:0;color:var(--mut);font-family:inherit;font-size:12px;font-weight:500;
+  padding:4px 13px;border-radius:99px;cursor:pointer;transition:.15s}
+.seg button[aria-selected="true"]{background:#FAFAFA;color:#09090A}
+.seg button:not([aria-selected="true"]):hover{color:var(--fg2)}
+
+section{padding:52px 0;border-top:1px solid var(--line)}
+.shead{display:flex;align-items:baseline;gap:14px;margin:0 0 20px;flex-wrap:wrap}
+.shead h2{font-family:var(--display);font-size:1.6rem;font-weight:600;letter-spacing:-.032em;margin:0}
+.shead .sp{margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+.prose{max-width:68ch;color:var(--fg2);font-weight:300;font-size:14.5px}
+.prose p{margin:0 0 1.05rem}
+.prose b,.prose strong{color:var(--fg);font-weight:500}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(206px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:17px 18px 12px;background:var(--panel)}
+.card .k{font-size:12.5px;color:var(--fg2)}
+.card .v{font-size:29px;font-weight:500;letter-spacing:-.03em;margin:5px 0 12px;
+  font-variant-numeric:tabular-nums;line-height:1}
+.spark{display:block;width:100%;height:54px}
+
+.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:11px}
+.qbox{border:1px solid var(--line);border-radius:var(--r);padding:19px 21px;background:var(--panel)}
+.qbox h3{font-size:14.5px;font-weight:500;margin:0 0 8px;color:var(--fg)}
+.qbox p{margin:0;color:var(--fg2);font-size:13.5px;font-weight:300;line-height:1.6}
+
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{font-size:11.5px;font-weight:400;color:var(--mut);text-align:left;padding:0 14px 11px;
+  border-bottom:1px solid var(--line)}
+.tbl td{padding:13px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:#0D0D0F}
+.tbl .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
+.tbl .nm{font-weight:500}
+.tbl .ds{color:var(--mut);font-size:12px;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.ico{width:30px;height:30px;border:1px solid var(--line2);border-radius:6px;display:grid;
+  place-items:center;flex:none;background:var(--panel2)}
+.cellflex{display:flex;align-items:center;gap:12px}
+.scroll{overflow-x:auto}.scroll table{min-width:620px}
+.us td{background:#101013}.us td:first-child{color:#FAFAFA;font-weight:500}
+.ok{color:var(--pos)}.no{color:var(--neg)}.dimc{color:var(--dim)}
+
+#out{min-height:20px}
+.rmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px;
+  font-family:var(--mono);font-size:11px;color:var(--mut)}
+.tick{border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+.tick.on{color:var(--fg2);border-color:var(--line2)}.tick.off{color:var(--dim)}
+.tick.hi{color:#09090A;background:#FAFAFA;border-color:#FAFAFA}
+.sc{font-family:var(--mono);font-size:15px;font-weight:500;width:38px;text-align:right;flex:none}
+.badge{font-family:var(--mono);font-size:10px;color:var(--fg2);border:1px solid var(--line2);
+  border-radius:4px;padding:1px 6px;margin-left:7px}
+.src{font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap}
+.empty{color:var(--mut);font-family:var(--mono);font-size:12px;padding:18px 0}
+.dots::after{content:"";animation:d 1.2s steps(4,end) infinite}
+@keyframes d{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
+pre{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:15px 17px;
+  overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.75;margin:0;color:var(--fg2)}
+pre b{color:var(--fg);font-weight:400}pre .u{color:var(--blue)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);font-size:12px}
+.fl{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--mono);font-size:11.5px}
+.fl a:hover{color:var(--fg2)}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="/">
+    <img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
+    <span class="wm">neuronto</span>
+  </a>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a></div>
+  <label class="navsearch">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="navq" placeholder="Search resources…" aria-label="Search">
+    <span class="kbd">⌘K</span>
+  </label>
+  <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
+</div></nav>
+
+<div class="wrap">
+  <div class="hero">
+    <p class="eyebrow">Agentic Resource Discovery</p>
+    <h1 class="display">Every tool an agent<br>can call, <em>in one index.</em></h1>
+    <p class="lede">Neuronto is a federated <b>ARD registry</b>. Ask it what can do a task and it
+    searches its own catalogue <b>and every other public ARD registry at once</b>, then fuses the
+    rankings into a single answer. It currently indexes <b><!--SSR_SENT--></b>.</p>
+    <div class="heroBtns">
+      <a class="btn btn--w" href="/console">Check your domain</a>
+      <a class="btn btn--g" href="/publish">Publish your resource</a>
+    </div>
+
+    <div class="searchWrap">
+      <form class="bigsearch" id="f" autocomplete="off">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--mut)" stroke-width="2">
+          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" placeholder="scrape a website behind cloudflare" aria-label="Find a resource">
+        <button class="btn btn--w" id="btn" type="submit">Search</button>
+      </form>
+      <div class="exs" id="exs"></div>
+    </div>
+  </div>
+  <div id="out"></div>
+</div>
+
+<section id="what"><div class="wrap">
+  <div class="shead"><h2>What is ARD?</h2></div>
+  <div class="prose">
+    <p><b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI
+    agents find the tools, skills, agents and APIs they need, published in June 2026 by a working
+    group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and
+    Snowflake.</p>
+    <p>An <b>agentic resource</b> is anything an AI client can call to get work done: an MCP server,
+    an A2A agent, a skill, an API, a workflow. ARD answers one question, <b>“what is available for
+    this task?”</b>, and then gets out of the way. It is a discovery layer, not a runtime, and it
+    does not replace MCP or A2A: it tells an agent what exists, and the agent connects using the
+    resource's own protocol.</p>
+  </div>
+  <div class="qa" style="margin-top:26px">
+    <div class="qbox"><h3>Why agents need it</h3><p>An agent can only use capabilities someone
+    wired in beforehand, and every tool description competes for space in the context window. That
+    does not survive an ecosystem of thousands of tools. ARD moves selection out of the context
+    window and into a search service.</p></div>
+    <div class="qbox"><h3>How discovery works</h3><p>Publishers describe what they offer at
+    <span class="mono">/.well-known/ard.json</span> on their own domain. Registries crawl those
+    manifests and answer queries over them. Nobody has to be approved by a marketplace to be
+    found.</p></div>
+    <div class="qbox"><h3>What federation means</h3><p>The specification defines three federation
+    modes and makes <span class="mono">auto</span> the default: a registry queries its peers,
+    merges their results and returns one set. Ask once, reach the whole federation.</p></div>
+    <div class="qbox"><h3>Who it is for</h3><p>Agent builders who want to stop hard-coding
+    integrations. API and tool vendors who want to be discoverable without applying anywhere.
+    Platform teams running discovery over their own internal services.</p></div>
+  </div>
+</div></section>
+
+<section id="index"><div class="wrap">
+  <div class="shead"><h2>The index</h2>
+    <div class="sp"><div class="seg" id="segWin" role="tablist">
+      <button role="tab" data-d="7">7d</button><button role="tab" data-d="14">14d</button>
+      <button role="tab" data-d="30" aria-selected="true">30d</button></div></div></div>
+  <div class="cards" id="cards"><!--SSR_CARDS--></div>
+</div></section>
+
+<section id="whats-inside"><div class="wrap">
+  <div class="shead"><h2>What is in the index</h2>
+    <div class="sp"><span class="src"><!--SSR_TOTAL--></span></div></div>
+  <p class="prose" style="margin-bottom:22px">Every entry is a resource an AI client can
+  actually call, held with its endpoint, its description, the queries its publisher says it
+  serves, and which sources carry it. The whole index is queryable over the API with no key
+  and no signup, and browsable page by page through <a href="/agents?pageSize=20">GET /agents</a>.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Kind of resource</th><th class="num">Entries</th><th>What it is</th></tr></thead>
+    <tbody><!--SSR_KINDS--></tbody>
+  </table></div>
+  <h3 style="margin-top:30px">Where it comes from</h3>
+  <p class="prose" style="margin-bottom:18px">Aggregated from every public ARD registry, the
+  official MCP Registry, and our own crawl of the well-known discovery paths. The crawl reaches
+  publishers no other index covers: the only other general crawler in the ecosystem stops at the
+  top 100,000 domains, so anyone smaller is invisible everywhere else.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Source</th><th class="num">Entries</th></tr></thead>
+    <tbody><!--SSR_SOURCES--></tbody>
+  </table></div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="shead"><h2>Publishers</h2><div class="sp"><span class="src" id="pubNote"></span></div></div>
+  <div class="scroll"><table class="tbl" id="pubs">
+    <thead><tr><th>Publisher</th><th class="num">Entries</th><th class="num">Verified live</th><th class="num">Kinds</th></tr></thead>
+    <tbody><!--SSR_PUBS--></tbody></table></div>
+</div></section>
+
+<section id="compare"><div class="wrap">
+  <div class="shead"><h2>Every public ARD registry, measured</h2></div>
+  <p class="prose" style="margin-bottom:20px">Benchmarked 31 August 2026 with the specification's
+  own conformance tool. Precision is top-1 over six queries with unambiguous answers; spread is the
+  average gap between the best and worst score in a result set.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Registry</th><th>Conformance</th><th class="num">Entries</th><th class="num">P@1</th>
+      <th class="num">Spread</th><th class="num">Latency</th><th class="num">federation: auto</th></tr></thead>
+    <tbody>
+      <tr class="us"><td>Neuronto</td><td class="ok">PASS</td><td class="num" id="cmpN"><!--SSR_N--></td>
+        <td class="num">6/6</td><td class="num ok">78</td><td class="num ok">&lt;200ms</td><td class="num ok">yes</td></tr>
+      <tr><td>GitHub Agent Finder</td><td class="no">FAIL</td><td class="num">344</td><td class="num">6/6</td>
+        <td class="num">32.5</td><td class="num">1,970ms</td><td class="num no">no</td></tr>
+      <tr><td>WellKnown</td><td class="dimc">PASS</td><td class="num">1,239</td><td class="num">6/6</td>
+        <td class="num no">6.7</td><td class="num">401ms</td><td class="num no">no</td></tr>
+      <tr><td>Hugging Face Discover</td><td class="dimc">PASS</td><td class="num">412</td><td class="num no">0/6</td>
+        <td class="num">40.8</td><td class="num">1,712ms</td><td class="num no">no</td></tr>
+      <tr><td>Desvela</td><td class="dimc">PASS</td><td class="num">93</td><td class="num">2/6</td>
+        <td class="num">39.7</td><td class="num">213ms</td><td class="num no">no</td></tr>
+    </tbody></table></div>
+</div></section>
+
+<section id="api"><div class="wrap">
+  <div class="shead"><h2>Use it</h2><div class="sp"><span class="src">ARD v0.91 · no key, no signup</span></div></div>
+  <div class="grid2">
+    <div>
+      <h3 style="margin-bottom:10px">Search the federation</h3>
+      <pre>curl -s <span class="u">https://neuronto.com/search</span> \
+  -H <b>'content-type: application/json'</b> \
+  -d <b>'{"query":{"text":"scrape a website"},
+       "federation":"auto"}'</b></pre>
+    </div>
+    <div id="publish">
+      <h3 style="margin-bottom:10px">Install as an MCP server</h3>
+      <pre>claude mcp add --transport http \
+  neuronto <span class="u">https://neuronto.com/mcp</span></pre>
+      <p class="prose" style="margin:14px 0 0;font-size:13px">Publishing? Serve an ARD manifest at
+      <span class="mono">/.well-known/ard.json</span> with
+      <span class="mono">representativeQueries</span> on every entry. The crawler finds it. No
+      submission form, no allowlist.</p>
+    </div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
+  <div style="max-width:70ch">An Agentic Resource Discovery registry, index and publisher.
+  Relevance scores are semantic only and are never a trust, compliance or safety rating.</div>
+</div></footer>
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>Number(n||0).toLocaleString("en-US");
+
+function bars(series,{h=54,gap=1.6}={}){
+  const d=series&&series.length?series:[0];
+  const max=Math.max(...d,1), n=d.length, w=100/n;
+  return `<svg class="spark" viewBox="0 0 100 ${h}" preserveAspectRatio="none" aria-hidden="true">`+
+    d.map((v,i)=>{const bh=Math.max(v>0?7:1.5,(v/max)*(h-4));
+      return `<rect x="${(i*w+gap/2).toFixed(3)}%" y="${(h-bh).toFixed(2)}" width="${(w-gap).toFixed(3)}%"
+        height="${bh.toFixed(2)}" rx=".7" fill="${v>0?"#D4D4D8":"#202024"}"/>`}).join("")+`</svg>`;
+}
+
+let STATS=null, WIN=30;
+async function load(days){
+  WIN=days;
+  try{ STATS=await (await fetch("/stats?days="+days)).json(); }catch(e){ return; }
+  const s=STATS.series||{};
+  $("#cards").innerHTML=[
+    ["Resources indexed",fmt(STATS.entries),s.indexed],
+    ["Publishers",fmt(STATS.publishers),s.indexed],
+    ["Verified live",fmt(STATS.live),s.probed],
+    ["Registries federated",fmt(((STATS.federation||{}).upstreams||[]).length+1),s.searches],
+  ].map(([k,v,ser])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div>${bars(ser)}</div>`).join("");
+  const el=$("#cmpN"); if(el) el.textContent=fmt(STATS.entries);
+  $("#pubs tbody").innerHTML=(STATS.publishers_top||[]).map(p=>`<tr>
+    <td><div class="cellflex"><span class="ico">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8A8A92" stroke-width="1.8">
+        <rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
+      </span><div><div class="nm">${esc(p.publisher)}</div>
+      <div class="ds">${esc((p.kinds||[]).join(" · "))}</div></div></div></td>
+    <td class="num">${fmt(p.entries)}</td>
+    <td class="num" style="color:${p.live?"var(--pos)":"var(--dim)"}">${fmt(p.live)}</td>
+    <td class="num" style="color:var(--mut)">${(p.kinds||[]).length}</td></tr>`).join("");
+  $("#pubNote").textContent=`top ${(STATS.publishers_top||[]).length} of ${fmt(STATS.publishers)}`;
+}
+load(30);
+$$("#segWin button").forEach(b=>b.onclick=()=>{
+  $$("#segWin button").forEach(x=>x.removeAttribute("aria-selected"));
+  b.setAttribute("aria-selected","true"); load(+b.dataset.d);});
+
+const EX=["scrape a website behind cloudflare","query a postgres database","send an email",
+  "generate an image","post a message to slack","transcribe audio","read a pdf"];
+EX.forEach(e=>{const b=document.createElement("button");b.className="ex";b.type="button";
+  b.textContent=e;b.onclick=()=>{$("#q").value=e;run()};$("#exs").appendChild(b)});
+addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();$("#q").focus()}});
+$("#navq").addEventListener("focus",()=>$("#q").focus());
+
+const p=new URLSearchParams(location.search).get("q");
+if(p){$("#q").value=p;}
+
+let busy=false;
+async function run(){
+  const q=$("#q").value.trim(); if(!q||busy) return;
+  busy=true; $("#btn").disabled=true;
+  $("#out").innerHTML='<div class="empty"><span class="dots">searching every registry</span></div>';
+  const t0=performance.now();
+  try{
+    const r=await fetch("/search",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({query:{text:q},federation:"auto",pageSize:12})});
+    const ms=Math.round(performance.now()-t0), d=await r.json();
+    const res=d.results||[], fed=(d.federation&&d.federation.registries)||[];
+    const head=`<div class="rmeta"><span class="tick hi">${ms}ms</span>
+      <span class="tick on">${res.length} results</span>`+
+      fed.map(f=>`<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${f.ok?" · "+f.results:" · timeout"}</span>`).join("")+`</div>`;
+    if(!res.length){$("#out").innerHTML=head+'<div class="empty">No match. Try describing the task more plainly.</div>';return}
+    $("#out").innerHTML=head+`<div class="scroll"><table class="tbl"><tbody>`+res.map(e=>{
+      const url=e.url||"", host=url?url.replace(/^https?:\/\//,"").split("/")[0]:"";
+      const kind=(e.type||"").replace("application/","").replace(/\+json$/,"").replace("-card","");
+      return `<tr><td style="width:100%"><div class="cellflex">
+        <span class="sc">${e.score==null?"—":e.score}</span>
+        <div style="min-width:0"><div class="nm">${esc(e.displayName||e.identifier)}${kind?`<span class="badge">${esc(kind)}</span>`:""}</div>
+        ${e.description?`<div class="ds">${esc(e.description)}</div>`:""}</div></div></td>
+        <td class="num"><span class="src">${esc(host)}</span></td>
+        <td class="num"><span class="src">${esc((e.source||"").replace(/^https?:\/\//,"").split("/")[0])}</span></td></tr>`}).join("")
+      +`</tbody></table></div>`;
+    load(WIN);
+  }catch(err){$("#out").innerHTML='<div class="empty">Search failed. Try again.</div>'}
+  finally{busy=false;$("#btn").disabled=false}
+}
+$("#f").addEventListener("submit",e=>{e.preventDefault();run()});
+if(p) run();
+</script>
+</body></html>

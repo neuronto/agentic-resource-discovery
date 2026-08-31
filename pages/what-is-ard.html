@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How to publish an ARD manifest and be found by agents</title>
-<meta name="description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<link rel="canonical" href="https://neuronto.com/publish">
+<title>What is ARD? Agentic Resource Discovery explained</title>
+<meta name="description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
+<link rel="canonical" href="https://neuronto.com/what-is-ard">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="How to publish an ARD manifest and be found by agents">
-<meta property="og:description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<meta property="og:url" content="https://neuronto.com/publish">
+<meta property="og:title" content="What is ARD? Agentic Resource Discovery explained">
+<meta property="og:description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
+<meta property="og:url" content="https://neuronto.com/what-is-ard">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/publish", "url": "https://neuronto.com/publish", "name": "How to publish an ARD manifest and be found by agents", "description": "Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I make my API discoverable by AI agents?", "acceptedAnswer": {"@type": "Answer", "text": "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."}}, {"@type": "Question", "name": "Do I need to submit my API anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."}}, {"@type": "Question", "name": "What is the most common mistake when publishing an ARD manifest?", "acceptedAnswer": {"@type": "Answer", "text": "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."}}, {"@type": "Question", "name": "What media type should I use for an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/what-is-ard", "url": "https://neuronto.com/what-is-ard", "name": "What is ARD? Agentic Resource Discovery explained", "description": "ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does ARD stand for?", "acceptedAnswer": {"@type": "Answer", "text": "ARD stands for Agentic Resource Discovery. It is an open specification for how AI agents discover the tools, skills, agents and APIs they can call, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake."}}, {"@type": "Question", "name": "Is ARD the same as MCP?", "acceptedAnswer": {"@type": "Answer", "text": "No. MCP is a runtime protocol for calling a tool; ARD is a discovery layer that runs before invocation. ARD tells an agent what exists and where, and the agent then connects using the resource's own protocol, which may be MCP, A2A or a plain HTTP API. They are complementary, not competing."}}, {"@type": "Question", "name": "What is an agentic resource?", "acceptedAnswer": {"@type": "Answer", "text": "An agentic resource is anything an AI client can call to get work done: an MCP server, an A2A agent, a skill, an API or a workflow. ARD describes them all in one common envelope, using an IANA media type to say what each artifact is without constraining its internal schema."}}, {"@type": "Question", "name": "Who maintains the ARD specification?", "acceptedAnswer": {"@type": "Answer", "text": "The specification lives at agenticresourcediscovery.org and in the ards-project/ard-spec repository under Apache-2.0. Its authors are Junjie Bu of Google, R.V. Guha, and Shaun Smith of Hugging Face, with contributions acknowledged from AWS, Cisco, Databricks, GitHub, GoDaddy, Microsoft, Nvidia, Salesforce and Snowflake."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -193,76 +193,58 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
-<p class="eyebrow">For publishers</p>
-<h1>How to publish an ARD manifest</h1>
-<p class="answer">Serve a JSON manifest at <b><code>/.well-known/ard.json</code></b> on your domain listing what you offer, add an <code>Agentmap:</code> line to robots.txt and a <code>&lt;link rel="ard"&gt;</code> tag, and put <b>2 to 5 representative queries on every entry</b>. Registries crawl it from there. There is no submission form and no allowlist.</p>
+<p class="eyebrow">Agentic Resource Discovery</p>
+<h1>What is ARD?</h1>
+<p class="answer"><b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. It answers one question, <b>“what is available for this task?”</b>, and then gets out of the way.</p>
 
-<h2>Step 1: write the manifest</h2>
-<p>The whole document is a spec version, an optional host block, and an array of entries.</p>
-<pre>{
-  "specVersion": "1.0",
-  "host": {
-    "displayName": "Example Inc",
-    "identifier": "did:web:example.com"
-  },
-  "entries": [
-    {
-      "identifier": "urn:air:example.com:mcp:weather",
-      "displayName": "Weather API",
-      "type": "application/mcp-server-card+json",
-      "url": "https://example.com/.well-known/mcp/server-card.json",
-      "description": "Current conditions and forecasts for any location.",
-      "representativeQueries": [
-        "what is the weather in Berlin",
-        "will it rain in London tomorrow"
-      ],
-      "tags": ["weather", "forecast"]
-    }
-  ]
-}</pre>
-<p>The identifier is a domain-anchored URN: <code>urn:air:&lt;your-domain&gt;:&lt;namespace&gt;:&lt;name&gt;</code>.
-The publisher segment has to be a domain you control, because that is what publisher-authority
-binding checks.</p>
+<h2>The problem ARD solves</h2>
+<p>Today an agent can only use capabilities that somebody wired in beforehand. Every tool has to be
+integrated by hand, and every tool description has to sit in the context window competing for space
+with the actual work. That model does not survive an ecosystem of thousands of tools, let alone
+millions.</p>
+<p>ARD moves the selection problem out of the context window and into a search service. It is the
+same shift the early web made when it went from curated link directories to search engines: you stop
+maintaining a list of everything and start asking a question.</p>
 
-<h2>Step 2: get representativeQueries right</h2>
-<p>This is the field that decides whether you are findable, and it is the one most often left out.</p>
-<p>Registries build their semantic index from it. An entry without representative queries is a valid
-catalogue entry that <b>no search will ever return</b>. The specification's own conformance tool
-flags its absence for exactly that reason.</p>
-<p>Write 2 to 5, phrased the way someone asks for the thing, not the way you describe it:</p>
-<table><thead><tr><th>Weak</th><th>Strong</th></tr></thead><tbody>
-<tr><td>"weather data platform"</td><td>"will it rain in London tomorrow"</td></tr>
-<tr><td>"enterprise document intelligence"</td><td>"read this PDF and pull out the invoice total"</td></tr>
-<tr><td>"scalable web extraction"</td><td>"scrape a website that blocks bots"</td></tr>
+<h2>How ARD works</h2>
+<p>There are two sides, and the specification is deliberately small on both.</p>
+<h3>Publishers describe what they offer</h3>
+<p>A publisher serves a JSON manifest at <code>/.well-known/ard.json</code> on their own domain. Each
+entry names one resource: an identifier, a display name, an IANA media type saying what kind of thing
+it is, a URL, a description, and <b>representative queries</b> phrased the way a person would ask.</p>
+<p>Nobody approves this. There is no marketplace to apply to and no allowlist. Publishing on your own
+domain is the whole mechanism, which is why the specification calls the model web-native.</p>
+<h3>Registries index and answer</h3>
+<p>A registry crawls those manifests and exposes a search API. An agent asks in plain language, the
+registry returns ranked candidates, and the agent connects to whichever it picks.</p>
+<pre>POST /search
+{"query": {"text": "scrape a website behind cloudflare"}}</pre>
+
+<h2>The four discovery paths</h2>
+<p>A publisher can advertise entries four ways, and a consumer may check any of them. Serving only
+one makes you invisible to any client that checks another.</p>
+<table><thead><tr><th>Path</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>/.well-known/ard.json</code></td><td>The manifest itself. A conformant consumer <b>MUST</b> fetch this one.</td></tr>
+<tr><td><code>Agentmap:</code> in robots.txt</td><td>The agent-facing counterpart to <code>Sitemap:</code>.</td></tr>
+<tr><td><code>&lt;link rel="ard"&gt;</code></td><td>A tag in the page head, for crawlers that only read HTML.</td></tr>
+<tr><td>DNS service records</td><td>Points at a static entry source or a live registry endpoint.</td></tr>
 </tbody></table>
+<p class="note">The predecessor path <code>/.well-known/ai-catalog.json</code> is still read by
+crawlers written against the earlier draft. Serving both costs one route.</p>
 
-<h2>Step 3: advertise it on all four paths</h2>
-<pre># robots.txt
-Sitemap: https://example.com/sitemap.xml
-<b>Agentmap: https://example.com/.well-known/ard.json</b></pre>
-<pre>&lt;!-- in your &lt;head&gt; --&gt;
-&lt;link rel="ard" href="https://example.com/.well-known/ard.json"&gt;
-&lt;link rel="ai-catalog" href="https://example.com/.well-known/ai-catalog.json"&gt;</pre>
-<p>Serve the same document at <code>/.well-known/ai-catalog.json</code> too. It is the predecessor
-name, and crawlers written against the earlier draft still look there.</p>
+<h2>Federation</h2>
+<p>The specification defines three federation modes and makes <code>auto</code> the default: a
+registry queries its peers, merges their results with its own, and returns one set. The other two are
+<code>referrals</code>, where a registry returns pointers to its peers, and <code>none</code>, where
+it answers only from its own index.</p>
+<p>In practice, when we benchmarked every public ARD registry on 31 August 2026, <b>none of them
+implemented the default mode</b>. Asking for <code>auto</code> returned byte-identical results to
+<code>none</code> on all four.</p>
 
-<h2>Step 4: check that it worked</h2>
-<p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and
-asks every public registry whether they actually return you.</p>
-<pre>pip install ard-publish
-python -m ard_publish validate .well-known/ard.json
-python -m ard_publish check example.com</pre>
-
-<h2>The mistakes that cost you silently</h2>
-<ul>
-<li><b>No representativeQueries.</b> Validates fine, never returned.</li>
-<li><b>The wrong MCP media type.</b> Three spellings are live in the ecosystem. Registries that
-match exactly will drop you. Use <code>application/mcp-server-card+json</code>.</li>
-<li><b>Only one discovery path.</b> A crawler checking robots.txt will never see a manifest that
-exists only at the well-known path.</li>
-<li><b>A description written for humans browsing a marketing page</b> rather than for a machine
-matching a task.</li>
-</ul>
+<h2>Trust is deliberately separate</h2>
+<p>ARD is explicit that a relevance score reflects semantic relevance only and <b>must not</b> be
+read as a trust, compliance or safety judgment. Trust evaluation is decoupled and handled through a
+separate trust manifest, so a registry's ranking can never be mistaken for an endorsement.</p>
 <div class="cta"><p><b>Check your own domain.</b> The console fetches what you
       publish and asks every public registry whether they return you.</p>
       <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>

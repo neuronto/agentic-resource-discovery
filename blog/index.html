@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How AI agents discover tools at runtime (ARD explained)</title>
-<meta name="description" content="Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes that, and the whole mechanism is a single JSON file.">
-<link rel="canonical" href="https://neuronto.com/blog/how-ai-agents-discover-tools">
+<title>Neuronto Blog — Agentic Resource Discovery, measured</title>
+<meta name="description" content="Analysis and walkthroughs on Agentic Resource Discovery, built on our own measurements of every public ARD registry and the MCP ecosystem.">
+<link rel="canonical" href="https://neuronto.com/blog">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="How AI agents discover tools at runtime (ARD explained)">
-<meta property="og:description" content="Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes that, and the whole mechanism is a single JSON file.">
-<meta property="og:url" content="https://neuronto.com/blog/how-ai-agents-discover-tools">
+<meta property="og:title" content="Neuronto Blog — Agentic Resource Discovery, measured">
+<meta property="og:description" content="Analysis and walkthroughs on Agentic Resource Discovery, built on our own measurements of every public ARD registry and the MCP ecosystem.">
+<meta property="og:url" content="https://neuronto.com/blog">
 <meta property="og:image" content="https://neuronto.com/img/discovery.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://neuronto.com/img/discovery.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/how-ai-agents-discover-tools#post", "headline": "How AI agents discover tools at runtime (ARD explained)", "description": "Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes that, and the whole mechanism is a single JSON file.", "image": "https://neuronto.com/img/discovery.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/how-ai-agents-discover-tools", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/how-ai-agents-discover-tools"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do AI agents find tools at runtime?", "acceptedAnswer": {"@type": "Answer", "text": "Instead of hard-coding integrations, an agent queries a discovery service in plain language, receives ranked candidate resources, and connects to the one it picks using that resource's own protocol. The Agentic Resource Discovery specification standardises this: publishers describe resources at /.well-known/ard.json and registries index those descriptions and answer search queries."}}, {"@type": "Question", "name": "Why does loading every tool into the context window not scale?", "acceptedAnswer": {"@type": "Answer", "text": "Each tool description consumes context that would otherwise hold the task, and selection accuracy falls as the number of similar-sounding tools grows. Moving selection into a retrieval service keeps the context window for work and lets the number of reachable capabilities grow without bound."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Blog", "name": "Neuronto Blog", "url": "https://neuronto.com/blog"}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -206,85 +206,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="art">
-<p class="kick">Discovery</p>
-<h1>How AI agents discover tools at runtime</h1>
-<p class="meta">31 August 2026 · 6 min read</p>
-<img class="hero" src="/img/discovery.jpg" alt="A vast dark grid seen in perspective with a scattered few cells glowing white" width="1344" height="768">
-<p class="stand">An agent today can only use capabilities somebody installed for it in advance, and every tool description competes for room in the context window. <b>Runtime discovery moves tool selection out of the model and into a search service</b>, the same shift the web made when it stopped curating link directories and started indexing.</p>
-
-<h2>The install-time model, and where it breaks</h2>
-<p>Every agent framework in use today assumes the same thing: before an agent can do something, a
-human wires that capability in. You add an MCP server to a config file, restart, and now the model
-sees another tool description in its context.</p>
-<p>That works at ten tools. At a hundred it starts to hurt, because every description competes for
-the same context the actual task needs. At a thousand it stops working entirely, and not only for
-context reasons: selection accuracy falls as candidates get more similar, which is a retrieval
-problem wearing a prompt-engineering costume.</p>
-<p class="pull">Pre-installing every capability an agent might need is the same bet as bookmarking
-every page you might read.</p>
-
-<h2>What runtime discovery does instead</h2>
-<p>The agent does not carry the catalogue. It asks a question when it needs something:</p>
-<pre>POST /search
-{"query": {"text": "scrape a website behind cloudflare"}}</pre>
-<p>Back comes a ranked list of resources that can do it, each with an endpoint and the protocol it
-speaks. The agent connects to whichever it picks. Nothing was installed in advance, and nothing
-occupied the context window until it was relevant.</p>
-<p>This is what the <a href="/what-is-ard">Agentic Resource Discovery specification</a> standardises.
-It is deliberately small: it describes how resources are published and searched, then gets out of the
-way so invocation happens over MCP, A2A or plain HTTP as it already does.</p>
-
-<h2>Two sides, both trivial</h2>
-<h3>Publishers describe what they offer</h3>
-<p>A JSON manifest at <code>/.well-known/ard.json</code> on your own domain. Each entry names one
-resource and, crucially, carries <b>representative queries</b>: the requests it can serve, phrased
-the way a person would ask.</p>
-<p>Nobody approves this. There is no marketplace to apply to. Publishing on a domain you control is
-the entire mechanism, which is why the specification calls the model web-native.</p>
-<h3>Registries index and answer</h3>
-<p>A registry crawls those manifests and exposes a search API. The interesting design decision is
-that the specification expects <b>many</b> registries rather than one, and defines a federation mode
-so a client can reach them all through any single one.</p>
-<div class="try">
-<h4>Try it on your own resource</h4>
-<p>Publishing takes one file. This checks whether it worked, across every public registry rather
-than only ours.</p>
-<pre>pip install ard-publish
-python -m ard_publish <b>check</b> yourdomain.com</pre>
-<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
-<a class="btn btn--g" href="/publish">Publishing guide</a></div>
-</div>
-<h2>Why representative queries decide everything</h2>
-<p>This is the part publishers get wrong, and the failure is silent.</p>
-<p>Registries build their semantic index from <code>representativeQueries</code>. An entry without
-them is a valid catalogue entry that <b>no search will ever return</b>. The manifest validates, it
-serves a 200, and it is unfindable. There is no error to notice.</p>
-<table><thead><tr><th>Written for a brochure</th><th>Written for retrieval</th></tr></thead><tbody>
-<tr><td>enterprise document intelligence</td><td>read this PDF and pull out the invoice total</td></tr>
-<tr><td>scalable web extraction platform</td><td>scrape a website that blocks bots</td></tr>
-<tr><td>unified communications API</td><td>send a text message to a phone number</td></tr>
-</tbody></table>
-<p>The right-hand column matches what an agent is actually holding when it goes looking: a task, in
-the user's words, not a category.</p>
-
-<h2>What this changes</h2>
-<p>For agent builders, integrations stop being a build-time decision. You ask for a capability and
-connect to whatever currently serves it best, which also means you are no longer locked to whichever
-vendor you happened to wire in last year.</p>
-<p>For tool vendors, distribution stops depending on being accepted somewhere. You publish on your
-own domain and you are eligible everywhere at once.</p>
-<p>Neither is fully true yet. The ecosystem is early and most clients still ship a fixed tool list.
-But the mechanism exists, it is specified, and it costs one JSON file to join.</p>
-<div class="try">
-<h4>Use Neuronto from your agent</h4>
-<p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
-<pre>curl -s <b>https://neuronto.com/search</b> \
-  -H 'content-type: application/json' \
-  -d '{"query":{"text":"scrape a website"},"federation":"auto"}'</pre>
-<pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
-<div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
-<a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public Agentic Resource Discovery registries the same 26 queries. Thei…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify that registries return you. Plus the …</div></a><a class="pc" href="/blog/most-of-the-agent-web-points-at-nothing"><div class="t">Most of the agent web points at nothing</div><div class="d">We probed registered agent endpoints: on one chain, one of 55 answered. Discovery withou…</div></a></div></article></div>
+<p class="kick">Writing</p><h1>Agent discovery, measured</h1><p class="stand">What we find when we actually test the agent web, and how to make your own resources findable in it.</p><div class="cards3" style="margin-top:34px"><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes that, and the whole m…</div></a><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 6…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify that registries return you. Plus the one mistake that silen…</div></a><a class="pc" href="/blog/most-of-the-agent-web-points-at-nothing"><div class="t">Most of the agent web points at nothing</div><div class="d">We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds …</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>

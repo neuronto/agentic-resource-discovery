@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How to publish an ARD manifest and be found by agents</title>
-<meta name="description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<link rel="canonical" href="https://neuronto.com/publish">
+<title>Every public ARD registry, compared and benchmarked</title>
+<meta name="description" content="Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.">
+<link rel="canonical" href="https://neuronto.com/registries">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="How to publish an ARD manifest and be found by agents">
-<meta property="og:description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<meta property="og:url" content="https://neuronto.com/publish">
+<meta property="og:title" content="Every public ARD registry, compared and benchmarked">
+<meta property="og:description" content="Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.">
+<meta property="og:url" content="https://neuronto.com/registries">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/publish", "url": "https://neuronto.com/publish", "name": "How to publish an ARD manifest and be found by agents", "description": "Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I make my API discoverable by AI agents?", "acceptedAnswer": {"@type": "Answer", "text": "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."}}, {"@type": "Question", "name": "Do I need to submit my API anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."}}, {"@type": "Question", "name": "What is the most common mistake when publishing an ARD manifest?", "acceptedAnswer": {"@type": "Answer", "text": "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."}}, {"@type": "Question", "name": "What media type should I use for an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/registries", "url": "https://neuronto.com/registries", "name": "Every public ARD registry, compared and benchmarked", "description": "Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Which ARD registries exist?", "acceptedAnswer": {"@type": "Answer", "text": "Five public ARD registries exist as of August 2026: Neuronto, GitHub Agent Finder, WellKnown, Hugging Face Discover and Desvela. They differ substantially in conformance, index size, ranking quality and federation support."}}, {"@type": "Question", "name": "Which ARD registry is the largest?", "acceptedAnswer": {"@type": "Answer", "text": "Measured on 31 August 2026, Neuronto held the largest index. Among the incumbents, WellKnown was largest, followed by Hugging Face Discover, GitHub Agent Finder and Desvela."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "The specification defines federation: auto as the default mode, in which a registry queries its peers and merges their results. When tested, none of the four incumbent registries implemented it: asking for auto returned identical results to asking for none."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -193,76 +193,45 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
-<p class="eyebrow">For publishers</p>
-<h1>How to publish an ARD manifest</h1>
-<p class="answer">Serve a JSON manifest at <b><code>/.well-known/ard.json</code></b> on your domain listing what you offer, add an <code>Agentmap:</code> line to robots.txt and a <code>&lt;link rel="ard"&gt;</code> tag, and put <b>2 to 5 representative queries on every entry</b>. Registries crawl it from there. There is no submission form and no allowlist.</p>
+<p class="eyebrow">Measured 31 August 2026</p>
+<h1>Every public ARD registry, compared</h1>
+<p class="answer">There are five public ARD registries. We benchmarked all of them on 31 August 2026 using the specification's own conformance tool. <b>GitHub's Agent Finder fails conformance</b>, one returns nothing for general queries, and <b>none of the four incumbents implements <code>federation: auto</code></b>, the mode the specification makes the default.</p>
 
-<h2>Step 1: write the manifest</h2>
-<p>The whole document is a spec version, an optional host block, and an array of entries.</p>
-<pre>{
-  "specVersion": "1.0",
-  "host": {
-    "displayName": "Example Inc",
-    "identifier": "did:web:example.com"
-  },
-  "entries": [
-    {
-      "identifier": "urn:air:example.com:mcp:weather",
-      "displayName": "Weather API",
-      "type": "application/mcp-server-card+json",
-      "url": "https://example.com/.well-known/mcp/server-card.json",
-      "description": "Current conditions and forecasts for any location.",
-      "representativeQueries": [
-        "what is the weather in Berlin",
-        "will it rain in London tomorrow"
-      ],
-      "tags": ["weather", "forecast"]
-    }
-  ]
-}</pre>
-<p>The identifier is a domain-anchored URN: <code>urn:air:&lt;your-domain&gt;:&lt;namespace&gt;:&lt;name&gt;</code>.
-The publisher segment has to be a domain you control, because that is what publisher-authority
-binding checks.</p>
-
-<h2>Step 2: get representativeQueries right</h2>
-<p>This is the field that decides whether you are findable, and it is the one most often left out.</p>
-<p>Registries build their semantic index from it. An entry without representative queries is a valid
-catalogue entry that <b>no search will ever return</b>. The specification's own conformance tool
-flags its absence for exactly that reason.</p>
-<p>Write 2 to 5, phrased the way someone asks for the thing, not the way you describe it:</p>
-<table><thead><tr><th>Weak</th><th>Strong</th></tr></thead><tbody>
-<tr><td>"weather data platform"</td><td>"will it rain in London tomorrow"</td></tr>
-<tr><td>"enterprise document intelligence"</td><td>"read this PDF and pull out the invoice total"</td></tr>
-<tr><td>"scalable web extraction"</td><td>"scrape a website that blocks bots"</td></tr>
+<h2>The benchmark</h2>
+<p>Conformance is the specification's own tool. Precision is top-1 over six queries with unambiguous
+correct answers. Spread is the average gap between the best and worst score in a result set, which
+measures whether a ranking carries any information at all.</p>
+<table><thead><tr><th>Registry</th><th>Conformance</th><th>P@1</th><th>Spread</th><th>Latency</th><th>federation: auto</th></tr></thead><tbody>
+<tr><td><b>Neuronto</b></td><td>PASS</td><td>6/6</td><td>78</td><td>&lt;200ms</td><td><b>yes</b></td></tr>
+<tr><td>GitHub Agent Finder</td><td><b>FAIL</b></td><td>6/6</td><td>32.5</td><td>1,970ms</td><td>no</td></tr>
+<tr><td>WellKnown</td><td>PASS</td><td>6/6</td><td>6.7</td><td>401ms</td><td>no</td></tr>
+<tr><td>Hugging Face Discover</td><td>PASS</td><td>0/6</td><td>40.8</td><td>1,712ms</td><td>no</td></tr>
+<tr><td>Desvela</td><td>PASS</td><td>2/6</td><td>39.7</td><td>213ms</td><td>no</td></tr>
 </tbody></table>
 
-<h2>Step 3: advertise it on all four paths</h2>
-<pre># robots.txt
-Sitemap: https://example.com/sitemap.xml
-<b>Agentmap: https://example.com/.well-known/ard.json</b></pre>
-<pre>&lt;!-- in your &lt;head&gt; --&gt;
-&lt;link rel="ard" href="https://example.com/.well-known/ard.json"&gt;
-&lt;link rel="ai-catalog" href="https://example.com/.well-known/ai-catalog.json"&gt;</pre>
-<p>Serve the same document at <code>/.well-known/ai-catalog.json</code> too. It is the predecessor
-name, and crawlers written against the earlier draft still look there.</p>
+<h2>What the numbers mean</h2>
+<h3>GitHub Agent Finder fails conformance</h3>
+<p>Its <code>GET /agents</code> endpoint answers 200 with a body that is not a paginated object, and
+the conformance tool marks the registry FAIL on exactly that. It is otherwise the strongest of the
+incumbents on result quality, and it is the default finder in the official connectors.</p>
 
-<h2>Step 4: check that it worked</h2>
-<p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and
-asks every public registry whether they actually return you.</p>
-<pre>pip install ard-publish
-python -m ard_publish validate .well-known/ard.json
-python -m ard_publish check example.com</pre>
+<h3>A score spread of 6.7 cannot rank</h3>
+<p>WellKnown returns accurate top results and holds a large index, but the gap between its best and
+worst result averages under seven points. A client cannot tell a strong match from a weak one, which
+defeats the purpose of returning a score.</p>
 
-<h2>The mistakes that cost you silently</h2>
-<ul>
-<li><b>No representativeQueries.</b> Validates fine, never returned.</li>
-<li><b>The wrong MCP media type.</b> Three spellings are live in the ecosystem. Registries that
-match exactly will drop you. Use <code>application/mcp-server-card+json</code>.</li>
-<li><b>Only one discovery path.</b> A crawler checking robots.txt will never see a manifest that
-exists only at the well-known path.</li>
-<li><b>A description written for humans browsing a marketing page</b> rather than for a machine
-matching a task.</li>
-</ul>
+<h3>Hugging Face Discover is not a general registry</h3>
+<p>It scored zero of six on precision because it indexes only Hugging Face Spaces and Skills. For
+queries about anything else it returns nothing relevant, despite shipping inside an official CLI.</p>
+
+<h3>Nobody implements the default federation mode</h3>
+<p>This is the largest gap in the ecosystem. The specification makes <code>auto</code> the default:
+query your peers, merge, return one set. Tested against all four incumbents, <code>auto</code>
+returned identical results to <code>none</code>, and the only source in every response was the
+registry's own domain.</p>
+<p>Measured across 26 probe queries, the union of all four indexes was <b>68% larger</b> than the
+largest single one. That difference is what a client loses every time it has to pick a registry
+instead of asking one that federates.</p>
 <div class="cta"><p><b>Check your own domain.</b> The console fetches what you
       publish and asks every public registry whether they return you.</p>
       <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>

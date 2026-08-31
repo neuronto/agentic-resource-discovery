@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How to publish an ARD manifest and be found by agents</title>
-<meta name="description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<link rel="canonical" href="https://neuronto.com/publish">
+<title>ARD Console — check if AI agents can discover your domain</title>
+<meta name="description" content="Free Agentic Resource Discovery audit. Check whether AI agents can find your domain, and which ARD registries actually return it. No signup.">
+<link rel="canonical" href="https://neuronto.com/console">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
-<meta property="og:type" content="article">
-<meta property="og:title" content="How to publish an ARD manifest and be found by agents">
-<meta property="og:description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
-<meta property="og:url" content="https://neuronto.com/publish">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ARD Console — can AI agents discover your domain?">
+<meta property="og:description" content="Check your manifest, your conformance, and which registries actually return you.">
+<meta property="og:url" content="https://neuronto.com/console">
+<meta property="og:image" content="https://neuronto.com/img/discovery.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/publish", "url": "https://neuronto.com/publish", "name": "How to publish an ARD manifest and be found by agents", "description": "Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I make my API discoverable by AI agents?", "acceptedAnswer": {"@type": "Answer", "text": "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."}}, {"@type": "Question", "name": "Do I need to submit my API anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."}}, {"@type": "Question", "name": "What is the most common mistake when publishing an ARD manifest?", "acceptedAnswer": {"@type": "Answer", "text": "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."}}, {"@type": "Question", "name": "What media type should I use for an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -154,120 +154,123 @@ pre b{color:var(--fg);font-weight:400}pre .u{color:var(--blue)}
 footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);font-size:12px}
 .fl{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--mono);font-size:11.5px}
 .fl a:hover{color:var(--fg2)}
-</style><style>
-.doc{max-width:74ch;padding:64px 0 40px}
-.doc .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--mut);margin:0 0 18px;display:flex;align-items:center;gap:10px}
-.doc .eyebrow::before{content:"";width:22px;height:1px;background:var(--line2)}
-.doc h1{font-family:var(--serif);font-weight:400;font-size:clamp(2.2rem,5vw,3.3rem);line-height:1.06;
-  letter-spacing:-.018em;margin:0 0 20px}
-.doc .answer{font-size:18px;line-height:1.62;color:var(--fg);font-weight:300;margin:0 0 30px;
-  padding-left:18px;border-left:2px solid var(--line2)}
-.doc .answer b{font-weight:500}
-.doc h2{font-family:var(--serif);font-weight:400;font-size:1.7rem;letter-spacing:-.012em;
-  margin:44px 0 14px;padding-top:22px;border-top:1px solid var(--line)}
-.doc h3{font-size:14.5px;font-weight:600;margin:26px 0 7px}
-.doc p{color:var(--fg2);font-weight:300;font-size:14.8px;line-height:1.68;margin:0 0 1.05rem}
-.doc b,.doc strong{color:var(--fg);font-weight:500}
-.doc ul,.doc ol{color:var(--fg2);font-weight:300;font-size:14.8px;padding-left:20px;margin:0 0 1.05rem}
-.doc li{margin-bottom:.5rem}
-.doc pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:15px 17px;
-  overflow-x:auto;font-family:var(--mono);font-size:12.3px;line-height:1.72;margin:0 0 1.2rem;color:var(--fg2)}
-.doc pre b{color:var(--fg);font-weight:400}
-.doc table{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 1.2rem}
-.doc th{font-size:11.5px;font-weight:400;color:var(--mut);text-align:left;padding:0 12px 10px;
-  border-bottom:1px solid var(--line);font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
-.doc td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--fg2)}
-.doc tr:last-child td{border-bottom:0}
-.doc .cta{border:1px solid var(--line2);border-radius:8px;padding:20px 22px;margin:34px 0 0;
-  background:var(--panel);display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-.doc .cta p{margin:0;flex:1;min-width:220px}
-.note{border-left:2px solid var(--line2);padding:2px 0 2px 16px;margin:0 0 1.2rem;color:var(--mut);font-size:13.5px}
+</style>
+<style>
+.grade{display:flex;align-items:center;gap:20px;margin:0 0 22px}
+.gnum{font-family:var(--display);font-size:60px;font-weight:600;line-height:1;letter-spacing:-.05em}
+.gsub{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+.bar{height:5px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:8px;max-width:320px}
+.bar i{display:block;height:100%;background:#FAFAFA}
+.chk{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.chk:last-child{border-bottom:0}
+.chk .pt{font-family:var(--mono);font-size:12px;width:62px;flex:none;color:var(--fg2);text-align:right}
+.chk .nm2{flex:1;font-size:13.5px}
+.chk .dt{font-family:var(--mono);font-size:11.5px;color:var(--mut);text-align:right}
+.dot2{width:7px;height:7px;border-radius:50%;flex:none}
+.dot2.y{background:var(--pos)}.dot2.n{background:var(--neg)}.dot2.p{background:#C9A227}
+.find{border-left:2px solid var(--line2);padding:9px 0 9px 14px;margin-bottom:9px}
+.find .sev{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase}
+.find.error .sev{color:var(--neg)}.find.warning .sev{color:#C9A227}.find.info .sev{color:var(--mut)}
+.find p{margin:3px 0 0;font-size:13px;color:var(--fg2);font-weight:300}
+.rec{display:flex;gap:11px;padding:12px 0;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--fg2);font-weight:300}
+.rec:last-child{border-bottom:0}
+.rec .i{font-family:var(--mono);font-size:11px;color:var(--fg);flex:none;width:18px}
 </style>
 </head>
 <body>
+
 <nav><div class="wrap">
   <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span></a>
   <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a></div>
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
-<div class="wrap"><article class="doc">
-<p class="eyebrow">For publishers</p>
-<h1>How to publish an ARD manifest</h1>
-<p class="answer">Serve a JSON manifest at <b><code>/.well-known/ard.json</code></b> on your domain listing what you offer, add an <code>Agentmap:</code> line to robots.txt and a <code>&lt;link rel="ard"&gt;</code> tag, and put <b>2 to 5 representative queries on every entry</b>. Registries crawl it from there. There is no submission form and no allowlist.</p>
 
-<h2>Step 1: write the manifest</h2>
-<p>The whole document is a spec version, an optional host block, and an array of entries.</p>
-<pre>{
-  "specVersion": "1.0",
-  "host": {
-    "displayName": "Example Inc",
-    "identifier": "did:web:example.com"
-  },
-  "entries": [
-    {
-      "identifier": "urn:air:example.com:mcp:weather",
-      "displayName": "Weather API",
-      "type": "application/mcp-server-card+json",
-      "url": "https://example.com/.well-known/mcp/server-card.json",
-      "description": "Current conditions and forecasts for any location.",
-      "representativeQueries": [
-        "what is the weather in Berlin",
-        "will it rain in London tomorrow"
-      ],
-      "tags": ["weather", "forecast"]
-    }
-  ]
-}</pre>
-<p>The identifier is a domain-anchored URN: <code>urn:air:&lt;your-domain&gt;:&lt;namespace&gt;:&lt;name&gt;</code>.
-The publisher segment has to be a domain you control, because that is what publisher-authority
-binding checks.</p>
+<div class="wrap">
+  <div class="hero" style="padding:70px 0 40px">
+    <p class="eyebrow">ARD Console</p>
+    <h1 class="display" style="font-size:clamp(2.2rem,5.1vw,3.4rem)">Can AI agents<br><em>discover you?</em></h1>
+    <p class="lede">Check any domain: whether its manifest is reachable on all four discovery paths,
+    whether it satisfies the specification, and <b>which registries actually return it</b>. That
+    last one is what decides if an agent ever finds you, and nothing else measures it.</p>
+    <form class="bigsearch" id="af" style="max-width:560px" autocomplete="off">
+      <input id="dom" placeholder="example.com" aria-label="Domain to audit">
+      <button class="btn btn--w" id="ab" type="submit">Audit</button>
+    </form>
+    <p class="src" style="margin-top:11px">Free, no signup. Takes about fifteen seconds.</p>
+  </div>
+  <div id="rep"></div>
+</div>
 
-<h2>Step 2: get representativeQueries right</h2>
-<p>This is the field that decides whether you are findable, and it is the one most often left out.</p>
-<p>Registries build their semantic index from it. An entry without representative queries is a valid
-catalogue entry that <b>no search will ever return</b>. The specification's own conformance tool
-flags its absence for exactly that reason.</p>
-<p>Write 2 to 5, phrased the way someone asks for the thing, not the way you describe it:</p>
-<table><thead><tr><th>Weak</th><th>Strong</th></tr></thead><tbody>
-<tr><td>"weather data platform"</td><td>"will it rain in London tomorrow"</td></tr>
-<tr><td>"enterprise document intelligence"</td><td>"read this PDF and pull out the invoice total"</td></tr>
-<tr><td>"scalable web extraction"</td><td>"scrape a website that blocks bots"</td></tr>
-</tbody></table>
-
-<h2>Step 3: advertise it on all four paths</h2>
-<pre># robots.txt
-Sitemap: https://example.com/sitemap.xml
-<b>Agentmap: https://example.com/.well-known/ard.json</b></pre>
-<pre>&lt;!-- in your &lt;head&gt; --&gt;
-&lt;link rel="ard" href="https://example.com/.well-known/ard.json"&gt;
-&lt;link rel="ai-catalog" href="https://example.com/.well-known/ai-catalog.json"&gt;</pre>
-<p>Serve the same document at <code>/.well-known/ai-catalog.json</code> too. It is the predecessor
-name, and crawlers written against the earlier draft still look there.</p>
-
-<h2>Step 4: check that it worked</h2>
-<p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and
-asks every public registry whether they actually return you.</p>
-<pre>pip install ard-publish
-python -m ard_publish validate .well-known/ard.json
-python -m ard_publish check example.com</pre>
-
-<h2>The mistakes that cost you silently</h2>
-<ul>
-<li><b>No representativeQueries.</b> Validates fine, never returned.</li>
-<li><b>The wrong MCP media type.</b> Three spellings are live in the ecosystem. Registries that
-match exactly will drop you. Use <code>application/mcp-server-card+json</code>.</li>
-<li><b>Only one discovery path.</b> A crawler checking robots.txt will never see a manifest that
-exists only at the well-known path.</li>
-<li><b>A description written for humans browsing a marketing page</b> rather than for a machine
-matching a task.</li>
-</ul>
-<div class="cta"><p><b>Check your own domain.</b> The console fetches what you
-      publish and asks every public registry whether they return you.</p>
-      <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
-  <div>An Agentic Resource Discovery registry, index and publisher.</div>
+  <div>The console is read-only. It fetches what you already publish and asks the public
+  registries whether they return you.</div>
 </div></footer>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const PATHNAMES={well_known:"/.well-known/ard.json",legacy:"/.well-known/ai-catalog.json",
+  agentmap:"Agentmap: in robots.txt",link_tag:'<link rel="ard"> in <head>'};
+let busy=false;
+async function audit(){
+  const d=$("#dom").value.trim(); if(!d||busy) return;
+  busy=true; $("#ab").disabled=true;
+  $("#rep").innerHTML='<div class="empty"><span class="dots">fetching your manifest and asking every registry</span></div>';
+  try{
+    const r=await fetch("/audit",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({domain:d})});
+    const j=await r.json();
+    if(j.error){$("#rep").innerHTML=`<div class="empty">${esc(j.detail||j.error)}</div>`;return}
+    const s=j.score;
+    $("#rep").innerHTML=`
+      <section style="border-top:1px solid var(--line);padding-top:34px">
+        <div class="grade">
+          <div><div class="gnum">${s.grade}</div></div>
+          <div style="flex:1">
+            <div class="gsub">${esc(j.domain)} · agent discoverability</div>
+            <div style="font-size:22px;font-weight:500;margin-top:2px">${s.total}<span style="color:var(--mut);font-size:15px">/100</span></div>
+            <div class="bar"><i style="width:${s.total}%"></i></div>
+          </div>
+        </div>
+        <div style="margin:26px 0 34px">
+          ${s.breakdown.map(b=>`<div class="chk">
+            <span class="dot2 ${b.points===b.max?"y":b.points===0?"n":"p"}"></span>
+            <span class="pt">${b.points}/${b.max}</span>
+            <span class="nm2">${esc(b.check)}</span>
+            <span class="dt">${esc(b.detail)}</span></div>`).join("")}
+        </div>
+
+        <div class="shead"><h2>Which registries return you</h2></div>
+        <div class="scroll"><table class="tbl"><thead><tr><th>Registry</th>
+          <th class="num">Returned for</th><th class="num">Status</th></tr></thead><tbody>
+          ${j.coverage.map(c=>`<tr><td class="nm">${esc(c.registry)}</td>
+            <td class="num">${c.returned_for} of ${c.queries}</td>
+            <td class="num ${c.indexed?"ok":"no"}">${c.indexed?"indexed":"not returned"}</td></tr>`).join("")}
+        </tbody></table></div>
+
+        <div class="shead" style="margin-top:34px"><h2>Discovery paths</h2></div>
+        <div>${Object.entries(j.discovery).map(([k,v])=>`<div class="chk">
+          <span class="dot2 ${v.found?"y":"n"}"></span>
+          <span class="nm2 mono" style="font-size:12.5px">${esc(PATHNAMES[k]||k)}</span>
+          <span class="dt">${v.found?"found":(v.status?"HTTP "+v.status:"not found")}</span></div>`).join("")}</div>
+
+        ${j.conformance.findings.length?`<div class="shead" style="margin-top:34px"><h2>Conformance</h2>
+          <div class="sp"><span class="src">${j.conformance.entries} entries</span></div></div>
+          <div>${j.conformance.findings.slice(0,14).map(f=>`<div class="find ${f.severity}">
+            <div class="sev">${f.severity}${f.entry?" · "+esc(f.entry):""}</div>
+            <p>${esc(f.message)}</p></div>`).join("")}</div>`:""}
+
+        <div class="shead" style="margin-top:34px"><h2>What to do next</h2></div>
+        <div>${j.recommendations.map((r,i)=>`<div class="rec"><span class="i">${i+1}</span>
+          <span>${esc(r)}</span></div>`).join("")}</div>
+      </section>`;
+  }catch(e){$("#rep").innerHTML='<div class="empty">Audit failed. Try again.</div>'}
+  finally{busy=false;$("#ab").disabled=false}
+}
+$("#af").addEventListener("submit",e=>{e.preventDefault();audit()});
+const q=new URLSearchParams(location.search).get("domain");
+if(q){$("#dom").value=q;audit()}
+</script>
 </body></html>
