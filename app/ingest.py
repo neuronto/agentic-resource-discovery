@@ -202,8 +202,15 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
         checked += 1
         if data:
             for e in data["entries"]:
-                if isinstance(e, dict) and store.upsert_entry(conn, e, "crawl"):
-                    got += 1
+                if not isinstance(e, dict):
+                    continue
+                try:
+                    if store.upsert_entry(conn, e, "crawl"):
+                        got += 1
+                except Exception:
+                    # A malformed entry from a third party is expected, not
+                    # exceptional. Skip it and keep crawling.
+                    continue
             if got:
                 found += 1; entries += got
         pending.append((dom, int(time.time()), "found" if got else "none", got))

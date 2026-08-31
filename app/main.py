@@ -432,10 +432,40 @@ def _render_home() -> str:
     sentence = (f'{_fmt(c["entries"])} resources from {_fmt(c["publishers"])} '
                 f'publishers, {_fmt(c["live"])} verified to respond')
 
+    # Composition of the index, rendered server side for the same reason as the
+    # figures above: a consumer that does not run JavaScript is exactly the one
+    # deciding whether this index is worth citing.
+    KINDS = {
+        "mcp-server": "MCP servers an agent can connect to and call as tools",
+        "skill":      "Skills and agent skill bundles",
+        "a2a-agent":  "A2A agents with a published agent card",
+        "openapi":    "REST APIs described by an OpenAPI document",
+        "registry":   "Other ARD registries, which is how federation is discovered",
+        "catalog":    "Nested catalogues pointing at further entries",
+        "doc":        "Machine-readable documentation such as llms.txt",
+        "package":    "Published packages",
+        "other":      "Resources whose type is outside the named set",
+    }
+    kinds = "".join(
+        f'<tr><td class="nm">{k}</td><td class="num">{_fmt(n)}</td>'
+        f'<td style="color:var(--mut)">{KINDS.get(k, "")}</td></tr>'
+        for k, n in c["families"].items() if n)
+
+    SRC = {"mcp-registry": "Official MCP Registry", "wellknown": "WellKnown",
+           "huggingface": "Hugging Face Discover", "github": "GitHub Agent Finder",
+           "desvela": "Desvela", "crawl": "Our own crawl of the discovery paths"}
+    sources = "".join(
+        f'<tr><td class="nm">{SRC.get(k, k)}</td><td class="num">{_fmt(n)}</td></tr>'
+        for k, n in c["sources"].items())
+
     return (html.replace("<!--SSR_CARDS-->", cards)
                 .replace("<!--SSR_PUBS-->", rows)
                 .replace("<!--SSR_N-->", _fmt(c["entries"]))
-                .replace("<!--SSR_SENT-->", sentence))
+                .replace("<!--SSR_SENT-->", sentence)
+                .replace("<!--SSR_KINDS-->", kinds)
+                .replace("<!--SSR_SOURCES-->", sources)
+                .replace("<!--SSR_TOTAL-->",
+                         f'{_fmt(c["entries"])} entries · {_fmt(c["publishers"])} publishers'))
 
 
 @app.get("/", include_in_schema=False)
