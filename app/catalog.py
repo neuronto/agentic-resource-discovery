@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from typing import Any
 
 from . import config, render
@@ -548,26 +549,34 @@ def sitemap_urls(conn: sqlite3.Connection) -> list[str]:
 # reference for a category while the category is still 178 publishers wide.
 # ---------------------------------------------------------------------------
 
-def publisher_list(conn: sqlite3.Connection, min_entries: int = 2) -> list[dict]:
-    """ARD-native publishers, that is, ones we found by crawling their domain."""
+def publisher_list(conn: sqlite3.Connection) -> list[dict]:
+    """Every ARD-native publisher we have found, with no editorial filter.
+
+    An earlier version required two entries and a written description, which
+    excluded 48 of 178 publishers including real companies like padlet.com and
+    supademo.com whose only fault was declaring resources without prose. Whether
+    a publisher writes descriptions is their stylistic choice; it is not grounds
+    to leave them off a list of who publishes ARD at all. The point of this list
+    is completeness, and a curated subset is a worse artefact than the full set.
+    """
     rows = conn.execute(
         """SELECT publisher,
                   COUNT(*) n,
                   SUM(CASE WHEN live=1 THEN 1 ELSE 0 END) live,
                   SUM(CASE WHEN live IS NOT NULL THEN 1 ELSE 0 END) probed,
-                  SUM(CASE WHEN description IS NOT NULL AND length(description)>40
-                           THEN 1 ELSE 0 END) desc_ok,
+                  SUM(COALESCE(mcp_tools,0)) tools,
                   GROUP_CONCAT(DISTINCT type_family) fams,
+                  MIN(first_seen) first_seen,
                   MAX(updated_at) seen
            FROM entries
            WHERE sources LIKE '%crawl%' AND publisher IS NOT NULL AND publisher != ''
              AND publisher NOT LIKE '%modelcontextprotocol%'
            GROUP BY publisher
-           HAVING n >= ? AND desc_ok > 0
-           ORDER BY n DESC""", (min_entries,)).fetchall()
+           ORDER BY n DESC, publisher""").fetchall()
     return [{"publisher": r["publisher"], "entries": r["n"], "live": r["live"],
-             "probed": r["probed"], "kinds": sorted((r["fams"] or "").split(",")),
-             "seen": r["seen"]} for r in rows]
+             "probed": r["probed"], "tools": r["tools"] or 0,
+             "kinds": sorted(x for x in (r["fams"] or "").split(",") if x),
+             "first_seen": r["first_seen"], "seen": r["seen"]} for r in rows]
 
 
 _pubset: set[str] | None = None
@@ -581,88 +590,129 @@ def publisher_ok(conn: sqlite3.Connection, host: str) -> bool:
 
 
 def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
+    """One publisher's complete declared surface.
+
+    Everything we hold about them, because the whole reason this page can exist
+    is that their manifest is machine-only and nobody has rendered it: the URN,
+    the endpoint, the declared type, the version, what the publisher says it is
+    for, verified tool counts, and reachability where we have checked.
+    """
     if not publisher_ok(conn, host):
         return None
     rows = conn.execute(
-        """SELECT identifier, display_name, description, type_raw, type_family,
-                  url, live, live_checked, rep_queries, mcp_tools, mcp_status
-           FROM entries WHERE lower(publisher)=? ORDER BY type_family, display_name""",
-        (host.lower(),)).fetchall()
+        """SELECT identifier, identifier_raw, display_name, description, type_raw,
+                  type_family, url, live, live_status, live_checked, live_ms,
+                  rep_queries, tags, capabilities, version, trust_identity,
+                  mcp_tools, mcp_status, mcp_server_name, first_seen
+           FROM entries WHERE lower(publisher)=?
+           ORDER BY type_family, display_name""", (host.lower(),)).fetchall()
     if not rows:
         return None
     n = len(rows)
     live = sum(1 for r in rows if r["live"] == 1)
     probed = sum(1 for r in rows if r["live"] is not None)
     tools = sum((r["mcp_tools"] or 0) for r in rows)
+    with_url = sum(1 for r in rows if r["url"])
+    first = min((r["first_seen"] or 0) for r in rows) or None
     kinds: dict[str, int] = {}
     for r in rows:
         k = r["type_family"] or "other"
         kinds[k] = kinds.get(k, 0) + 1
 
-    body_rows = []
+    def _j(v):
+        try:
+            return [str(x) for x in json.loads(v or "[]")]
+        except Exception:
+            return []
+
+    cards = []
     for r in rows:
         tag = ""
         if r["mcp_status"] == "auth":
             tag = '<span class="tag auth">auth required</span>'
         elif r["live"] == 1:
-            tag = '<span class="tag ok">answers</span>'
+            tag = f'<span class="tag ok">answers{f" in {r["live_ms"]}ms" if r["live_ms"] else ""}</span>'
         elif r["live"] == 0:
-            tag = '<span class="tag">no response when last checked</span>'
+            tag = (f'<span class="tag">no response'
+                   f'{f" ({r["live_status"]})" if r["live_status"] else ""}</span>')
         else:
             tag = '<span class="tag">not yet checked</span>'
-        rq = ""
-        try:
-            qs = json.loads(r["rep_queries"] or "[]")[:3]
-            if qs:
-                rq = ('<div class="dsc"><span style="color:var(--dim)">published for:</span> '
-                      + " · ".join(esc(str(x)[:60]) for x in qs) + "</div>")
-        except Exception:
-            pass
-        d = (r["description"] or "")[:200]
-        body_rows.append(
+        if r["mcp_tools"]:
+            tag += f'<span class="tag ok">{r["mcp_tools"]} verified tools</span>'
+        if r["version"]:
+            tag += f'<span class="tag">v{esc(r["version"])}</span>'
+
+        meta = []
+        if r["url"]:
+            meta.append(f'<div class="dsc"><span style="color:var(--dim)">endpoint:</span> '
+                        f'<code>{esc(r["url"])}</code></div>')
+        meta.append(f'<div class="dsc"><span style="color:var(--dim)">identifier:</span> '
+                    f'<code>{esc(r["identifier_raw"] or r["identifier"])}</code></div>')
+        rq = _j(r["rep_queries"])[:4]
+        if rq:
+            meta.append('<div class="dsc"><span style="color:var(--dim)">published to be '
+                        'found for:</span> ' + " · ".join(esc(x[:70]) for x in rq) + "</div>")
+        tg = (_j(r["tags"]) + _j(r["capabilities"]))[:8]
+        if tg:
+            meta.append('<div class="dsc">' + " ".join(
+                f'<span class="tag">{esc(t[:28])}</span>' for t in tg) + "</div>")
+        if r["trust_identity"]:
+            meta.append(f'<div class="dsc"><span style="color:var(--dim)">trust identity:'
+                        f'</span> <code>{esc(str(r["trust_identity"])[:80])}</code></div>')
+        d = (r["description"] or "").strip()
+        if len(d) > 260:
+            d = d[:257] + "..."
+        cards.append(
             f'<tr><td><span class="tn">{esc(r["display_name"] or r["identifier"])}</span>{tag}'
-            f'{f"<div class=dsc>{esc(d)}</div>" if d else ""}{rq}</td>'
+            f'{f"<div class=dsc>{esc(d)}</div>" if d else ""}'
+            + "".join(meta) + "</td>"
             f'<td><span class="sv">{esc(r["type_raw"] or r["type_family"] or "")}</span></td></tr>')
 
     kindline = " · ".join(f"{fmt(v)} {KIND_LABEL.get(k, k).lower()}"
                           for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))
-    title = f"{host}: what it publishes for AI agents"
-    desc = (f"{host} publishes an ARD manifest declaring {fmt(n)} agentic resources "
-            f"({kindline}). Read from its own /.well-known/ard.json, with endpoint "
-            f"reachability checked.")
+    seen_h = (time.strftime("%d %B %Y", time.gmtime(first)) if first else "recently")
+    title = f"{host}: what it publishes for AI agents (ARD manifest)"
+    desc = (f"{host} publishes an ARD manifest declaring {fmt(n)} agentic resources: "
+            f"{kindline}. Endpoints, identifiers, and what each is published to be found "
+            f"for, read from the domain's own /.well-known/ard.json.")
     body = f"""
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / <a href="/publishers/">ARD publishers</a> / {esc(host)}</div>
   <h1>{esc(host)}</h1>
   <p class="lede">{esc(host)} publishes an Agentic Resource Discovery manifest at
   <code>/.well-known/ard.json</code>, declaring what an AI agent can call on this domain.
-  Everything below is read from that manifest. Endpoint reachability is our own check.</p>
+  Everything below is read from that file. First seen by our crawler on {seen_h}.</p>
   <ul class="statline">
     <li><b>{fmt(n)}</b>declared resources</li>
+    <li><b>{fmt(with_url)}</b>with a callable endpoint</li>
     <li><b>{(fmt(live) + "</b>answering of " + fmt(probed) + " checked") if probed
             else ("not yet</b>checked for reachability")}</li>
     <li><b>{fmt(tools)}</b>verified tools</li>
-    <li><b>{len(kinds)}</b>kinds</li>
   </ul>
 </div>
 
 <table class="tl">
-  <thead><tr><th>Resource</th><th>Declared type</th></tr></thead>
-  <tbody>{"".join(body_rows)}</tbody>
+  <thead><tr><th>Declared resource</th><th>Type</th></tr></thead>
+  <tbody>{"".join(cards)}</tbody>
 </table>
 
 <div class="note">
-  Source: <code>https://{esc(host)}/.well-known/ard.json</code>, this publisher's own file.
-  {("Of the resources listed, " + fmt(probed) + " have been probed for reachability so far.")
+  <b>Source</b>: <code>https://{esc(host)}/.well-known/ard.json</code>, this publisher's own
+  file. Identifiers are reproduced exactly as published.
+  {("Of the resources listed, " + fmt(probed) + " have been probed for reachability.")
    if probed else "None of these endpoints has been probed for reachability yet, so nothing here says whether they answer."}
-  "Answers" and "no response" describe only whether an endpoint replied when we last probed
-  it: services go down and come back, and an entry is demoted rather than removed. None of
-  this is a trust, quality or safety rating.
-  <br><br>Search these and every other indexed resource at
+  "Answers" and "no response" describe only whether an endpoint replied when last probed:
+  services go down and come back, and an entry is demoted rather than removed. None of this
+  is a trust, quality or safety rating.
+  <br><br>
+  Search this publisher's resources alongside every other indexed resource at
   <code>{esc(B)}/search</code>, or connect an agent to <code>{esc(B)}/mcp</code>.
+  If this is your domain, the <a href="/console">free console</a> shows what a registry
+  sees when it reads your manifest.
 </div>
 """
     return render.page(title, desc, body, f"{B}/publishers/{host}")
+
 
 
 def render_publishers_index(conn: sqlite3.Connection) -> str:
