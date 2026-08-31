@@ -4,7 +4,7 @@
   "path": "/what-is-ard",
   "eyebrow": "Agentic Resource Discovery",
   "title": "What is ARD? Agentic Resource Discovery explained",
-  "desc": "ARD stands for Agentic Resource Discovery, an open specification for how AI agents find tools, skills, agents and APIs at runtime. What it is, who backs it, and how it works.",
+  "desc": "ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.",
   "h1": "What is ARD?",
   "answer": "<b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. It answers one question, <b>“what is available for this task?”</b>, and then gets out of the way.",
   "faq": [
@@ -31,8 +31,8 @@
   "slug": "publish",
   "path": "/publish",
   "eyebrow": "For publishers",
-  "title": "How to publish an ARD manifest and make your API discoverable by AI agents",
-  "desc": "A step-by-step guide to publishing an Agentic Resource Discovery manifest so AI agents can find your API, MCP server or skill. Includes a working example and the mistakes that silently cost you.",
+  "title": "How to publish an ARD manifest and be found by agents",
+  "desc": "Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.",
   "h1": "How to publish an ARD manifest",
   "answer": "Serve a JSON manifest at <b><code>/.well-known/ard.json</code></b> on your domain listing what you offer, add an <code>Agentmap:</code> line to robots.txt and a <code>&lt;link rel=\"ard\"&gt;</code> tag, and put <b>2 to 5 representative queries on every entry</b>. Registries crawl it from there. There is no submission form and no allowlist.",
   "faq": [
@@ -59,8 +59,8 @@
   "slug": "submit-mcp-server",
   "path": "/submit-mcp-server",
   "eyebrow": "For publishers",
-  "title": "Where to submit your MCP server so AI agents can find it",
-  "desc": "Every place you can list an MCP server in 2026, which ones accept open submissions, and which are curated with no route in. Measured, not guessed.",
+  "title": "Where to submit your MCP server: every registry in 2026",
+  "desc": "Every place to list an MCP server, which take open submissions, which are curated with no route in, and why ARD registries need no submission at all.",
   "h1": "Where do I submit my MCP server?",
   "answer": "There are two routes. <b>Directories</b> such as the official MCP Registry, Glama, Smithery and mcpmarket take direct submissions. <b>ARD registries</b> require no submission at all: publish a manifest at <code>/.well-known/ard.json</code> and crawlers find you. Some prominent catalogues, including GitHub's Agent Finder, are curated and have <b>no published submission route</b>.",
   "faq": [
@@ -84,7 +84,7 @@
   "path": "/registries",
   "eyebrow": "Measured 31 August 2026",
   "title": "Every public ARD registry, compared and benchmarked",
-  "desc": "Conformance, index size, precision, latency and federation support for every public Agentic Resource Discovery registry, measured with the specification's own tool.",
+  "desc": "Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.",
   "h1": "Every public ARD registry, compared",
   "answer": "There are five public ARD registries. We benchmarked all of them on 31 August 2026 using the specification's own conformance tool. <b>GitHub's Agent Finder fails conformance</b>, one returns nothing for general queries, and <b>none of the four incumbents implements <code>federation: auto</code></b>, the mode the specification makes the default.",
   "faq": [

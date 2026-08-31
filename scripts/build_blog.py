@@ -156,9 +156,9 @@ def build(a, style, others):
 
 
 def build_index(arts, style):
-    html = HEAD.format(title="Neuronto Blog — agent discovery, measured",
-                       desc="Analysis and walkthroughs on Agentic Resource Discovery, built on "
-                            "measurements of every public ARD registry.",
+    html = HEAD.format(title="Neuronto Blog — Agentic Resource Discovery, measured",
+                       desc="Analysis and walkthroughs on Agentic Resource Discovery, built on our own "
+                            "measurements of every public ARD registry and the MCP ecosystem.",
                        base=BASE, path="/blog", img="discovery",
                        schema=json.dumps({"@context": "https://schema.org", "@type": "Blog",
                                           "name": "Neuronto Blog", "url": f"{BASE}/blog"}),

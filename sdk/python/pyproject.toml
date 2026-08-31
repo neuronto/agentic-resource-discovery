@@ -1,12 +1,26 @@
 [project]
 name = "ard-publish"
 version = "1.0.0"
-description = "Make your API discoverable by AI agents. Build, validate and check an Agentic Resource Discovery manifest."
+description = "Make your API, MCP server or AI agent discoverable by AI agents. Build, validate and verify an Agentic Resource Discovery (ARD) manifest."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
-keywords = ["ard", "agentic-resource-discovery", "mcp", "ai-agents", "discovery", "a2a"]
-classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License"]
+keywords = ["ard", "agentic-resource-discovery", "agent-discovery", "mcp",
+            "mcp-server", "model-context-protocol", "ai-agents", "a2a",
+            "discovery", "registry", "well-known", "llm-tools", "agentic-ai"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://neuronto.com"
+Documentation = "https://neuronto.com/publish"
+Repository = "https://github.com/neuronto/ard-publish"
+Specification = "https://agenticresourcediscovery.org/spec"
 
 [project.scripts]
 ard-publish = "ard_publish.__main__:main"

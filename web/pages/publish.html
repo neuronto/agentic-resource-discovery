@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How to publish an ARD manifest and make your API discoverable by AI agents</title>
-<meta name="description" content="A step-by-step guide to publishing an Agentic Resource Discovery manifest so AI agents can find your API, MCP server or skill. Includes a working example and the mistakes that silently cost you.">
+<title>How to publish an ARD manifest and be found by agents</title>
+<meta name="description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
 <link rel="canonical" href="https://neuronto.com/publish">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="How to publish an ARD manifest and make your API discoverable by AI agents">
-<meta property="og:description" content="A step-by-step guide to publishing an Agentic Resource Discovery manifest so AI agents can find your API, MCP server or skill. Includes a working example and the mistakes that silently cost you.">
+<meta property="og:title" content="How to publish an ARD manifest and be found by agents">
+<meta property="og:description" content="Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.">
 <meta property="og:url" content="https://neuronto.com/publish">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/publish", "url": "https://neuronto.com/publish", "name": "How to publish an ARD manifest and make your API discoverable by AI agents", "description": "A step-by-step guide to publishing an Agentic Resource Discovery manifest so AI agents can find your API, MCP server or skill. Includes a working example and the mistakes that silently cost you.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I make my API discoverable by AI agents?", "acceptedAnswer": {"@type": "Answer", "text": "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."}}, {"@type": "Question", "name": "Do I need to submit my API anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."}}, {"@type": "Question", "name": "What is the most common mistake when publishing an ARD manifest?", "acceptedAnswer": {"@type": "Answer", "text": "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."}}, {"@type": "Question", "name": "What media type should I use for an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/publish", "url": "https://neuronto.com/publish", "name": "How to publish an ARD manifest and be found by agents", "description": "Step by step: write the Agentic Resource Discovery manifest, advertise it on all four paths, and verify registries return you. With the common mistake.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I make my API discoverable by AI agents?", "acceptedAnswer": {"@type": "Answer", "text": "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."}}, {"@type": "Question", "name": "Do I need to submit my API anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."}}, {"@type": "Question", "name": "What is the most common mistake when publishing an ARD manifest?", "acceptedAnswer": {"@type": "Answer", "text": "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."}}, {"@type": "Question", "name": "What media type should I use for an MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -249,7 +249,7 @@ name, and crawlers written against the earlier draft still look there.</p>
 <h2>Step 4: check that it worked</h2>
 <p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and
 asks every public registry whether they actually return you.</p>
-<pre>pip install ard-publish
+<pre>pip install ard-publish   # github.com/neuronto/ard-publish
 python -m ard_publish validate .well-known/ard.json
 python -m ard_publish check example.com</pre>
 

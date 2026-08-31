@@ -8,8 +8,8 @@
   "read": 6,
   "kicker": "Discovery",
   "alt": "A vast dark grid seen in perspective with a scattered few cells glowing white",
-  "title": "How AI agents discover tools at runtime",
-  "desc": "Agents can only use what someone wired in beforehand. Runtime discovery changes that, and the mechanism is one JSON file.",
+  "title": "How AI agents discover tools at runtime (ARD explained)",
+  "desc": "Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes that, and the whole mechanism is a single JSON file.",
   "h1": "How AI agents discover tools at runtime",
   "stand": "An agent today can only use capabilities somebody installed for it in advance, and every tool description competes for room in the context window. <b>Runtime discovery moves tool selection out of the model and into a search service</b>, the same shift the web made when it stopped curating link directories and started indexing.",
   "faq": [
@@ -34,7 +34,7 @@
   "kicker": "Federation, original measurement",
   "alt": "Four separate constellations of white points weaving into one braided channel",
   "title": "Why every ARD registry gives you a different answer",
-  "desc": "We asked all four public ARD registries the same 26 queries. Their combined index was 68% larger than the best single one.",
+  "desc": "We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.",
   "h1": "Why every ARD registry gives you a different answer",
   "stand": "We put the same 26 queries to every public ARD registry. The <b>union of their indexes was 68% larger than the largest single one</b>, and not one of them implemented <code>federation: auto</code>, the mode the specification makes the default. Asking for it returned byte-identical results to asking for nothing.",
   "faq": [
@@ -59,7 +59,7 @@
   "kicker": "Tutorial",
   "alt": "A single luminous node broadcasting thin signal lines outward across black",
   "title": "Publish your AI agent or MCP server to ARD in 10 minutes",
-  "desc": "Write the manifest, advertise it four ways, verify registries return you. Plus the mistake that silently costs you everything.",
+  "desc": "Write the manifest, advertise it four ways, verify that registries return you. Plus the one mistake that silently costs you every search result.",
   "h1": "Publish your AI agent to ARD in 10 minutes",
   "stand": "Three steps: write one JSON file, advertise it four ways, then <b>verify that registries actually return you</b>, because publishing and being indexed are different things and only one of them gets you found.",
   "faq": [
@@ -83,8 +83,8 @@
   "read": 6,
   "kicker": "Index quality, original measurement",
   "alt": "A dark lattice of fine white lines converging toward a single bright aperture",
-  "title": "Most of the agent web points at nothing",
-  "desc": "We probed registered agent endpoints. On one chain, one of 55 answered. Discovery without verification builds an index of dead links.",
+  "title": "Most of the agent web points at nothing | ARD index quality",
+  "desc": "We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds an index of dead links.",
   "h1": "Most of the agent web points at nothing",
   "stand": "We sampled registered agent endpoints and asked a simple question: does anything answer? On one chain, <b>one of 55 declared endpoints responded</b>. Self-published discovery scales beautifully and rots just as fast, and an index that does not check becomes a directory of dead links.",
   "faq": [

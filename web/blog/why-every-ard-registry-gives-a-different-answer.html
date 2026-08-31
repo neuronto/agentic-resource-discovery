@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Why every ARD registry gives you a different answer</title>
-<meta name="description" content="We asked all four public ARD registries the same 26 queries. Their combined index was 68% larger than the best single one.">
+<meta name="description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
 <link rel="canonical" href="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Why every ARD registry gives you a different answer">
-<meta property="og:description" content="We asked all four public ARD registries the same 26 queries. Their combined index was 68% larger than the best single one.">
+<meta property="og:description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
 <meta property="og:url" content="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
 <meta property="og:image" content="https://neuronto.com/img/federation.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer#post", "headline": "Why every ARD registry gives you a different answer", "description": "We asked all four public ARD registries the same 26 queries. Their combined index was 68% larger than the best single one.", "image": "https://neuronto.com/img/federation.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does federation: auto mean in ARD?", "acceptedAnswer": {"@type": "Answer", "text": "The ARD specification defines three federation modes and makes auto the default: a registry queries upstream registries, merges their results with its own, and returns a single unified set. The alternatives are referrals, where the registry returns pointers to its peers, and none, where it answers only from its own index."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "As measured on 31 August 2026, none of the four incumbent public registries implemented the default federation mode. Requesting federation: auto returned results identical to federation: none on every one, with each registry's own domain as the only source."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer#post", "headline": "Why every ARD registry gives you a different answer", "description": "We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.", "image": "https://neuronto.com/img/federation.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does federation: auto mean in ARD?", "acceptedAnswer": {"@type": "Answer", "text": "The ARD specification defines three federation modes and makes auto the default: a registry queries upstream registries, merges their results with its own, and returns a single unified set. The alternatives are referrals, where the registry returns pointers to its peers, and none, where it answers only from its own index."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "As measured on 31 August 2026, none of the four incumbent public registries implemented the default federation mode. Requesting federation: auto returned results identical to federation: none on every one, with each registry's own domain as the only source."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -239,7 +239,7 @@ writing, unimplemented across the entire ecosystem.</p>
 <h4>Try it on your own resource</h4>
 <p>Publishing takes one file. This checks whether it worked, across every public registry rather
 than only ours.</p>
-<pre>pip install ard-publish
+<pre>pip install ard-publish   # github.com/neuronto/ard-publish
 python -m ard_publish <b>check</b> yourdomain.com</pre>
 <div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
 <a class="btn btn--g" href="/publish">Publishing guide</a></div>
@@ -290,7 +290,7 @@ page</a>.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Runtime discovery changes that, an…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify registries return you. Plus the mista…</div></a><a class="pc" href="/blog/most-of-the-agent-web-points-at-nothing"><div class="t">Most of the agent web points at nothing</div><div class="d">We probed registered agent endpoints. On one chain, one of 55 answered. Discovery withou…</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes…</div></a><a class="pc" href="/blog/publish-your-agent-to-ard-in-10-minutes"><div class="t">Publish your AI agent to ARD in 10 minutes</div><div class="d">Write the manifest, advertise it four ways, verify that registries return you. Plus the …</div></a><a class="pc" href="/blog/most-of-the-agent-web-points-at-nothing"><div class="t">Most of the agent web points at nothing</div><div class="d">We probed registered agent endpoints: on one chain, one of 55 answered. Discovery withou…</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/neuronto">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>
