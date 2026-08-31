@@ -273,6 +273,28 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <div class="cards" id="cards"><!--SSR_CARDS--></div>
 </div></section>
 
+<section id="whats-inside"><div class="wrap">
+  <div class="shead"><h2>What is in the index</h2>
+    <div class="sp"><span class="src"><!--SSR_TOTAL--></span></div></div>
+  <p class="prose" style="margin-bottom:22px">Every entry is a resource an AI client can
+  actually call, held with its endpoint, its description, the queries its publisher says it
+  serves, and which sources carry it. The whole index is queryable over the API with no key
+  and no signup, and browsable page by page through <a href="/agents?pageSize=20">GET /agents</a>.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Kind of resource</th><th class="num">Entries</th><th>What it is</th></tr></thead>
+    <tbody><!--SSR_KINDS--></tbody>
+  </table></div>
+  <h3 style="margin-top:30px">Where it comes from</h3>
+  <p class="prose" style="margin-bottom:18px">Aggregated from every public ARD registry, the
+  official MCP Registry, and our own crawl of the well-known discovery paths. The crawl reaches
+  publishers no other index covers: the only other general crawler in the ecosystem stops at the
+  top 100,000 domains, so anyone smaller is invisible everywhere else.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Source</th><th class="num">Entries</th></tr></thead>
+    <tbody><!--SSR_SOURCES--></tbody>
+  </table></div>
+</div></section>
+
 <section><div class="wrap">
   <div class="shead"><h2>Publishers</h2><div class="sp"><span class="src" id="pubNote"></span></div></div>
   <div class="scroll"><table class="tbl" id="pubs">

@@ -95,6 +95,30 @@ def init(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _s(v: Any) -> str | None:
+    """Coerce any manifest value to something SQLite can bind.
+
+    Publishers write what they like. A field the specification describes as a
+    string arrives as an object, a number, or a list, and an unbindable type
+    raises mid-transaction and kills the batch. Nothing about third-party input
+    is guaranteed, so nothing is trusted.
+    """
+    if v is None or isinstance(v, str):
+        return v or None
+    if isinstance(v, (int, float, bool)):
+        return str(v)
+    if isinstance(v, dict):
+        # the common shape: {"id": "did:web:..."} or {"value": "..."}
+        for k in ("identity", "id", "value", "did", "uri", "url"):
+            got = v.get(k)
+            if isinstance(got, str) and got:
+                return got
+        return json.dumps(v, ensure_ascii=False)[:300]
+    if isinstance(v, (list, tuple)):
+        return _s(v[0]) if v else None
+    return str(v)[:300]
+
+
 def _jlist(v: Any) -> str:
     if v is None: return "[]"
     if isinstance(v, str): v = [v]
@@ -117,13 +141,14 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
     now = int(time.time())
     fam = media_family(e.get("type") or e.get("mediaType"))
     pub = publisher_of(ident, url)
-    trust = (e.get("trustManifest") or {}).get("identity") if isinstance(e.get("trustManifest"), dict) else None
+    tm = e.get("trustManifest")
+    trust = _s(tm.get("identity")) if isinstance(tm, dict) else None
 
     row = conn.execute("SELECT * FROM entries WHERE key=?", (key,)).fetchone()
     if row:
         srcs = set(json.loads(row["sources"] or "[]")); srcs.add(source)
         # Keep whichever description is more informative.
-        desc = e.get("description") or ""
+        desc = _s(e.get("description")) or ""
         if len(desc) <= len(row["description"] or ""):
             desc = row["description"]
         rq = json.loads(row["rep_queries"] or "[]")
@@ -141,18 +166,19 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
             tags=?, capabilities=?, rep_queries=?, trust_identity=COALESCE(?,trust_identity),
             version=COALESCE(NULLIF(?,''),version), sources=?, updated_at=?
             WHERE key=?""",
-            (e.get("displayName") or "", desc, e.get("type") or e.get("mediaType") or "",
-             fam, url or "", pub, json.dumps(tags), json.dumps(caps), json.dumps(rq),
-             trust, str(e.get("version") or ""), json.dumps(sorted(srcs)), now, key))
+            (_s(e.get("displayName")) or "", _s(desc) or "", _s(e.get("type") or e.get("mediaType")) or "",
+             fam, _s(url) or "", pub, json.dumps(tags), json.dumps(caps), json.dumps(rq),
+             trust, _s(e.get("version")) or "", json.dumps(sorted(srcs)), now, key))
     else:
         conn.execute("""INSERT INTO entries(key,identifier,identifier_raw,display_name,description,
             type_raw,type_family,url,publisher,tags,capabilities,rep_queries,trust_identity,
             version,sources,first_seen,updated_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (key, ident or url, ident_raw, e.get("displayName") or "", e.get("description") or "",
-             e.get("type") or e.get("mediaType") or "", fam, url or "", pub,
+            (key, _s(ident or url), _s(ident_raw), _s(e.get("displayName")) or "",
+             _s(e.get("description")) or "",
+             _s(e.get("type") or e.get("mediaType")) or "", fam, _s(url) or "", pub,
              _jlist(e.get("tags")), _jlist(e.get("capabilities")), _jlist(e.get("representativeQueries")),
-             trust, str(e.get("version") or ""), json.dumps([source]), now, now))
+             trust, _s(e.get("version")) or "", json.dumps([source]), now, now))
     _reindex(conn, key)
     return key
 
@@ -199,12 +225,29 @@ def _source_counts(conn: sqlite3.Connection) -> dict:
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
+def _label(identifier: str | None, url: str | None) -> str | None:
+    """A readable name for an entry whose publisher gave none.
+
+    The specification requires only `identifier` on an entry, so plenty of real
+    manifests omit displayName. Returning null for those makes a listing read as
+    a column of nulls, when the URN's last segment is a perfectly good label.
+    """
+    ident = str(identifier or "")
+    if ident.startswith("urn:"):
+        leaf = ident.rstrip(":").split(":")[-1]
+        if leaf:
+            return leaf.replace("-", " ").replace("_", " ").strip() or ident
+    if url:
+        return str(url).replace("https://", "").replace("http://", "").split("/")[0]
+    return ident or None
+
+
 def row_to_entry(r: sqlite3.Row) -> dict:
     """The public shape. `identifier` is the only term the spec requires."""
     j = lambda s: json.loads(s or "[]")
     out = {
         "identifier": r["identifier"],
-        "displayName": r["display_name"] or None,
+        "displayName": r["display_name"] or _label(r["identifier"], r["url"]),
         "type": r["type_raw"] or None,
         "url": r["url"] or None,
         "description": r["description"] or None,

@@ -78,10 +78,17 @@ _PREFERRED = {
 }
 
 
-def media_family(media_type: str | None) -> str:
-    """Map any spelling to its canonical family, or 'other'."""
+def media_family(media_type: object | None) -> str:
+    """Map any spelling to its canonical family, or 'other'.
+
+    Takes `object` rather than `str` deliberately: this runs on third-party
+    manifests, where a field the specification calls a string arrives as a
+    number, a list or an object often enough to matter.
+    """
     if not media_type:
         return "other"
+    if not isinstance(media_type, str):
+        media_type = str(media_type)
     t = media_type.strip().lower()
     t = t.split(";")[0].strip()          # drop parameters: profile=, charset=
     if t in _LOOKUP:
@@ -123,7 +130,8 @@ def normalize_identifier(ident: str | None) -> str | None:
     """
     if not ident:
         return None
-    s = ident.strip()
+    s = ident if isinstance(ident, str) else str(ident)
+    s = s.strip()
     m = _URN_RE.match(s)
     if not m:
         return s
@@ -133,10 +141,12 @@ def normalize_identifier(ident: str | None) -> str | None:
 
 def publisher_of(ident: str | None, url: str | None = None) -> str | None:
     """The authority segment, which is what publisher-authority binding anchors on."""
-    m = _URN_RE.match((ident or "").strip())
+    m = _URN_RE.match(str(ident or "").strip())
     if m:
         return m.group(2).lower()
     for candidate in (url, ident):
+        candidate = candidate if isinstance(candidate, str) else (
+            str(candidate) if candidate else None)
         if candidate and "://" in candidate:
             host = candidate.split("://", 1)[1].split("/", 1)[0]
             return host.split("@")[-1].split(":")[0].lower() or None
@@ -153,6 +163,6 @@ def dedupe_key(ident: str | None, url: str | None) -> str:
     n = normalize_identifier(ident)
     if n and n.startswith("urn:"):
         return n
-    u = (url or ident or "").strip().lower()
+    u = str(url or ident or "").strip().lower()
     u = re.sub(r"^https?://", "", u).rstrip("/")
     return u
