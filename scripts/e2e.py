@@ -469,6 +469,36 @@ def t_badge_never_implies_trust():
         assert word not in body, f"badge implies trust: {word!r}"
 
 
+# --------------------------------------------------------------------------
+# 10. The accumulating asset: history that cannot be rebuilt later
+# --------------------------------------------------------------------------
+def t_search_records_impressions():
+    """A query must record which entries it returned, not just that it happened.
+
+    Without this the query log can say somebody searched for "pdf" but can never
+    tell a publisher which queries surfaced their resource, which is the whole
+    of any future reporting product.
+    """
+    import time as _t
+    marker = f"pdf extraction probe {int(_t.time())}"
+    s, d = post("/search", {"query": {"text": marker}, "federation": "none",
+                            "pageSize": 5})
+    assert s == 200, s
+    s2, st = get("/stats")
+    # the search must be visible in the recent log
+    recent = [r.get("q") for r in (st.get("recent") or [])]
+    assert marker in recent, "search was not logged at all"
+
+
+def t_stats_exposes_history_counts():
+    """Observation history must be non-empty and visible."""
+    s, d = get("/stats")
+    h = d.get("history") or {}
+    assert h.get("observations", 0) > 0, \
+        "no observation history recorded; liveness is being overwritten"
+    assert "impressions" in h, "impressions not reported"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
