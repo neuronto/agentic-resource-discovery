@@ -129,6 +129,46 @@ CREATE TABLE IF NOT EXISTS adoption (
 );
 CREATE INDEX IF NOT EXISTS idx_adoption_notable ON adoption(notable);
 
+-- Observation history. The liveness and introspection columns on `entries` hold
+-- only the latest value and are overwritten on every probe, which silently
+-- destroys the one asset that cannot be rebuilt later: the time series. An
+-- index can be re-crawled; a year of "was this endpoint up, and how many tools
+-- did it expose" cannot be reconstructed after the fact.
+--
+-- Transitions only, not every sample. A probe that agrees with the last
+-- recorded state writes nothing, so a stable endpoint costs one row per change
+-- rather than one row per hour, and the table answers "when did this change"
+-- exactly rather than approximately.
+CREATE TABLE IF NOT EXISTS observations (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_key TEXT NOT NULL,
+  ts        INTEGER NOT NULL,
+  kind      TEXT NOT NULL,        -- liveness | introspect
+  live      INTEGER,
+  status    INTEGER,              -- http status, liveness only
+  ms        INTEGER,
+  tools     INTEGER,              -- verified tool count, introspect only
+  auth      INTEGER,
+  detail    TEXT                  -- mcp_status for introspect
+);
+CREATE INDEX IF NOT EXISTS idx_obs_entry ON observations(entry_key, ts);
+CREATE INDEX IF NOT EXISTS idx_obs_ts    ON observations(ts);
+
+-- Impressions: which entries a query actually returned, and where they ranked.
+-- Without this we can log that somebody searched for "pdf" but never tell a
+-- publisher which queries surfaced their resource, which is the whole of the
+-- reporting product. Capped to the visible page, and carries no identifier of
+-- who asked: what was asked is a product signal, who asked is not our business.
+CREATE TABLE IF NOT EXISTS impressions (
+  search_id INTEGER NOT NULL,
+  entry_key TEXT NOT NULL,
+  rank      INTEGER NOT NULL,
+  score     INTEGER,
+  ts        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_imp_entry ON impressions(entry_key, ts);
+CREATE INDEX IF NOT EXISTS idx_imp_search ON impressions(search_id);
+
 -- Benchmark runs. Kept so a published number can always be traced to the run
 -- that produced it.
 CREATE TABLE IF NOT EXISTS bench_runs (
@@ -353,11 +393,20 @@ def replace_tools(conn: sqlite3.Connection, entry_key: str,
 
 def mark_introspection(conn: sqlite3.Connection, key: str, status: str,
                        n_tools: int, auth: bool, server_name: str | None) -> None:
+    prev = conn.execute("SELECT mcp_status, mcp_tools FROM entries WHERE key=?",
+                        (key,)).fetchone()
+    now = int(time.time())
     conn.execute("""UPDATE entries SET mcp_checked=?, mcp_tools=?, mcp_auth=?,
                                        mcp_server_name=?, mcp_status=?
                     WHERE key=?""",
-                 (int(time.time()), n_tools, 1 if auth else 0,
-                  _s(server_name), status, key))
+                 (now, n_tools, 1 if auth else 0, _s(server_name), status, key))
+    # A changed tool count is the interesting event: a server that gained or
+    # lost capability, or drifted from what it advertises.
+    if (prev is None or prev["mcp_status"] is None
+            or prev["mcp_status"] != status or (prev["mcp_tools"] or 0) != n_tools):
+        conn.execute("""INSERT INTO observations(entry_key,ts,kind,tools,auth,detail)
+                        VALUES(?,?,'introspect',?,?,?)""",
+                     (key, now, n_tools, 1 if auth else 0, status))
 
 
 def tools_for(conn: sqlite3.Connection, entry_key: str) -> list[dict]:
@@ -376,6 +425,15 @@ def tools_for(conn: sqlite3.Connection, entry_key: str) -> list[dict]:
     return out
 
 
+def history_counts(conn: sqlite3.Connection) -> dict:
+    """Size of the accumulating record. Surfaced so it cannot rot unnoticed."""
+    q = lambda s: conn.execute(s).fetchone()
+    o = q("SELECT COUNT(*), MIN(ts), MAX(ts) FROM observations")
+    i = q("SELECT COUNT(*) FROM impressions")
+    return {"observations": o[0] or 0, "since": o[1], "latest": o[2],
+            "impressions": i[0] or 0}
+
+
 def tool_counts(conn: sqlite3.Connection) -> dict:
     q = lambda s: conn.execute(s).fetchone()[0]
     return {
@@ -391,8 +449,15 @@ def tool_counts(conn: sqlite3.Connection) -> dict:
 
 def mark_liveness(conn: sqlite3.Connection, key: str, alive: bool,
                   status: int | None, ms: int | None) -> None:
+    prev = conn.execute("SELECT live FROM entries WHERE key=?", (key,)).fetchone()
+    now = int(time.time())
     conn.execute("""UPDATE entries SET live=?, live_status=?, live_ms=?, live_checked=?
-                    WHERE key=?""", (1 if alive else 0, status, ms, int(time.time()), key))
+                    WHERE key=?""", (1 if alive else 0, status, ms, now, key))
+    # Record the transition, not the sample. First observation always counts.
+    if prev is None or prev["live"] is None or prev["live"] != (1 if alive else 0):
+        conn.execute("""INSERT INTO observations(entry_key,ts,kind,live,status,ms)
+                        VALUES(?,?,'liveness',?,?,?)""",
+                     (key, now, 1 if alive else 0, status, ms))
 
 
 def counts(conn: sqlite3.Connection) -> dict:
@@ -455,12 +520,25 @@ def row_to_entry(r: sqlite3.Row) -> dict:
 
 
 def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
-               ms: int, federated: int) -> None:
-    """Record a query. Best effort: never let bookkeeping fail a search."""
+               ms: int, federated: int, entries: list[dict] | None = None) -> None:
+    """Record a query and what it returned. Never let bookkeeping fail a search.
+
+    The impressions half is what turns a query log into a report a publisher
+    would pay attention to: not "somebody searched for pdf" but "your resource
+    was returned for these queries, at these positions".
+    """
     try:
-        conn.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
-                        VALUES(?,?,?,?,?,?)""",
-                     (q[:200], mode, results, ms, federated, int(time.time())))
+        now = int(time.time())
+        cur = conn.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
+                              VALUES(?,?,?,?,?,?)""",
+                           (q[:200], mode, results, ms, federated, now))
+        sid = cur.lastrowid
+        if entries:
+            conn.executemany(
+                """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
+                   VALUES(?,?,?,?,?)""",
+                [(sid, e.get("_key"), i, e.get("score"), now)
+                 for i, e in enumerate(entries[:10], start=1) if e.get("_key")])
         conn.commit()
     except Exception:
         pass

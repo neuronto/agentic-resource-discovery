@@ -91,7 +91,8 @@ async def search_endpoint(body: dict) -> JSONResponse:
     out = await search.search(conn, text, flt, page_size, mode)
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
-    store.log_search(conn, text, mode, len(out["results"]), took, fed_ok)
+    store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
+                     entries=out["results"])
     payload: dict[str, Any] = {"results": search.clean(out["results"])}
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
@@ -421,6 +422,7 @@ async def stats(days: int = Query(30, ge=7, le=90)):
         (int(time.time()) - 7 * 86400,)).fetchone()
     return {**c, "upstreams": regs,
             "verified": store.tool_counts(conn),
+            "history": store.history_counts(conn),
             "dense": embed.status(conn),
             "searches_7d": q["n"] or 0,
             "avg_search_ms": round(q["avg_ms"] or 0, 1),
