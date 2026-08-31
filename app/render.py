@@ -114,8 +114,13 @@ def page(title: str, description: str, body: str, canonical: str,
 <meta property="og:description" content="{esc(description)}">
 <meta property="og:url" content="{esc(canonical)}">
 <meta property="og:type" content="website">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
+<meta property="og:image" content="https://neuronto.com/img/discovery.jpg">
+<meta property="og:site_name" content="Neuronto">
+<meta name="twitter:image" content="https://neuronto.com/img/discovery.jpg">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Neuronto verification events" href="https://neuronto.com/feed.xml">
+<link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <style>{css()}{EXTRA_CSS}</style>
 {jsonld}
 </head><body>

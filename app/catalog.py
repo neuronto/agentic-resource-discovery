@@ -525,5 +525,187 @@ def render_adoption(report: dict) -> str:
 
 def sitemap_urls(conn: sqlite3.Connection) -> list[str]:
     """Only pages that actually exist. Never advertise a URL that 404s."""
-    return [f"{B}/tools/"] + [f"{B}/tools/{s}" for s in published(conn)] + \
-           [f"{B}/bench", f"{B}/adoption"]
+    return ([f"{B}/tools/"] + [f"{B}/tools/{s}" for s in published(conn)] +
+            [f"{B}/publishers/"] +
+            [f"{B}/publishers/{p['publisher']}" for p in publisher_list(conn)] +
+            [f"{B}/bench", f"{B}/adoption"])
+
+
+# ---------------------------------------------------------------------------
+# ARD publisher pages.
+#
+# This is a different bet from the capability pages, and from the directory we
+# deliberately did not build. For an MCP server, GitHub is the primary source
+# and mirroring it is a race the primary source wins. For an ARD manifest there
+# is **no page at all**: it is machine-only JSON on somebody's domain, and we
+# measured that publishers like gstcranes.com, built2winweb.com and ultimaluz.com
+# have literally zero pages describing what they publish. Rendering one makes us
+# the primary source rather than a mirror.
+#
+# The whole ARD-native world is ~178 publishers, 2.92 manifests per 1,000 domains
+# crawled. That is small enough to cover completely and far too small to be
+# scaled content. The value is not traffic today; it is being the canonical
+# reference for a category while the category is still 178 publishers wide.
+# ---------------------------------------------------------------------------
+
+def publisher_list(conn: sqlite3.Connection, min_entries: int = 2) -> list[dict]:
+    """ARD-native publishers, that is, ones we found by crawling their domain."""
+    rows = conn.execute(
+        """SELECT publisher,
+                  COUNT(*) n,
+                  SUM(CASE WHEN live=1 THEN 1 ELSE 0 END) live,
+                  SUM(CASE WHEN live IS NOT NULL THEN 1 ELSE 0 END) probed,
+                  SUM(CASE WHEN description IS NOT NULL AND length(description)>40
+                           THEN 1 ELSE 0 END) desc_ok,
+                  GROUP_CONCAT(DISTINCT type_family) fams,
+                  MAX(updated_at) seen
+           FROM entries
+           WHERE sources LIKE '%crawl%' AND publisher IS NOT NULL AND publisher != ''
+             AND publisher NOT LIKE '%modelcontextprotocol%'
+           GROUP BY publisher
+           HAVING n >= ? AND desc_ok > 0
+           ORDER BY n DESC""", (min_entries,)).fetchall()
+    return [{"publisher": r["publisher"], "entries": r["n"], "live": r["live"],
+             "probed": r["probed"], "kinds": sorted((r["fams"] or "").split(",")),
+             "seen": r["seen"]} for r in rows]
+
+
+_pubset: set[str] | None = None
+
+
+def publisher_ok(conn: sqlite3.Connection, host: str) -> bool:
+    global _pubset
+    if _pubset is None:
+        _pubset = {p["publisher"].lower() for p in publisher_list(conn)}
+    return host.lower() in _pubset
+
+
+def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
+    if not publisher_ok(conn, host):
+        return None
+    rows = conn.execute(
+        """SELECT identifier, display_name, description, type_raw, type_family,
+                  url, live, live_checked, rep_queries, mcp_tools, mcp_status
+           FROM entries WHERE lower(publisher)=? ORDER BY type_family, display_name""",
+        (host.lower(),)).fetchall()
+    if not rows:
+        return None
+    n = len(rows)
+    live = sum(1 for r in rows if r["live"] == 1)
+    probed = sum(1 for r in rows if r["live"] is not None)
+    tools = sum((r["mcp_tools"] or 0) for r in rows)
+    kinds: dict[str, int] = {}
+    for r in rows:
+        k = r["type_family"] or "other"
+        kinds[k] = kinds.get(k, 0) + 1
+
+    body_rows = []
+    for r in rows:
+        tag = ""
+        if r["mcp_status"] == "auth":
+            tag = '<span class="tag auth">auth required</span>'
+        elif r["live"] == 1:
+            tag = '<span class="tag ok">answers</span>'
+        elif r["live"] == 0:
+            tag = '<span class="tag">no response when last checked</span>'
+        else:
+            tag = '<span class="tag">not yet checked</span>'
+        rq = ""
+        try:
+            qs = json.loads(r["rep_queries"] or "[]")[:3]
+            if qs:
+                rq = ('<div class="dsc"><span style="color:var(--dim)">published for:</span> '
+                      + " · ".join(esc(str(x)[:60]) for x in qs) + "</div>")
+        except Exception:
+            pass
+        d = (r["description"] or "")[:200]
+        body_rows.append(
+            f'<tr><td><span class="tn">{esc(r["display_name"] or r["identifier"])}</span>{tag}'
+            f'{f"<div class=dsc>{esc(d)}</div>" if d else ""}{rq}</td>'
+            f'<td><span class="sv">{esc(r["type_raw"] or r["type_family"] or "")}</span></td></tr>')
+
+    kindline = " · ".join(f"{fmt(v)} {KIND_LABEL.get(k, k).lower()}"
+                          for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))
+    title = f"{host}: what it publishes for AI agents"
+    desc = (f"{host} publishes an ARD manifest declaring {fmt(n)} agentic resources "
+            f"({kindline}). Read from its own /.well-known/ard.json, with endpoint "
+            f"reachability checked.")
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / <a href="/publishers/">ARD publishers</a> / {esc(host)}</div>
+  <h1>{esc(host)}</h1>
+  <p class="lede">{esc(host)} publishes an Agentic Resource Discovery manifest at
+  <code>/.well-known/ard.json</code>, declaring what an AI agent can call on this domain.
+  Everything below is read from that manifest. Endpoint reachability is our own check.</p>
+  <ul class="statline">
+    <li><b>{fmt(n)}</b>declared resources</li>
+    <li><b>{(fmt(live) + "</b>answering of " + fmt(probed) + " checked") if probed
+            else ("not yet</b>checked for reachability")}</li>
+    <li><b>{fmt(tools)}</b>verified tools</li>
+    <li><b>{len(kinds)}</b>kinds</li>
+  </ul>
+</div>
+
+<table class="tl">
+  <thead><tr><th>Resource</th><th>Declared type</th></tr></thead>
+  <tbody>{"".join(body_rows)}</tbody>
+</table>
+
+<div class="note">
+  Source: <code>https://{esc(host)}/.well-known/ard.json</code>, this publisher's own file.
+  {("Of the resources listed, " + fmt(probed) + " have been probed for reachability so far.")
+   if probed else "None of these endpoints has been probed for reachability yet, so nothing here says whether they answer."}
+  "Answers" and "no response" describe only whether an endpoint replied when we last probed
+  it: services go down and come back, and an entry is demoted rather than removed. None of
+  this is a trust, quality or safety rating.
+  <br><br>Search these and every other indexed resource at
+  <code>{esc(B)}/search</code>, or connect an agent to <code>{esc(B)}/mcp</code>.
+</div>
+"""
+    return render.page(title, desc, body, f"{B}/publishers/{host}")
+
+
+def render_publishers_index(conn: sqlite3.Connection) -> str:
+    pubs = publisher_list(conn)
+    total_domains = conn.execute("SELECT COUNT(*) FROM crawl_seen").fetchone()[0]
+    with_manifest = conn.execute(
+        "SELECT COUNT(*) FROM crawl_seen WHERE entries > 0").fetchone()[0]
+    rows = "".join(
+        f'<tr><td><a href="/publishers/{esc(p["publisher"])}">{esc(p["publisher"])}</a>'
+        f'<div class="dsc">{esc(" · ".join(KIND_LABEL.get(k, k).lower() for k in p["kinds"][:4] if k))}</div></td>'
+        f'<td class="num">{fmt(p["entries"])}</td>'
+        f'<td class="num">{fmt(p["live"]) if p["probed"] else "<span style=color:var(--dim)>not checked</span>"}</td></tr>'
+        for p in pubs)
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / ARD publishers</div>
+  <h1>Who publishes an ARD manifest</h1>
+  <p class="lede">An ARD manifest is a file at <code>/.well-known/ard.json</code> in which a
+  domain declares what an AI agent can call on it. It is machine-readable and, for almost
+  every publisher below, described nowhere else in human-readable form. These pages are that
+  description.</p>
+  <ul class="statline">
+    <li><b>{fmt(len(pubs))}</b>publishers listed</li>
+    <li><b>{fmt(with_manifest)}</b>manifests found</li>
+    <li><b>{fmt(total_domains)}</b>domains crawled</li>
+    <li><b>{round(1000*with_manifest/max(total_domains,1), 2)}</b>manifests per 1,000 domains</li>
+  </ul>
+</div>
+
+<table class="tl">
+  <thead><tr><th>Publisher</th><th class="num">Resources</th><th class="num">Answering</th></tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+
+<div class="note">
+  Adoption is early: {round(100*with_manifest/max(total_domains,1), 2)}% of the domains we
+  crawled serve a manifest. That is the honest state of the specification today, and it is
+  tracked over time on the <a href="/adoption">adoption page</a>.
+  Publishing one is a few lines of JSON: see <a href="/publish">how to publish</a>.
+</div>
+"""
+    return render.page(
+        "ARD publishers: who serves an ard.json",
+        f"{fmt(len(pubs))} domains publishing an Agentic Resource Discovery manifest, "
+        f"what each declares for AI agents, and whether the endpoints answer.",
+        body, f"{B}/publishers/")
