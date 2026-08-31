@@ -1,0 +1,106 @@
+[
+ {
+  "slug": "what-is-ard",
+  "path": "/what-is-ard",
+  "eyebrow": "Agentic Resource Discovery",
+  "title": "What is ARD? Agentic Resource Discovery explained",
+  "desc": "ARD stands for Agentic Resource Discovery, an open specification for how AI agents find tools, skills, agents and APIs at runtime. What it is, who backs it, and how it works.",
+  "h1": "What is ARD?",
+  "answer": "<b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. It answers one question, <b>“what is available for this task?”</b>, and then gets out of the way.",
+  "faq": [
+   [
+    "What does ARD stand for?",
+    "ARD stands for Agentic Resource Discovery. It is an open specification for how AI agents discover the tools, skills, agents and APIs they can call, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake."
+   ],
+   [
+    "Is ARD the same as MCP?",
+    "No. MCP is a runtime protocol for calling a tool; ARD is a discovery layer that runs before invocation. ARD tells an agent what exists and where, and the agent then connects using the resource's own protocol, which may be MCP, A2A or a plain HTTP API. They are complementary, not competing."
+   ],
+   [
+    "What is an agentic resource?",
+    "An agentic resource is anything an AI client can call to get work done: an MCP server, an A2A agent, a skill, an API or a workflow. ARD describes them all in one common envelope, using an IANA media type to say what each artifact is without constraining its internal schema."
+   ],
+   [
+    "Who maintains the ARD specification?",
+    "The specification lives at agenticresourcediscovery.org and in the ards-project/ard-spec repository under Apache-2.0. Its authors are Junjie Bu of Google, R.V. Guha, and Shaun Smith of Hugging Face, with contributions acknowledged from AWS, Cisco, Databricks, GitHub, GoDaddy, Microsoft, Nvidia, Salesforce and Snowflake."
+   ]
+  ],
+  "body": "\n<h2>The problem ARD solves</h2>\n<p>Today an agent can only use capabilities that somebody wired in beforehand. Every tool has to be\nintegrated by hand, and every tool description has to sit in the context window competing for space\nwith the actual work. That model does not survive an ecosystem of thousands of tools, let alone\nmillions.</p>\n<p>ARD moves the selection problem out of the context window and into a search service. It is the\nsame shift the early web made when it went from curated link directories to search engines: you stop\nmaintaining a list of everything and start asking a question.</p>\n\n<h2>How ARD works</h2>\n<p>There are two sides, and the specification is deliberately small on both.</p>\n<h3>Publishers describe what they offer</h3>\n<p>A publisher serves a JSON manifest at <code>/.well-known/ard.json</code> on their own domain. Each\nentry names one resource: an identifier, a display name, an IANA media type saying what kind of thing\nit is, a URL, a description, and <b>representative queries</b> phrased the way a person would ask.</p>\n<p>Nobody approves this. There is no marketplace to apply to and no allowlist. Publishing on your own\ndomain is the whole mechanism, which is why the specification calls the model web-native.</p>\n<h3>Registries index and answer</h3>\n<p>A registry crawls those manifests and exposes a search API. An agent asks in plain language, the\nregistry returns ranked candidates, and the agent connects to whichever it picks.</p>\n<pre>POST /search\n{\"query\": {\"text\": \"scrape a website behind cloudflare\"}}</pre>\n\n<h2>The four discovery paths</h2>\n<p>A publisher can advertise entries four ways, and a consumer may check any of them. Serving only\none makes you invisible to any client that checks another.</p>\n<table><thead><tr><th>Path</th><th>What it is</th></tr></thead><tbody>\n<tr><td><code>/.well-known/ard.json</code></td><td>The manifest itself. A conformant consumer <b>MUST</b> fetch this one.</td></tr>\n<tr><td><code>Agentmap:</code> in robots.txt</td><td>The agent-facing counterpart to <code>Sitemap:</code>.</td></tr>\n<tr><td><code>&lt;link rel=\"ard\"&gt;</code></td><td>A tag in the page head, for crawlers that only read HTML.</td></tr>\n<tr><td>DNS service records</td><td>Points at a static entry source or a live registry endpoint.</td></tr>\n</tbody></table>\n<p class=\"note\">The predecessor path <code>/.well-known/ai-catalog.json</code> is still read by\ncrawlers written against the earlier draft. Serving both costs one route.</p>\n\n<h2>Federation</h2>\n<p>The specification defines three federation modes and makes <code>auto</code> the default: a\nregistry queries its peers, merges their results with its own, and returns one set. The other two are\n<code>referrals</code>, where a registry returns pointers to its peers, and <code>none</code>, where\nit answers only from its own index.</p>\n<p>In practice, when we benchmarked every public ARD registry on 31 August 2026, <b>none of them\nimplemented the default mode</b>. Asking for <code>auto</code> returned byte-identical results to\n<code>none</code> on all four.</p>\n\n<h2>Trust is deliberately separate</h2>\n<p>ARD is explicit that a relevance score reflects semantic relevance only and <b>must not</b> be\nread as a trust, compliance or safety judgment. Trust evaluation is decoupled and handled through a\nseparate trust manifest, so a registry's ranking can never be mistaken for an endorsement.</p>\n"
+ },
+ {
+  "slug": "publish",
+  "path": "/publish",
+  "eyebrow": "For publishers",
+  "title": "How to publish an ARD manifest and make your API discoverable by AI agents",
+  "desc": "A step-by-step guide to publishing an Agentic Resource Discovery manifest so AI agents can find your API, MCP server or skill. Includes a working example and the mistakes that silently cost you.",
+  "h1": "How to publish an ARD manifest",
+  "answer": "Serve a JSON manifest at <b><code>/.well-known/ard.json</code></b> on your domain listing what you offer, add an <code>Agentmap:</code> line to robots.txt and a <code>&lt;link rel=\"ard\"&gt;</code> tag, and put <b>2 to 5 representative queries on every entry</b>. Registries crawl it from there. There is no submission form and no allowlist.",
+  "faq": [
+   [
+    "How do I make my API discoverable by AI agents?",
+    "Serve an ARD manifest at /.well-known/ard.json on your domain describing each resource you offer, with 2 to 5 representativeQueries per entry phrased the way a user would ask. Add an Agentmap: line to robots.txt and a link rel=\"ard\" tag in your page head so crawlers that check other paths also find you. Registries pick it up automatically."
+   ],
+   [
+    "Do I need to submit my API anywhere?",
+    "No. ARD is web-native: publishing the manifest on your own domain is the mechanism. Registries crawl the discovery paths. Some registries only crawl large domains, so submitting to an open registry speeds things up, but no approval is required."
+   ],
+   [
+    "What is the most common mistake when publishing an ARD manifest?",
+    "Omitting representativeQueries. It is the field registries build their semantic index from, so an entry without it is a valid catalogue entry that no search will ever return. The manifest validates, serves a 200, and is silently unfindable."
+   ],
+   [
+    "What media type should I use for an MCP server?",
+    "Use application/mcp-server-card+json. Three spellings are in circulation across the ecosystem, and because filters match exactly, the wrong one causes entries to be silently dropped by registries that do not normalise."
+   ]
+  ],
+  "body": "\n<h2>Step 1: write the manifest</h2>\n<p>The whole document is a spec version, an optional host block, and an array of entries.</p>\n<pre>{\n  \"specVersion\": \"1.0\",\n  \"host\": {\n    \"displayName\": \"Example Inc\",\n    \"identifier\": \"did:web:example.com\"\n  },\n  \"entries\": [\n    {\n      \"identifier\": \"urn:air:example.com:mcp:weather\",\n      \"displayName\": \"Weather API\",\n      \"type\": \"application/mcp-server-card+json\",\n      \"url\": \"https://example.com/.well-known/mcp/server-card.json\",\n      \"description\": \"Current conditions and forecasts for any location.\",\n      \"representativeQueries\": [\n        \"what is the weather in Berlin\",\n        \"will it rain in London tomorrow\"\n      ],\n      \"tags\": [\"weather\", \"forecast\"]\n    }\n  ]\n}</pre>\n<p>The identifier is a domain-anchored URN: <code>urn:air:&lt;your-domain&gt;:&lt;namespace&gt;:&lt;name&gt;</code>.\nThe publisher segment has to be a domain you control, because that is what publisher-authority\nbinding checks.</p>\n\n<h2>Step 2: get representativeQueries right</h2>\n<p>This is the field that decides whether you are findable, and it is the one most often left out.</p>\n<p>Registries build their semantic index from it. An entry without representative queries is a valid\ncatalogue entry that <b>no search will ever return</b>. The specification's own conformance tool\nflags its absence for exactly that reason.</p>\n<p>Write 2 to 5, phrased the way someone asks for the thing, not the way you describe it:</p>\n<table><thead><tr><th>Weak</th><th>Strong</th></tr></thead><tbody>\n<tr><td>\"weather data platform\"</td><td>\"will it rain in London tomorrow\"</td></tr>\n<tr><td>\"enterprise document intelligence\"</td><td>\"read this PDF and pull out the invoice total\"</td></tr>\n<tr><td>\"scalable web extraction\"</td><td>\"scrape a website that blocks bots\"</td></tr>\n</tbody></table>\n\n<h2>Step 3: advertise it on all four paths</h2>\n<pre># robots.txt\nSitemap: https://example.com/sitemap.xml\n<b>Agentmap: https://example.com/.well-known/ard.json</b></pre>\n<pre>&lt;!-- in your &lt;head&gt; --&gt;\n&lt;link rel=\"ard\" href=\"https://example.com/.well-known/ard.json\"&gt;\n&lt;link rel=\"ai-catalog\" href=\"https://example.com/.well-known/ai-catalog.json\"&gt;</pre>\n<p>Serve the same document at <code>/.well-known/ai-catalog.json</code> too. It is the predecessor\nname, and crawlers written against the earlier draft still look there.</p>\n\n<h2>Step 4: check that it worked</h2>\n<p>Publishing is not being indexed. Use the SDK, or run a free audit that fetches your manifest and\nasks every public registry whether they actually return you.</p>\n<pre>pip install ard-publish\npython -m ard_publish validate .well-known/ard.json\npython -m ard_publish check example.com</pre>\n\n<h2>The mistakes that cost you silently</h2>\n<ul>\n<li><b>No representativeQueries.</b> Validates fine, never returned.</li>\n<li><b>The wrong MCP media type.</b> Three spellings are live in the ecosystem. Registries that\nmatch exactly will drop you. Use <code>application/mcp-server-card+json</code>.</li>\n<li><b>Only one discovery path.</b> A crawler checking robots.txt will never see a manifest that\nexists only at the well-known path.</li>\n<li><b>A description written for humans browsing a marketing page</b> rather than for a machine\nmatching a task.</li>\n</ul>\n"
+ },
+ {
+  "slug": "submit-mcp-server",
+  "path": "/submit-mcp-server",
+  "eyebrow": "For publishers",
+  "title": "Where to submit your MCP server so AI agents can find it",
+  "desc": "Every place you can list an MCP server in 2026, which ones accept open submissions, and which are curated with no route in. Measured, not guessed.",
+  "h1": "Where do I submit my MCP server?",
+  "answer": "There are two routes. <b>Directories</b> such as the official MCP Registry, Glama, Smithery and mcpmarket take direct submissions. <b>ARD registries</b> require no submission at all: publish a manifest at <code>/.well-known/ard.json</code> and crawlers find you. Some prominent catalogues, including GitHub's Agent Finder, are curated and have <b>no published submission route</b>.",
+  "faq": [
+   [
+    "Where can I submit my MCP server?",
+    "The official MCP Registry accepts direct publication. Glama, Smithery and mcpmarket index submissions. For ARD registries you do not submit at all: you publish an ard.json manifest on your own domain and crawlers pick it up. GitHub's Agent Finder is curated with no published submission route."
+   ],
+   [
+    "Is there a single place to list an MCP server?",
+    "No single place covers everything, which is why federation exists. A federated ARD registry queries several indexes at once, so being in any of them makes you reachable through it."
+   ],
+   [
+    "Do I need an account to be listed in an ARD registry?",
+    "No. ARD is web-native. You publish a manifest on a domain you control and registries crawl it. No account, no allowlist and no approval step."
+   ]
+  ],
+  "body": "\n<h2>The two routes</h2>\n<h3>1. Directories that take submissions</h3>\n<table><thead><tr><th>Directory</th><th>How to get in</th></tr></thead><tbody>\n<tr><td>Official MCP Registry</td><td>Publish through the registry's own publishing flow. It is the largest catalogue of MCP servers in existence.</td></tr>\n<tr><td>Glama</td><td>Indexes public MCP servers and scores them.</td></tr>\n<tr><td>Smithery</td><td>Publish via their CLI.</td></tr>\n<tr><td>mcpmarket</td><td>Submission form.</td></tr>\n</tbody></table>\n\n<h3>2. ARD registries, where you do not submit</h3>\n<p>ARD inverts the model. Instead of applying to a directory, you publish a manifest on your own\ndomain and registries crawl it. That is the whole mechanism, and it is the reason the specification\ndescribes discovery as web-native.</p>\n<p>The practical catch is crawl coverage. Registries choose their own frontier, and most only reach\nlarge domains, so a small publisher can be perfectly conformant and still be indexed nowhere.</p>\n\n<h2>What about GitHub's Agent Finder?</h2>\n<p>It is curated. An open issue asking how independent publishers get into its catalogue has been\nunanswered since July 2026. If you are not already inside one of its source sets, there is currently\nno published route in.</p>\n\n<h2>The fastest path in practice</h2>\n<ol>\n<li><b>Publish an ARD manifest</b> at <code>/.well-known/ard.json</code>. This makes you eligible\neverywhere at once, and it is the only step nobody can gatekeep.</li>\n<li><b>Publish to the official MCP Registry</b>, which is the largest single catalogue and is\nmirrored by several others.</li>\n<li><b>Verify coverage</b> rather than assuming it. Being listed and being <i>returned</i> are\ndifferent things, and only one of them matters.</li>\n</ol>\n"
+ },
+ {
+  "slug": "registries",
+  "path": "/registries",
+  "eyebrow": "Measured 31 August 2026",
+  "title": "Every public ARD registry, compared and benchmarked",
+  "desc": "Conformance, index size, precision, latency and federation support for every public Agentic Resource Discovery registry, measured with the specification's own tool.",
+  "h1": "Every public ARD registry, compared",
+  "answer": "There are five public ARD registries. We benchmarked all of them on 31 August 2026 using the specification's own conformance tool. <b>GitHub's Agent Finder fails conformance</b>, one returns nothing for general queries, and <b>none of the four incumbents implements <code>federation: auto</code></b>, the mode the specification makes the default.",
+  "faq": [
+   [
+    "Which ARD registries exist?",
+    "Five public ARD registries exist as of August 2026: Neuronto, GitHub Agent Finder, WellKnown, Hugging Face Discover and Desvela. They differ substantially in conformance, index size, ranking quality and federation support."
+   ],
+   [
+    "Which ARD registry is the largest?",
+    "Measured on 31 August 2026, Neuronto held the largest index. Among the incumbents, WellKnown was largest, followed by Hugging Face Discover, GitHub Agent Finder and Desvela."
+   ],
+   [
+    "Do ARD registries federate with each other?",
+    "The specification defines federation: auto as the default mode, in which a registry queries its peers and merges their results. When tested, none of the four incumbent registries implemented it: asking for auto returned identical results to asking for none."
+   ]
+  ],
+  "body": "\n<h2>The benchmark</h2>\n<p>Conformance is the specification's own tool. Precision is top-1 over six queries with unambiguous\ncorrect answers. Spread is the average gap between the best and worst score in a result set, which\nmeasures whether a ranking carries any information at all.</p>\n<table><thead><tr><th>Registry</th><th>Conformance</th><th>P@1</th><th>Spread</th><th>Latency</th><th>federation: auto</th></tr></thead><tbody>\n<tr><td><b>Neuronto</b></td><td>PASS</td><td>6/6</td><td>78</td><td>&lt;200ms</td><td><b>yes</b></td></tr>\n<tr><td>GitHub Agent Finder</td><td><b>FAIL</b></td><td>6/6</td><td>32.5</td><td>1,970ms</td><td>no</td></tr>\n<tr><td>WellKnown</td><td>PASS</td><td>6/6</td><td>6.7</td><td>401ms</td><td>no</td></tr>\n<tr><td>Hugging Face Discover</td><td>PASS</td><td>0/6</td><td>40.8</td><td>1,712ms</td><td>no</td></tr>\n<tr><td>Desvela</td><td>PASS</td><td>2/6</td><td>39.7</td><td>213ms</td><td>no</td></tr>\n</tbody></table>\n\n<h2>What the numbers mean</h2>\n<h3>GitHub Agent Finder fails conformance</h3>\n<p>Its <code>GET /agents</code> endpoint answers 200 with a body that is not a paginated object, and\nthe conformance tool marks the registry FAIL on exactly that. It is otherwise the strongest of the\nincumbents on result quality, and it is the default finder in the official connectors.</p>\n\n<h3>A score spread of 6.7 cannot rank</h3>\n<p>WellKnown returns accurate top results and holds a large index, but the gap between its best and\nworst result averages under seven points. A client cannot tell a strong match from a weak one, which\ndefeats the purpose of returning a score.</p>\n\n<h3>Hugging Face Discover is not a general registry</h3>\n<p>It scored zero of six on precision because it indexes only Hugging Face Spaces and Skills. For\nqueries about anything else it returns nothing relevant, despite shipping inside an official CLI.</p>\n\n<h3>Nobody implements the default federation mode</h3>\n<p>This is the largest gap in the ecosystem. The specification makes <code>auto</code> the default:\nquery your peers, merge, return one set. Tested against all four incumbents, <code>auto</code>\nreturned identical results to <code>none</code>, and the only source in every response was the\nregistry's own domain.</p>\n<p>Measured across 26 probe queries, the union of all four indexes was <b>68% larger</b> than the\nlargest single one. That difference is what a client loses every time it has to pick a registry\ninstead of asking one that federates.</p>\n"
+ }
+]
