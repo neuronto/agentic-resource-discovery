@@ -194,6 +194,12 @@ FOOTER = f"""<footer><div class="wrap">
 EXTRA_CSS = """
 
 
+/* Rows far below the fold are not laid out until they are near it. A category
+   page carries about sixty rows and the publisher index two hundred; this keeps
+   first paint independent of the count. */
+.tbl tbody tr,.mtable tbody tr{content-visibility:auto;contain-intrinsic-size:auto 44px}
+img{max-width:100%;height:auto}
+
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 /* Brushed metal rather than flat white. Three things do the work: a vertical
    gradient from white to a cool grey so the surface reads as curved, a one
@@ -519,15 +525,30 @@ def _k(key: str) -> str:
 
 
 def _read(key: str):
-    key = _k(key)
+    """This build's copy, or the previous build's if there is not one yet.
+
+    A stamp change used to make every page cold at once, so the first visitor
+    after a deploy paid a full rebuild: measured at fifteen seconds on a
+    capability page, and the CDN then cached that slow response for everyone.
+    A new build should make pages *stale*, not absent. The old copy is returned
+    with a timestamp of zero, which reads as expired everywhere, so the caller
+    serves it immediately and rebuilds behind the request exactly as it does for
+    any other stale entry. Content from one deploy ago for a few seconds is a
+    far better answer than a fifteen second wait.
+    """
+    stamped = _k(key)
     c = _cdb()
     if c is None:
-        return _cache.get(key)
+        return _cache.get(stamped)
     try:
-        r = c.execute("SELECT built, html FROM pages WHERE key=?", (key,)).fetchone()
-        return (r[0], r[1]) if r else None
+        r = c.execute("SELECT built, html FROM pages WHERE key=?", (stamped,)).fetchone()
+        if r:
+            return (r[0], r[1])
+        r = c.execute("SELECT html FROM pages WHERE key LIKE ? AND key != '__warmlock__' "
+                      "ORDER BY built DESC LIMIT 1", ("%:" + key,)).fetchone()
+        return (0.0, r[0]) if r else None
     except Exception:
-        return _cache.get(key)
+        return _cache.get(stamped)
 
 
 def _write(key: str, html_: str) -> None:
@@ -540,10 +561,11 @@ def _write(key: str, html_: str) -> None:
         c.execute("INSERT INTO pages(key,built,html) VALUES(?,?,?) "
                   "ON CONFLICT(key) DO UPDATE SET built=excluded.built, html=excluded.html",
                   (key, time.time(), html_))
-        # Entries from an earlier build of the rendering code can never be read
-        # again, so they are dropped rather than left to grow the file forever.
-        c.execute("DELETE FROM pages WHERE key NOT LIKE ? AND key != '__warmlock__'",
-                  (STAMP + ":%",))
+        # Drop only the older copies of the page just written: the rest are still
+        # serving as the fallback for pages this build has not rebuilt yet.
+        bare = key.split(":", 1)[1] if ":" in key else key
+        c.execute("DELETE FROM pages WHERE key LIKE ? AND key != ? AND key != '__warmlock__'",
+                  ("%:" + bare, key))
         c.commit()
     except Exception:
         pass
@@ -624,6 +646,47 @@ def release_warm() -> None:
         c.commit()
     except Exception:
         pass
+
+
+def cached_value(key: str, ttl: int, build):
+    """The same cache, for a small JSON value instead of a page.
+
+    Exists because `catalog.published()` was a per-process dict computed on the
+    first request that needed it: twenty-five aggregate queries, ten seconds on
+    an idle box, more under load, once per worker, in front of a visitor. The
+    page cache made every page instant and this map, checked before the page
+    cache was even consulted, put the whole cost back. Anything derived from
+    the index that a request path needs belongs here, warmed like the pages,
+    served stale like the pages, and never computed in front of anyone after
+    the first build.
+    """
+    import json as _json
+    got = _cache.get(_k(key)) or _read(key)
+    if got:
+        if time.time() - got[0] >= ttl:
+            with _build_lock:
+                fresh = key not in _building
+                if fresh:
+                    _building.add(key)
+            if fresh:
+                threading.Thread(target=_rebuild, args=(key, lambda: _json.dumps(build())),
+                                 name=f"rebuild:{key}", daemon=True).start()
+        try:
+            return _json.loads(got[1])
+        except Exception:
+            pass
+    val = build()
+    _write(key, _json.dumps(val))
+    return val
+
+
+def warm_value(key: str, ttl: int, build) -> bool:
+    import json as _json
+    got = _read(key)
+    if got and time.time() - got[0] < ttl and got[0] > 0:
+        return False
+    _write(key, _json.dumps(build()))
+    return True
 
 
 def warm(key: str, ttl: int, build) -> bool:

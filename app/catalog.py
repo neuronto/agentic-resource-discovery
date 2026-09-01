@@ -122,16 +122,39 @@ MIN_TOOLS = 60
 _published: dict[str, int] | None = None
 
 
+def _compute_published(conn: sqlite3.Connection) -> dict[str, int]:
+    got = {}
+    for slug in CATEGORIES:
+        n = category_stats(conn, slug)["tools"]
+        if n >= MIN_TOOLS:
+            got[slug] = n
+    return got
+
+
 def published(conn: sqlite3.Connection, refresh: bool = False) -> dict[str, int]:
-    """Slugs that clear MIN_TOOLS, with their qualifying tool counts."""
+    """Slugs that clear MIN_TOOLS, with their qualifying tool counts.
+
+    Twenty-five aggregate queries over the tool table: ten seconds on an idle
+    machine and twice that under load. It used to be a per-process dict filled
+    on the first request that needed it, which was the category page and the
+    sitemap, so the first visitor to each worker after every deploy waited for
+    it, and the CDN then cached that slow response for everyone. It now lives
+    in the shared page cache: warmed at startup before any page, served stale
+    while it rebuilds, and computed in front of a request only on the very
+    first boot of an empty cache.
+    """
     global _published
-    if _published is None or refresh:
-        got = {}
-        for slug in CATEGORIES:
-            n = category_stats(conn, slug)["tools"]
-            if n >= MIN_TOOLS:
-                got[slug] = n
+    if _published is not None and not refresh:
+        return _published
+    if refresh:
+        got = _compute_published(conn)
+        import json as _json
+        render._write("published-map", _json.dumps(got))
         _published = got
+        return got
+    _published = {k: int(v) for k, v in
+                  render.cached_value("published-map", 1800,
+                                      lambda: _compute_published(conn)).items()}
     return _published
 
 
