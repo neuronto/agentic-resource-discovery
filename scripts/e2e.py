@@ -1358,7 +1358,10 @@ def t_publish_resource_is_idempotent():
                     {"name": "publish_resource",
                      "arguments": {"endpoint": "https://mcp.deepwiki.com/mcp"}}}, timeout=70)
         ids.append(json.loads(r["result"]["content"][0]["text"]).get("identifier"))
-    assert ids[0] and ids[0] == ids[1], f"not idempotent: {ids}"
+    if not all(ids):
+        # Idempotency can only be judged when both calls reached the third party.
+        raise Skip(f"the reference MCP server did not answer both calls: {ids}")
+    assert ids[0] == ids[1], f"not idempotent: {ids}"
 
 
 def t_generation_and_submission_agree():
@@ -1697,6 +1700,38 @@ def t_submit_offers_the_badge_without_requiring_it():
     b = d.get("badge")
     assert b and b.get("markdown") and b.get("optional"), f"no optional badge offer: {list(d)}"
     assert "optional" in b["optional"].lower()
+
+
+def t_pages_report_themselves_and_honour_do_not_track():
+    """Most pages are served from a CDN, so a page that cannot report itself is
+    a page nobody can count."""
+    for path in ("/", "/tools/", "/ard-publishers", "/what-is-ard", "/ard-registries"):
+        s_, h = _html(path)
+        assert s_ == 200 and "sendBeacon" in h, f"{path} carries no beacon"
+        assert "globalPrivacyControl" in h and "doNotTrack" in h, \
+            f"{path} beacon does not check the browser's opt-out"
+
+    def post_e(payload, extra=None):
+        req = urllib.request.Request(BASE + "/e", data=json.dumps(payload).encode(),
+                                     headers={**UA, **(extra or {})}, method="POST")
+        return urllib.request.urlopen(req, timeout=30).status
+
+    assert post_e({"t": "view", "p": "/x", "vw": 1440}) == 204
+    assert post_e({"t": "end", "p": "/x", "d": 30, "s": 50}) == 204
+    # opt-out and junk are both accepted and dropped, never an error to the page
+    assert post_e({"t": "view", "p": "/x"}, {"DNT": "1"}) == 204
+    assert post_e({"t": "view", "p": "/x"}, {"Sec-GPC": "1"}) == 204
+    assert post_e({"t": "nonsense"}) == 204
+    assert post_e({}) == 204
+
+
+def t_beacon_endpoint_is_never_cached():
+    """It is a POST, so it must reach the origin every time."""
+    req = urllib.request.Request(BASE + "/e", data=b'{"t":"view","p":"/x"}',
+                                 headers={**UA}, method="POST")
+    r = urllib.request.urlopen(req, timeout=30)
+    assert r.headers.get("cf-cache-status", "DYNAMIC").upper() in ("DYNAMIC", "BYPASS"), \
+        f"the beacon endpoint is being cached: {r.headers.get('cf-cache-status')}"
 
 
 def main():
