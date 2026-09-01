@@ -1892,6 +1892,46 @@ def t_publish_guide_ends_with_the_step_that_gets_you_indexed():
     assert "no submission path found" in h, "the comparison flatters us by omission"
 
 
+def t_every_machine_readable_document_serves():
+    """A 500 on one of these went unnoticed because the only test that fetched
+    it swallowed HTTP errors. These are what a crawler or an agent reads, so a
+    failure here is invisible to a human and total for a machine."""
+    want = {
+        "/llms.txt": "text/plain",
+        "/robots.txt": "text/plain",
+        "/sitemap.xml": "xml",
+        "/feed.xml": "xml",
+        "/.well-known/ard.json": "json",
+        "/.well-known/ai-catalog.json": "json",
+        "/.well-known/did.json": "json",
+        "/openapi.json": "json",
+        "/metrics.json": "json",
+    }
+    for path, kind in want.items():
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                BASE + path + "?cb=1", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+        except urllib.error.HTTPError as e:
+            raise AssertionError(f"{path} returned {e.code}")
+        body = r.read()
+        assert r.status == 200 and body, f"{path}: {r.status}, {len(body)} bytes"
+        assert kind in r.headers.get("content-type", ""), \
+            f"{path}: {r.headers.get('content-type')}"
+        if kind == "json":
+            json.loads(body)
+
+
+def t_llms_txt_tells_an_agent_how_to_be_listed():
+    """It is the machine-readable guide, and it described only how to query us."""
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/llms.txt?cb=1", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+    t = r.read().decode()
+    assert "How to be listed" in t, "llms.txt never says how to get indexed"
+    assert '{"domain":"example.com"}' in t, \
+        "the submit example is malformed (f-string braces are a real hazard here)"
+    assert "/submit" in t and "publish_resource" in t
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

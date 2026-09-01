@@ -566,6 +566,26 @@ to respond. Refreshed continuously.
 - GET  {B}/agents    deterministic paginated listing
 - POST {B}/mcp       the same search as an MCP tool
 
+## How to be listed (no key, no signup, no allowlist)
+
+Serving a manifest is not being indexed: a registry has to fetch it. Registries
+crawl domain lists they chose, so a domain outside one is invisible to it
+indefinitely. To be indexed here, send the domain or the endpoint.
+
+- POST https://neuronto.com/submit   {{"domain":"example.com"}}
+  Both well-known paths are fetched from that domain and whatever parses is
+  indexed in the same request.
+- POST https://neuronto.com/submit   {{"endpoint":"https://example.com/mcp"}}
+  For an MCP server with no manifest at all: the endpoint must complete an
+  initialize handshake and its own tools/list is read back.
+- MCP tool publish_resource on https://neuronto.com/mcp does the same thing
+  from inside a conversation.
+- POST https://neuronto.com/audit    {{"domain":"example.com"}}
+  Reports which registries return you, and whether this one can index you now.
+
+Nothing is taken on the submitter's word: everything listed was fetched from
+the domain that claims it. Publishing guide: https://neuronto.com/publish
+
 ## What is different here
 
 - federation: auto is implemented. The ARD specification makes it the default
