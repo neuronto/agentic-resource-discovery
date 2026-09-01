@@ -52,12 +52,12 @@ NAV = """<nav><div class="wrap">
     <img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span>
   </a>
-  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/ard-registries">Registries</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>"""
 
 FOOTER = """<footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="/published">Published</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/ard-registries">Registries</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/badge">Badge</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/ard-conformance">Conformance</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="/published">Published</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div style="max-width:70ch">An Agentic Resource Discovery registry, index and publisher.
   Relevance scores are semantic only and are never a trust, compliance or safety rating.
   A tool listed as verified was read from that server's own tools/list; verification is a
@@ -103,7 +103,15 @@ table.tl td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 
 def page(title: str, description: str, body: str, canonical: str,
          jsonld: str = "") -> str:
-    """One complete document."""
+    """One complete document.
+
+    Every title carries the site name in the same form, so the phrase a person
+    types to find a registry of this kind is present on every page, once, in
+    the slot search engines and answer engines weight most. A caller that
+    already wrote it is left alone.
+    """
+    if "Neuronto" not in title:
+        title = title + " | Neuronto ARD Registry"
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -118,8 +126,8 @@ def page(title: str, description: str, body: str, canonical: str,
 <meta property="og:image" content="https://neuronto.com/img/og-v1.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Neuronto Agentic Resource Discovery Index">
-<meta property="og:site_name" content="Neuronto">
+<meta property="og:image:alt" content="Neuronto ARD Registry, the Agentic Resource Discovery (ARD) index">
+<meta property="og:site_name" content="Neuronto ARD Registry">
 <meta name="twitter:image" content="https://neuronto.com/img/og-v1.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/rss+xml" title="Neuronto verification events" href="https://neuronto.com/feed.xml">

@@ -816,7 +816,10 @@ def t_published_links_all_resolve():
     import re as _re
     s, h = _html("/published")
     ext = sorted(set(_re.findall(r'href="(https?://(?!neuronto\.com)[^"]+)"', h)))
-    dead = []
+    # A 4xx or 5xx is our problem: we are pointing at something that is not
+    # there. A connection failure is theirs, and failing the build on a third
+    # party's outage teaches people to ignore the build.
+    dead, unreachable = [], []
     for u in ext:
         try:
             r = urllib.request.urlopen(urllib.request.Request(
@@ -826,8 +829,10 @@ def t_published_links_all_resolve():
         except urllib.error.HTTPError as e:
             dead.append((u, e.code))
         except Exception as e:
-            dead.append((u, type(e).__name__))
+            unreachable.append((u, type(e).__name__))
     assert not dead, f"dead links on /published: {dead}"
+    if unreachable:
+        raise Skip(f"could not reach, treated as their outage not our dead link: {unreachable}")
 
 
 def t_navigation_is_consistent_sitewide():
@@ -1550,6 +1555,131 @@ def t_every_verified_manifest_records_the_path_it_was_found_on():
         f"unexpected manifest path recorded: {set(a['by_path'])}"
     assert a["by_path"].get("/.well-known/ai-catalog.json", 0) > 0, \
         "premise changed: the ecosystem was on the predecessor path"
+
+
+def t_site_name_is_on_every_page():
+    """The name of the thing is in the slot that matters, once, on every page."""
+    import re as _re
+    for path in ("/", "/what-is-ard", "/publish", "/submit", "/submit-mcp-server", "/console",
+                 "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
+                 "/ard-publishers", "/tools/", "/bench", "/adoption", "/published", "/blog"):
+        s, h = _html(path)
+        assert s == 200, f"{path}: {s}"
+        t = _re.search(r"<title>(.*?)</title>", h, _re.S)
+        assert t and "Neuronto ARD Registry" in t.group(1), f"{path}: title {t.group(1) if t else None!r}"
+        assert 'property="og:site_name" content="Neuronto ARD Registry"' in h, f"{path}: og:site_name"
+        assert t.group(1).count("Neuronto ARD Registry") == 1, f"{path}: name repeated in title"
+
+
+def t_new_pages_answer_the_query_in_the_h1():
+    import re as _re
+    want = {"/ard-registries": "ARD registries",
+            "/ard-manifest-generator": "ARD manifest generator",
+            "/ard-conformance": "ARD conformance",
+            "/submit": "How to submit to an ARD registry"}
+    for path, phrase in want.items():
+        s, h = _html(path)
+        assert s == 200, f"{path}: {s}"
+        h1 = _re.search(r"<h1[^>]*>(.*?)</h1>", h, _re.S)
+        assert h1 and phrase.lower() in _re.sub(r"<[^>]+>", "", h1.group(1)).lower(), \
+            f"{path}: h1 is {h1.group(1) if h1 else None!r}"
+        assert "\u2014" not in h and "\u2013" not in h, f"{path}: dash in page"
+
+
+def t_registries_moved_with_a_permanent_redirect():
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    op = urllib.request.build_opener(NoRedirect)
+    try:
+        op.open(urllib.request.Request(BASE + "/registries", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+        raise AssertionError("/registries did not redirect")
+    except urllib.error.HTTPError as e:
+        assert e.code == 301, e.code
+        assert e.headers.get("location", "").endswith("/ard-registries"), e.headers.get("location")
+
+
+def t_comparison_page_states_its_method_and_date():
+    s, h = _html("/ard-registries")
+    assert "September 2026" in h, "no measurement date"
+    assert "POST /search" in h or "POST <code>/search" in h.replace("<code>", "<code>"), "no definition of a registry"
+    for name in ("WellKnown", "Desvela", "GitHub Agent Finder", "Hugging Face"):
+        assert name in h, f"{name} missing from the comparison"
+
+
+def t_generator_page_fronts_the_real_endpoint():
+    s, h = _html("/ard-manifest-generator")
+    assert "/manifest/build" in h, "page does not call the generator"
+    assert "Nothing is invented" in h, "the one rule that matters is not stated"
+
+
+def t_every_page_links_the_new_sections():
+    for path in ("/", "/what-is-ard", "/tools/", "/ard-publishers", "/console"):
+        s, h = _html(path)
+        assert 'href="/ard-registries"' in h, f"{path} does not link the comparison"
+
+
+def t_no_helper_is_defined_twice():
+    """A second definition of a helper silently replaces the first.
+
+    A duplicate `_html` that omitted the Accept header shadowed the real one and
+    broke four passing tests at once. Same shape as the duplicated functions
+    found in catalog.py: later definition wins, quietly.
+    """
+    import ast as _ast
+    import collections
+    src = _ast.parse(open(__file__).read())
+    names = [n.name for n in src.body if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))]
+    dupes = [n for n, c in collections.Counter(names).items() if c > 1]
+    assert not dupes, f"defined more than once in this file: {dupes}"
+
+
+def t_badge_is_monochrome_and_states_a_fact():
+    """No score, no colour grade: the spec separates discovery from trust."""
+    import re as _re
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/badge/zapier.com.svg", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+    svg = r.read().decode()
+    assert r.headers.get("content-type", "").startswith("image/svg+xml")
+    cols = {c.lower() for c in _re.findall(r"#[0-9A-Fa-f]{6}", svg)}
+    for c in cols:
+        rr, gg, bb = int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+        assert max(rr, gg, bb) - min(rr, gg, bb) <= 8, f"badge is not monochrome: {c}"
+    assert "prefers-color-scheme" in svg, "no dark variant"
+    for word in ("score", "grade", "rating", "certified", "approved", "trusted"):
+        assert word not in svg.lower(), f"badge implies a judgment: {word}"
+    for theme in ("light", "dark"):
+        r2 = urllib.request.urlopen(urllib.request.Request(
+            BASE + f"/badge/zapier.com.svg?theme={theme}", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+        assert r2.status == 200
+
+
+def t_unknown_domain_gets_a_badge_not_a_broken_image():
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/badge/definitely-not-indexed-xyz.com.svg",
+        headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+    assert r.status == 200 and "not indexed yet" in r.read().decode()
+
+
+def t_badge_page_gives_a_snippet_and_no_obligation():
+    s, h = _html("/badge?domain=zapier.com")
+    assert s == 200, s
+    assert "/ard-publishers/zapier.com" in h, "the badge does not link the publisher's own page"
+    assert "alt=" in h and "Neuronto ARD Registry" in h, "no alt text in the snippet"
+    assert "optional" in h.lower() or "Nothing here is required" in h, \
+        "the page does not say displaying it is optional"
+    # RULE 8: no strategy talk on a public page
+    for w in ("nofollow", "backlink", "link equity", "authority", "SEO", "ranking factor"):
+        assert w.lower() not in h.lower(), f"public page discusses distribution strategy: {w}"
+
+
+def t_submit_offers_the_badge_without_requiring_it():
+    s, d = post("/submit", {"domain": "zapier.com"}, timeout=70)
+    if d.get("status") != "indexed":
+        raise Skip(f"submit returned {d.get('status')}, cannot check the offer")
+    b = d.get("badge")
+    assert b and b.get("markdown") and b.get("optional"), f"no optional badge offer: {list(d)}"
+    assert "optional" in b["optional"].lower()
 
 
 def main():

@@ -3,25 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Every public ARD registry, compared and benchmarked</title>
-<meta name="description" content="Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.">
-<link rel="canonical" href="https://neuronto.com/registries">
+<title>ARD conformance: how to test a registry or manifest with the official tool | Neuronto ARD Registry</title>
+<meta name="description" content="What the Agentic Resource Discovery (ARD) conformance tool checks for manifests and registries, the exact commands to run it, where registries fail, and Neuronto&#x27;s own result.">
+<link rel="canonical" href="https://neuronto.com/ard-conformance">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Every public ARD registry, compared and benchmarked">
-<meta property="og:description" content="Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.">
+<meta property="og:title" content="ARD conformance: how to test a registry or manifest with the official tool | Neuronto ARD Registry">
+<meta property="og:description" content="What the Agentic Resource Discovery (ARD) conformance tool checks for manifests and registries, the exact commands to run it, where registries fail, and Neuronto&#x27;s own result.">
 <meta property="og:image" content="https://neuronto.com/img/og-v1.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Neuronto Agentic Resource Discovery index">
-<meta property="og:url" content="https://neuronto.com/registries">
+<meta property="og:image:alt" content="Neuronto ARD Registry, the Agentic Resource Discovery (ARD) index">
+<meta property="og:url" content="https://neuronto.com/ard-conformance">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/registries", "url": "https://neuronto.com/registries", "name": "Every public ARD registry, compared and benchmarked", "description": "Conformance, index size, precision, latency and federation for every public Agentic Resource Discovery registry, measured with the official tool.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Which ARD registries exist?", "acceptedAnswer": {"@type": "Answer", "text": "Five public ARD registries exist as of August 2026: Neuronto, GitHub Agent Finder, WellKnown, Hugging Face Discover and Desvela. They differ substantially in conformance, index size, ranking quality and federation support."}}, {"@type": "Question", "name": "Which ARD registry is the largest?", "acceptedAnswer": {"@type": "Answer", "text": "Measured on 31 August 2026, Neuronto held the largest index. Among the incumbents, WellKnown was largest, followed by Hugging Face Discover, GitHub Agent Finder and Desvela."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "The specification defines federation: auto as the default mode, in which a registry queries its peers and merges their results. When tested, none of the four incumbent registries implemented it: asking for auto returned identical results to asking for none."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/ard-conformance", "url": "https://neuronto.com/ard-conformance", "name": "ARD conformance: how to test a registry or manifest with the official tool | Neuronto ARD Registry", "description": "What the Agentic Resource Discovery (ARD) conformance tool checks for manifests and registries, the exact commands to run it, where registries fail, and Neuronto's own result.", "isPartOf": {"@type": "WebSite", "name": "Neuronto ARD Registry", "url": "https://neuronto.com"}, "dateModified": "2026-09-01"}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -189,60 +189,65 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
 .note{border-left:2px solid var(--line2);padding:2px 0 2px 16px;margin:0 0 1.2rem;color:var(--mut);font-size:13.5px}
 </style>
 <meta name="twitter:image" content="https://neuronto.com/img/og-v1.png">
-<meta property="og:site_name" content="Neuronto">
+<meta property="og:site_name" content="Neuronto ARD Registry">
 </head>
 <body>
 <nav><div class="wrap">
   <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span></a>
-  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/ard-registries">Registries</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
-<p class="eyebrow">Measured 31 August 2026</p>
-<h1>Every public ARD registry, compared</h1>
-<p class="answer">There are five public ARD registries. We benchmarked all of them on 31 August 2026 using the specification's own conformance tool. <b>GitHub's Agent Finder fails conformance</b>, one returns nothing for general queries, and <b>none of the four incumbents implements <code>federation: auto</code></b>, the mode the specification makes the default.</p>
-
-<h2>The benchmark</h2>
-<p>Conformance is the specification's own tool. Precision is top-1 over six queries with unambiguous
-correct answers. Spread is the average gap between the best and worst score in a result set, which
-measures whether a ranking carries any information at all.</p>
-<table><thead><tr><th>Registry</th><th>Conformance</th><th>P@1</th><th>Spread</th><th>Latency</th><th>federation: auto</th></tr></thead><tbody>
-<tr><td><b>Neuronto</b></td><td>PASS</td><td>6/6</td><td>78</td><td>&lt;200ms</td><td><b>yes</b></td></tr>
-<tr><td>GitHub Agent Finder</td><td><b>FAIL</b></td><td>6/6</td><td>32.5</td><td>1,970ms</td><td>no</td></tr>
-<tr><td>WellKnown</td><td>PASS</td><td>6/6</td><td>6.7</td><td>401ms</td><td>no</td></tr>
-<tr><td>Hugging Face Discover</td><td>PASS</td><td>0/6</td><td>40.8</td><td>1,712ms</td><td>no</td></tr>
-<tr><td>Desvela</td><td>PASS</td><td>2/6</td><td>39.7</td><td>213ms</td><td>no</td></tr>
+<p class="eyebrow">Verified 1 September 2026</p>
+<h1>ARD conformance: what the official test checks, and how to run it on any registry or manifest</h1>
+<p class="answer">The Agentic Resource Discovery specification ships its own conformance tool. It validates a
+<b>manifest</b> (is this <code>ard.json</code> something a consumer can rely on) and a <b>registry</b> (does this
+search service behave as the specification says). Neuronto passes both with zero errors and zero warnings; the
+commands below reproduce that result against any URL, including this one.</p>
+<h2>Run it</h2>
+<pre><code>git clone https://github.com/ards-project/ard-spec
+cd ard-spec
+conformance/bin/conformance-test manifest https://neuronto.com/.well-known/ard.json
+conformance/bin/conformance-test registry https://neuronto.com</code></pre>
+<p>Substitute your own domain to test your manifest, or another registry's root to test it as a registry.</p>
+<h2>What the manifest check covers</h2>
+<ul>
+<li>the document parses and carries <code>specVersion</code>, a <code>host</code> and an <code>entries</code> list</li>
+<li>every entry has an <code>identifier</code> in the URN form the specification defines, with the publisher segment matching the domain</li>
+<li>every entry delivers its resource by value or by reference, not both and not neither</li>
+<li>media types are ones the specification recognises</li>
+</ul>
+<h2>What the registry check covers</h2>
+<ul>
+<li><code>POST /search</code> answers 200 with a results list, and every item carries <code>identifier</code>, <code>score</code> and <code>source</code></li>
+<li><code>POST /explore</code>, if present, returns a facets object</li>
+<li><code>GET /agents</code>, if present, returns a properly paginated <b>object</b>, not a bare list</li>
+</ul>
+<h2>Where registries fail</h2>
+<p>The most common failure seen across the public registries is <code>GET /agents</code> answering 200 with a body
+that is not a paginated object. The tool marks the whole registry FAIL on exactly that, however good its
+search results are. The second is a manifest served on only one of the two well-known paths: the
+specification's version 0.91 renamed <code>ai-catalog.json</code> to <code>ard.json</code>, and most deployed
+publishers still serve only the older name, so a consumer checking one path misses most of the ecosystem.
+Serve both.</p>
+<h2>Neuronto's result</h2>
+<table><thead><tr><th>Role</th><th>Result</th><th>Errors</th><th>Warnings</th><th>Checked</th></tr></thead><tbody>
+<tr><td>manifest, <code>/.well-known/ard.json</code></td><td>PASS</td><td>0</td><td>0</td><td>1 September 2026</td></tr>
+<tr><td>registry, <code>POST /search</code>, <code>/explore</code>, <code>/agents</code></td><td>PASS</td><td>0</td><td>0</td><td>1 September 2026</td></tr>
 </tbody></table>
-
-<h2>What the numbers mean</h2>
-<h3>GitHub Agent Finder fails conformance</h3>
-<p>Its <code>GET /agents</code> endpoint answers 200 with a body that is not a paginated object, and
-the conformance tool marks the registry FAIL on exactly that. It is otherwise the strongest of the
-incumbents on result quality, and it is the default finder in the official connectors.</p>
-
-<h3>A score spread of 6.7 cannot rank</h3>
-<p>WellKnown returns accurate top results and holds a large index, but the gap between its best and
-worst result averages under seven points. A client cannot tell a strong match from a weak one, which
-defeats the purpose of returning a score.</p>
-
-<h3>Hugging Face Discover is not a general registry</h3>
-<p>It scored zero of six on precision because it indexes only Hugging Face Spaces and Skills. For
-queries about anything else it returns nothing relevant, despite shipping inside an official CLI.</p>
-
-<h3>Nobody implements the default federation mode</h3>
-<p>This is the largest gap in the ecosystem. The specification makes <code>auto</code> the default:
-query your peers, merge, return one set. Tested against all four incumbents, <code>auto</code>
-returned identical results to <code>none</code>, and the only source in every response was the
-registry's own domain.</p>
-<p>Measured across 26 probe queries, the union of all four indexes was <b>68% larger</b> than the
-largest single one. That difference is what a client loses every time it has to pick a registry
-instead of asking one that federates.</p>
+<p>It is re-run after every deployment. The result is stated here rather than as a badge because a badge
+cannot be re-run and a command can.</p>
+<h2>Check your own manifest without installing anything</h2>
+<p>The <a href="/console">free audit</a> runs the same conformance checks on your manifest, entry by entry, with
+each finding written as an instruction rather than an error code, and then asks every public registry whether
+they return you. <code>pip install ard-publish</code> gives you <code>ard-publish validate</code> for the local
+half and <code>ard-publish check</code> for the live one.</p>
 <div class="cta"><p><b>Check your own domain.</b> The console fetches what you
       publish and asks every public registry whether they return you.</p>
       <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>
 <footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/badge">Badge</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/ard-conformance">Conformance</a><a href="/ard-registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>
 </div></footer>
 </body></html>

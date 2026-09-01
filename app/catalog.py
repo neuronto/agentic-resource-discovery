@@ -21,6 +21,7 @@ so no page is a stub.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from typing import Any
@@ -951,9 +952,108 @@ def render_published(conn: sqlite3.Connection) -> str:
 </div>
 """
     return render.page(
-        "Where Neuronto is published: source, dataset, packages and registry entries",
+        "Where the Neuronto ARD Registry is published: source, dataset, packages and registry entries",
         f"All {n} external artefacts of the Neuronto Agentic Resource Discovery (ARD) Index: "
         f"the Apache-2.0 source, the CC BY 4.0 verified MCP tools dataset, PyPI packages, "
         f"MCP Registry entry and specification contributions.",
         body, f"{B}/published",
         jsonld=f'<script type="application/ld+json">{ld}</script>')
+
+
+def render_badge_page(conn: sqlite3.Connection, domain: str = "") -> str:
+    """The badge, why it is worth embedding, and the snippet, for one domain."""
+    from . import badge as _badge
+    B = config.PUBLIC_BASE
+    dom = re.sub(r"^https?://", "", (domain or "").strip().lower()).strip("/").split("/")[0]
+    dom = dom if re.match(r"^[a-z0-9.-]{3,100}$", dom or "") else ""
+    sample = dom or "example.com"
+    sn = _badge.snippet(sample)
+    state = ""
+    if dom:
+        st = _badge.stats_for(conn, dom)
+        state = (f"<p class=\"src\">We hold {st[1]} MCP server(s) for <b>{esc(dom)}</b>, "
+                 f"{st[0]} verified tool(s), {st[2]} answering.</p>" if st else
+                 f"<p class=\"src\">We do not hold <b>{esc(dom)}</b> yet. The badge will say "
+                 f"so until you <a href=\"/submit\">submit it</a>, and change on its own "
+                 f"once we have fetched it.</p>")
+
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / Badge</div>
+  <h1>The ARD Registry badge</h1>
+  <p class="lede">A small, monochrome badge stating what was actually verified about your
+  resources: how many tools your server returned to <code>tools/list</code>, and whether the
+  endpoint answered when probed. It is evidence, not a score, and it updates itself.</p>
+</div>
+
+<div class="note" style="max-width:64ch">
+  <form id="bf" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="bd" value="{esc(dom)}" placeholder="example.com" aria-label="Your domain"
+      style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);
+             border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
+    <button class="btn btn--w" type="submit">Get my badge</button>
+  </form>
+  {state}
+  <div style="margin-top:16px;display:flex;gap:22px;align-items:center;flex-wrap:wrap">
+    <img id="prev" src="{B}/badge/{esc(sample)}.svg" alt="{esc(sn['alt'])}" height="20">
+    <img src="{B}/badge/{esc(sample)}.svg?theme=light" alt="light variant" height="20"
+         style="background:#fff;padding:6px;border-radius:4px">
+    <img src="{B}/badge/{esc(sample)}.svg?theme=dark" alt="dark variant" height="20"
+         style="background:#0A0A0B;padding:6px;border-radius:4px">
+  </div>
+  <p class="src" style="margin-top:10px">Left to right: follows the reader's theme, light, dark.
+  Add <code>?theme=light</code> or <code>?theme=dark</code> to pin one.</p>
+</div>
+
+<h2 style="margin-top:34px;font-size:20px">Copy one of these</h2>
+<p class="lede">HTML, for your own site or documentation:</p>
+<pre id="h" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>{esc(sn['html'])}</code></pre>
+<p class="lede">Markdown, for a README:</p>
+<pre id="m" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>{esc(sn['markdown'])}</code></pre>
+
+<h2 style="margin-top:34px;font-size:20px">What it says, and what it never says</h2>
+<p class="lede">Three states, all of them observations:</p>
+<ul class="lede">
+  <li><b>N tools verified</b>, we completed an MCP handshake with your endpoint and it
+      returned that many tools, and it answered the last time we probed it.</li>
+  <li><b>endpoint verified</b>, your endpoint answered, and returned no public tool list
+      because it requires credentials first.</li>
+  <li><b>not indexed yet</b>, we have not fetched anything from you. The badge corrects
+      itself within the hour once we have.</li>
+</ul>
+<p class="lede">It is deliberately monochrome and carries no score, no grade and no stars.
+A graded badge invites the reader to treat it as a quality or safety judgment, and the
+specification is explicit that discovery is separate from trust. We will not imply one.</p>
+
+<h2 style="margin-top:34px;font-size:20px">Where to put it</h2>
+<p class="lede">Wherever someone is deciding whether to depend on you. Your documentation
+and integrations pages reach the person evaluating your product; a README reaches the
+developer about to install it. Both are worth having:</p>
+<ol class="lede">
+  <li>your documentation, integrations or developer page</li>
+  <li>your repository README, near the other badges</li>
+  <li>your MCP server's own listing wherever else you publish it</li>
+</ol>
+<p class="lede">The badge links to <code>{B}/ard-publishers/&lt;your-domain&gt;</code>, a real
+page listing what you publish, what answered and when it was last checked. It is a page
+about you, not an advertisement for us, which is the only reason it is worth linking to.</p>
+
+<div class="note" style="margin-top:24px">
+  Nothing here is required. Submitting to this index does not oblige you to display
+  anything, indexing is free either way, and no ranking depends on it.
+</div>
+
+<script>
+function go(e){{
+  e.preventDefault();
+  const d=document.getElementById('bd').value.trim().replace(/^https?:\\/\\//,'').split('/')[0];
+  if(d) location.search='?domain='+encodeURIComponent(d);
+  return false;
+}}
+</script>
+"""
+    return render.page(
+        "Badge: show what was verified about your resources",
+        "A monochrome badge stating how many tools your MCP server returned to tools/list "
+        "and whether the endpoint answers. Evidence, not a score. Free, updates itself.",
+        body, f"{B}/badge")

@@ -30,12 +30,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
-from . import (adoption, audit, badge, bench, catalog, config, embed,
+from . import (adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, render, search,
                store, tools_index)
 from .normalize import media_family
 
-app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
+app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
               docs_url="/api-docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"],
@@ -71,6 +71,7 @@ async def _rate_limit(request: Request, call_next):
     ok, retry, headers = limits.check(rule, request)
     if not ok:
         _, verified = limits.caller(request)
+        events.emit("rate_limited", a=rule)
         return JSONResponse(status_code=429,
                             content=limits.too_many(rule, retry, headers, verified),
                             headers={**headers, "retry-after": str(retry)})
@@ -78,6 +79,9 @@ async def _rate_limit(request: Request, call_next):
     for k, v in headers.items():
         resp.headers[k] = v
     return resp
+
+
+events.install(app)
 
 _conn: sqlite3.Connection | None = None
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -140,6 +144,7 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
         ok, retry, hdrs = limits.check("search_fed", request)
         if not ok:
             _, verified = limits.caller(request)
+            events.emit("rate_limited", a="search_fed")
             body_out = limits.too_many("search_fed", retry, hdrs, verified)
             body_out["detail"] += (" Set \"federation\": \"none\" to search this index "
                                    "only, which is not limited.")
@@ -161,6 +166,8 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     cleaned = search.clean(out["results"])
     payload: dict[str, Any] = {"results": cleaned,
                                "queryMatch": search.query_match(text, cleaned)}
+    events.emit("search", a=mode, b=payload["queryMatch"]["confidence"],
+                n=len(cleaned), ok=bool(cleaned))
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
     fed = out.get("_federated") or []
@@ -289,14 +296,14 @@ def _manifest() -> dict:
     B = config.PUBLIC_BASE
     return {
         "specVersion": "1.0",
-        "host": {"displayName": "Neuronto Agentic Resource Discovery (ARD) index",
+        "host": {"displayName": "Neuronto ARD Registry: Agentic Resource Discovery (ARD) index",
                  "identifier": "did:web:neuronto.com",
                  "documentationUrl": f"{B}/about"},
         "entries": [{
             # §5.3: a registry's base URL is discovered by finding an entry of
             # this type. This is how Neuronto becomes findable AS a registry.
             "identifier": "urn:air:neuronto.com:registry:neuronto",
-            "displayName": "Neuronto Agentic Resource Discovery (ARD) registry",
+            "displayName": "Neuronto ARD Registry: Agentic Resource Discovery (ARD) registry",
             "type": "application/ai-registry+json",
             "url": f"{B}/search",
             "description": ("A federated ARD registry and index. Implements "
@@ -328,7 +335,7 @@ def _manifest() -> dict:
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:mcp:discovery",
-            "displayName": "Neuronto - ARD & MCP discovery (MCP server)",
+            "displayName": "Neuronto ARD Registry: ARD and MCP discovery (MCP server)",
             "type": "application/mcp-server-card+json",
             "url": f"{B}/.well-known/mcp/server-card.json",
             "description": ("The same federated discovery as an MCP server, so an agent can "
@@ -395,7 +402,8 @@ async def robots():
 async def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
-            "/registries", "/console", "/blog",
+            "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
+            "/badge", "/console", "/blog",
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
@@ -438,7 +446,7 @@ discovery layer, not a runtime, and does not replace MCP or A2A.
 
 A registry indexes the resource descriptions publishers serve on their own
 domains and answers search queries over them. Publishers describe what they
-offer at /.well-known/ard.json. Neuronto is both a registry and a publisher.
+offer at /.well-known/ard.json. Neuronto is an ARD registry and a publisher.
 
 ## Index
 
@@ -619,6 +627,7 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
         ok, retry, hdrs = limits.check("submit", request)
         if not ok:
             _, verified = limits.caller(request)
+            events.emit("rate_limited", a="submit")
             note = limits.too_many("submit", retry, hdrs, verified)
             return JSONResponse(
                 {"jsonrpc": "2.0", "id": (body or {}).get("id"),
@@ -627,6 +636,9 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
                             "isError": True}},
                 status_code=200, headers={**hdrs, "retry-after": str(retry)})
     status, payload = await handle(db(), body)
+    if (body or {}).get("method") == "tools/call":
+        events.emit("mcp_call", a=str((body.get("params") or {}).get("name") or "?")[:60],
+                    ok=not ((payload or {}).get("result") or {}).get("isError", False))
     if payload is None:
         return Response(status_code=status)
     return JSONResponse(payload, status_code=status)
@@ -685,9 +697,17 @@ async def audit_endpoint(body: dict) -> JSONResponse:
         report["competition"] = comp
         report["recommendations"] = (report.get("recommendations") or []) \
             + audit.competition_advice(comp)
+        if hits:
+            report["badge"] = badge.snippet(report["domain"])
+            report["recommendations"].append(
+                "Your resources are indexed and verified here, so you can show that on your "
+                "own site if you want to: " + f"{config.PUBLIC_BASE}/badge?domain={report['domain']}"
+                + ". It states the verified tool count and whether your endpoint answered, it "
+                "corrects itself, and displaying it changes nothing about your indexing.")
     except Exception:
         pass
     report.pop("_manifest", None)
+    events.emit("audit", a=report.get("domain"), n=(report.get("score") or {}).get("total"))
     return JSONResponse(report)
 
 
@@ -750,6 +770,7 @@ async def demand_endpoint(domain: str = Query(..., min_length=3),
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "domain is required"})
     d = store.demand_for(db(), host, days, limit)
+    events.emit("demand", a=host, n=d.get("impressions"))
     if not d["indexed"]:
         return JSONResponse(status_code=404, content={
             "domain": host, "status": "not_indexed",
@@ -796,6 +817,7 @@ async def manifest_build(body: dict) -> JSONResponse:
             "error": "invalid_request", "detail": "a hostname is required"})
     async with limits.outbound():
         found = await publisher.infer_resources(host)
+    events.emit("manifest_build", a=host, n=len(found), ok=bool(found))
     if not found:
         return JSONResponse(status_code=404, content={
             "domain": host, "status": "nothing_found",
@@ -851,6 +873,7 @@ async def claim_start(body: dict) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "a hostname is required"})
     tok = publisher.claim_token(host)
+    events.emit("claim", a=host)
     return JSONResponse({
         "domain": host,
         "record": {"type": "TXT", "name": "@", "host": host,
@@ -868,6 +891,7 @@ async def claim_verify(body: dict) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "a hostname is required"})
     res = await publisher.verify_domain(host)
+    events.emit("claim_verified", a=host, ok=bool(res["verified"]))
     if not res["verified"]:
         return JSONResponse(status_code=403, content={
             "domain": host, "verified": False,
@@ -907,6 +931,7 @@ async def private_add(body: dict, request: Request) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "entry.displayName is required"})
     n = store.private_count(conn, owner)
+    events.emit("private_add", a=owner, n=n)
     return JSONResponse({"status": "added", "owner": owner, "private_entries": n,
                          "note": ("visible only to this domain's key. It is held in a separate "
                                   "table from the public index, so no public query, count or "
@@ -937,6 +962,7 @@ async def private_delete(body: dict, request: Request) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "identifier is required"})
     gone = store.delete_private(conn, owner, ident)
+    events.emit("private_delete", a=owner, ok=gone)
     return JSONResponse({"status": "deleted" if gone else "not_found",
                          "owner": owner, "private_entries": store.private_count(conn, owner)},
                         status_code=200 if gone else 404)
@@ -970,8 +996,16 @@ GUIDES = {
     "what-is-ard": "what-is-ard.html",
     "publish": "publish.html",
     "submit-mcp-server": "submit-mcp-server.html",
-    "registries": "registries.html",
+    "ard-registries": "ard-registries.html",
+    "ard-manifest-generator": "ard-manifest-generator.html",
+    "ard-conformance": "ard-conformance.html",
 }
+
+
+@app.get("/registries", include_in_schema=False)
+async def registries_redirect():
+    # The comparison moved to a name that says what it is.
+    return RedirectResponse("/ard-registries", status_code=301)
 
 
 @app.get("/img/{name}", include_in_schema=False)
@@ -1009,6 +1043,7 @@ async def tools_endpoint(body: dict) -> JSONResponse:
                        config.PAGE_SIZE_MAX))
     with_schema = bool(body.get("withSchema"))
     hits = tools_index.search_tools(db(), text, limit)
+    events.emit("tool_search", n=len(hits))
     if not with_schema:
         hits = [{k: v for k, v in h.items() if k != "inputSchema"} for h in hits]
     return JSONResponse({
@@ -1124,7 +1159,7 @@ async def adoption_endpoint(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/badge/{publisher}.svg", include_in_schema=False)
-async def badge_svg(publisher: str) -> Response:
+async def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|dark)$")) -> Response:
     pub = publisher.strip().lower()
     # A hostname or reverse-DNS publisher id, nothing else. This is a public,
     # unauthenticated SVG generator; without the allowlist it is a text-echo
@@ -1132,7 +1167,7 @@ async def badge_svg(publisher: str) -> Response:
     if not pub or len(pub) > 100 or not all(
             c.isalnum() or c in ".-_" for c in pub):
         return Response(status_code=404)
-    svg = badge.render(db(), pub)
+    svg = badge.render(db(), pub, theme)
     return Response(svg, media_type="image/svg+xml",
                     headers={"Cache-Control": "public, max-age=3600",
                              # GitHub proxies images through Camo and honours
@@ -1143,12 +1178,18 @@ async def badge_svg(publisher: str) -> Response:
 
 @app.get("/badge", include_in_schema=False)
 @app.get("/badge/", include_in_schema=False)
-async def badge_help():
+async def badge_help(request: Request, domain: str = Query("", max_length=100)):
+    """The badge, and the snippet for it, for whoever asks."""
+    if _wants_html(request):
+        return HTMLResponse(catalog.render_badge_page(db(), domain),
+                            headers={"Cache-Control": "public, max-age=900"})
+    pub = (domain or "your.domain").strip().lower()
     return JSONResponse({
-        "what": "README badge showing your server's verified tool count",
-        "url": f"{config.PUBLIC_BASE}/badge/<your-publisher-id>.svg",
-        "publisher_id": "the publisher segment of your URN, or your domain",
-        "markdown": badge.snippet("your.domain"),
+        "what": "a badge stating what we verified about your resources",
+        "url": f"{config.PUBLIC_BASE}/badge/<your-domain>.svg",
+        "themes": ["auto", "light", "dark"],
+        "publisher_id": "your domain, or the publisher segment of your URN",
+        "embed": badge.snippet(pub),
         "note": ("the badge states what was observed: how many tools your server "
                  "returned to tools/list and whether the endpoint answers. It is "
                  "never a trust, safety or quality rating"),
@@ -1248,6 +1289,35 @@ async def feed():
 
 @app.post("/submit")
 async def submit_endpoint(body: dict) -> JSONResponse:
+    resp = await _submit(body)
+    try:
+        d = json.loads(bytes(resp.body).decode() or "{}")
+        # A successful submission is the one moment the publisher is looking at
+        # us, so it is the only place the badge is offered. Stated as an option,
+        # with what it says, and never as a condition of being indexed.
+        if resp.status_code < 400 and d.get("status") == "indexed":
+            host = (d.get("identifier") or "").split(":")[2] if (d.get("identifier") or "").count(":") > 2 else ""
+            host = host or str((body or {}).get("domain") or "").strip().lower()
+            if host:
+                d["badge"] = {
+                    **badge.snippet(host),
+                    "optional": ("entirely optional and changes nothing about your indexing "
+                                 "or ranking. It states what we verified, and it corrects "
+                                 "itself when that changes"),
+                    "customise": f"{config.PUBLIC_BASE}/badge?domain={host}",
+                }
+                resp = JSONResponse(d, status_code=resp.status_code)
+        b = body or {}
+        target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or "")[:120]
+        events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
+                    b=target, n=d.get("verified_tools"),
+                    ok=resp.status_code < 400 and d.get("status") == "indexed")
+    except Exception:
+        pass
+    return resp
+
+
+async def _submit(body: dict) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
 
     `{"domain": "..."}` fetches the ARD manifest and indexes everything it
@@ -1392,8 +1462,8 @@ async def submit_page():
     body = f"""
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / Submit</div>
-  <h1>Submit your domain to the ARD index</h1>
-  <p class="lede">Two ways in, and neither needs an account, an allowlist, a charge or any
+  <h1>How to submit to an ARD registry</h1>
+  <p class="lede">Two ways into this one, and neither needs an account, an allowlist, a charge or any
   paid ranking. Give us a <b>domain</b> that serves an ARD manifest and we index everything
   it declares. Or give us an <b>MCP server URL</b> directly, with no manifest at all, and we
   handshake with it and read its own tool list.</p>
@@ -1408,6 +1478,21 @@ async def submit_page():
   </form>
   <pre id="o" style="margin-top:14px;display:none;white-space:pre-wrap"></pre>
 </div>
+
+<h2 style="margin-top:34px;font-size:20px">How each public ARD registry takes submissions</h2>
+<p class="lede">Checked on 1 September 2026. "Verified" means the registry fetches or handshakes with what you submit
+before listing it, so nothing is taken on the submitter's word.</p>
+<div class="scroll"><table class="tbl"><thead><tr><th>Registry</th><th>How to get listed</th><th>Verified first</th></tr></thead><tbody>
+<tr><td class="nm">Neuronto</td><td><code>POST /submit</code> with an MCP endpoint or a domain; the MCP tool <code>publish_resource</code>; <code>ard-publish submit</code></td><td>yes: handshake for an endpoint, manifest fetch for a domain</td></tr>
+<tr><td class="nm">WellKnown</td><td><code>/submit</code> form on its site</td><td>not stated</td></tr>
+<tr><td class="nm">GitHub Agent Finder</td><td>no submission path found; indexed by its own crawl</td><td>n/a</td></tr>
+<tr><td class="nm">Hugging Face Discover</td><td>no submission path found; indexes Hugging Face Spaces and Skills</td><td>n/a</td></tr>
+<tr><td class="nm">Desvela</td><td>no submission path found; crawls a top-100,000 domain list, so a domain outside it is not seen</td><td>n/a</td></tr>
+<tr><td class="nm">ARD Registry Hub</td><td>no submission path found</td><td>n/a</td></tr>
+</tbody></table></div>
+<p class="lede">Registries federate: a domain indexed here is returned to clients of any registry that
+queries Neuronto, and Neuronto queries every registry above on each federated search. The full
+comparison is at <a href="/ard-registries">ARD registries compared</a>.</p>
 
 <h2 style="margin-top:34px;font-size:20px">I only have an MCP server</h2>
 <p class="lede">Then submit the server itself. Most MCP developers have a repository, a

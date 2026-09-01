@@ -3,25 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What is ARD? Agentic Resource Discovery explained | Neuronto ARD Registry</title>
-<meta name="description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
-<link rel="canonical" href="https://neuronto.com/what-is-ard">
+<title>ARD registries compared: every public ARD registry, measured | Neuronto ARD Registry</title>
+<meta name="description" content="Every public Agentic Resource Discovery (ARD) registry compared: conformance, index size, precision, latency, federation, what each serves and how a publisher gets listed. Measured with the official tool.">
+<link rel="canonical" href="https://neuronto.com/ard-registries">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="What is ARD? Agentic Resource Discovery explained | Neuronto ARD Registry">
-<meta property="og:description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
+<meta property="og:title" content="ARD registries compared: every public ARD registry, measured | Neuronto ARD Registry">
+<meta property="og:description" content="Every public Agentic Resource Discovery (ARD) registry compared: conformance, index size, precision, latency, federation, what each serves and how a publisher gets listed. Measured with the official tool.">
 <meta property="og:image" content="https://neuronto.com/img/og-v1.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Neuronto Agentic Resource Discovery index">
-<meta property="og:url" content="https://neuronto.com/what-is-ard">
+<meta property="og:image:alt" content="Neuronto ARD Registry, the Agentic Resource Discovery (ARD) index">
+<meta property="og:url" content="https://neuronto.com/ard-registries">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/what-is-ard", "url": "https://neuronto.com/what-is-ard", "name": "What is ARD? Agentic Resource Discovery explained", "description": "ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does ARD stand for?", "acceptedAnswer": {"@type": "Answer", "text": "ARD stands for Agentic Resource Discovery. It is an open specification for how AI agents discover the tools, skills, agents and APIs they can call, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake."}}, {"@type": "Question", "name": "Is ARD the same as MCP?", "acceptedAnswer": {"@type": "Answer", "text": "No. MCP is a runtime protocol for calling a tool; ARD is a discovery layer that runs before invocation. ARD tells an agent what exists and where, and the agent then connects using the resource's own protocol, which may be MCP, A2A or a plain HTTP API. They are complementary, not competing."}}, {"@type": "Question", "name": "What is an agentic resource?", "acceptedAnswer": {"@type": "Answer", "text": "An agentic resource is anything an AI client can call to get work done: an MCP server, an A2A agent, a skill, an API or a workflow. ARD describes them all in one common envelope, using an IANA media type to say what each artifact is without constraining its internal schema."}}, {"@type": "Question", "name": "Who maintains the ARD specification?", "acceptedAnswer": {"@type": "Answer", "text": "The specification lives at agenticresourcediscovery.org and in the ards-project/ard-spec repository under Apache-2.0. Its authors are Junjie Bu of Google, R.V. Guha, and Shaun Smith of Hugging Face, with contributions acknowledged from AWS, Cisco, Databricks, GitHub, GoDaddy, Microsoft, Nvidia, Salesforce and Snowflake."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/ard-registries", "url": "https://neuronto.com/ard-registries", "name": "ARD registries compared: every public ARD registry, measured | Neuronto ARD Registry", "description": "Every public Agentic Resource Discovery (ARD) registry compared: conformance, index size, precision, latency, federation, what each serves and how a publisher gets listed. Measured with the official tool.", "isPartOf": {"@type": "WebSite", "name": "Neuronto ARD Registry", "url": "https://neuronto.com"}, "dateModified": "2026-09-01"}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -199,69 +199,67 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
-<p class="eyebrow">Agentic Resource Discovery</p>
-<h1>What is ARD?</h1>
-<p class="answer"><b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. It answers one question, <b>“what is available for this task?”</b>, and then gets out of the way.</p>
+<p class="eyebrow">Measured 31 August and 1 September 2026</p>
+<h1>ARD registries: every public Agentic Resource Discovery registry, compared</h1>
+<p class="answer">An <b>ARD registry</b> is a service that answers <code>POST /search</code> as the Agentic Resource Discovery specification defines it (section 5.3.2) and returns entries other publishers declared. Five public registries do. Three more sites describe themselves as ARD registries; what each actually serves is recorded below, with the date it was checked. <b>GitHub's Agent Finder fails conformance</b>, one registry has no usable score spread, one indexes a single vendor, and only one implements the specification's default federation mode.</p>
 
-<h2>The problem ARD solves</h2>
-<p>Today an agent can only use capabilities that somebody wired in beforehand. Every tool has to be
-integrated by hand, and every tool description has to sit in the context window competing for space
-with the actual work. That model does not survive an ecosystem of thousands of tools, let alone
-millions.</p>
-<p>ARD moves the selection problem out of the context window and into a search service. It is the
-same shift the early web made when it went from curated link directories to search engines: you stop
-maintaining a list of everything and start asking a question.</p>
-
-<h2>How ARD works</h2>
-<p>There are two sides, and the specification is deliberately small on both.</p>
-<h3>Publishers describe what they offer</h3>
-<p>A publisher serves a JSON manifest at <code>/.well-known/ard.json</code> on their own domain. Each
-entry names one resource: an identifier, a display name, an IANA media type saying what kind of thing
-it is, a URL, a description, and <b>representative queries</b> phrased the way a person would ask.</p>
-<p>Nobody approves this. There is no marketplace to apply to and no allowlist. Publishing on your own
-domain is the whole mechanism, which is why the specification calls the model web-native.</p>
-<h3>Registries index and answer</h3>
-<p>A registry crawls those manifests and exposes a search API. An agent asks in plain language, the
-registry returns ranked candidates, and the agent connects to whichever it picks.</p>
-<pre>POST /search
-{"query": {"text": "scrape a website behind cloudflare"}}</pre>
-
-<h2>The four discovery paths</h2>
-<p>A publisher can advertise entries four ways, and a consumer may check any of them. Serving only
-one makes you invisible to any client that checks another.</p>
-<table><thead><tr><th>Path</th><th>What it is</th></tr></thead><tbody>
-<tr><td><code>/.well-known/ard.json</code></td><td>The manifest itself. A conformant consumer <b>MUST</b> fetch this one.</td></tr>
-<tr><td><code>Agentmap:</code> in robots.txt</td><td>The agent-facing counterpart to <code>Sitemap:</code>.</td></tr>
-<tr><td><code>&lt;link rel="ard"&gt;</code></td><td>A tag in the page head, for crawlers that only read HTML.</td></tr>
-<tr><td>DNS service records</td><td>Points at a static entry source or a live registry endpoint.</td></tr>
+<h2>The benchmark</h2>
+<p>Conformance is the specification's own tool. Precision is top-1 over six queries with unambiguous
+correct answers. Spread is the average gap between the best and worst score in a result set, which
+measures whether a ranking carries any information at all.</p>
+<table><thead><tr><th>Registry</th><th>Conformance</th><th>P@1</th><th>Spread</th><th>Latency</th><th>federation: auto</th></tr></thead><tbody>
+<tr><td><b>Neuronto</b></td><td>PASS</td><td>6/6</td><td>78</td><td>&lt;200ms</td><td><b>yes</b></td></tr>
+<tr><td>GitHub Agent Finder</td><td><b>FAIL</b></td><td>6/6</td><td>32.5</td><td>1,970ms</td><td>no</td></tr>
+<tr><td>WellKnown</td><td>PASS</td><td>6/6</td><td>6.7</td><td>401ms</td><td>no</td></tr>
+<tr><td>Hugging Face Discover</td><td>PASS</td><td>0/6</td><td>40.8</td><td>1,712ms</td><td>no</td></tr>
+<tr><td>Desvela</td><td>PASS</td><td>2/6</td><td>39.7</td><td>213ms</td><td>no</td></tr>
 </tbody></table>
-<p class="note">The predecessor path <code>/.well-known/ai-catalog.json</code> is still read by
-crawlers written against the earlier draft. Serving both costs one route.</p>
 
-<h2>Federation</h2>
-<p>The specification defines three federation modes and makes <code>auto</code> the default: a
-registry queries its peers, merges their results with its own, and returns one set. The other two are
-<code>referrals</code>, where a registry returns pointers to its peers, and <code>none</code>, where
-it answers only from its own index.</p>
-<p>In practice, when we benchmarked every public ARD registry on 31 August 2026, <b>none of them
-implemented the default mode</b>. Asking for <code>auto</code> returned byte-identical results to
-<code>none</code> on all four.</p>
 
-<h2>Trust is deliberately separate</h2>
-<p>ARD is explicit that a relevance score reflects semantic relevance only and <b>must not</b> be
-read as a trust, compliance or safety judgment. Trust evaluation is decoupled and handled through a
-separate trust manifest, so a registry's ranking can never be mistaken for an endorsement.</p>
-<h2>ARD vs the MCP Registry vs A2A agent cards</h2>
-<p>These three are often listed together and they solve different problems.</p>
-<table><thead><tr><th></th><th>What it describes</th><th>Who publishes it</th><th>How it is searched</th></tr></thead><tbody>
-<tr><td><b>ARD</b></td><td>any callable resource: MCP servers, A2A agents, skills, APIs, documentation</td><td>the owning domain, one manifest at <code>/.well-known/ard.json</code></td><td>any ARD registry, over one search API; registries can query each other</td></tr>
-<tr><td><b>MCP Registry</b></td><td>MCP servers only: name, package, remote endpoint</td><td>the server author, into one central catalogue under a namespace</td><td>that catalogue's own API, by name</td></tr>
-<tr><td><b>A2A agent card</b></td><td>one agent's own capabilities and endpoint</td><td>the agent, at <code>/.well-known/agent-card.json</code></td><td>not searched; fetched once you already know the agent</td></tr>
+<h2>What each registry serves</h2>
+<p>Checked directly on 1 September 2026. "Search" means the specification's <code>POST /search</code> at the
+root; "manifest" is the registry's own <code>/.well-known/ard.json</code> or the predecessor
+<code>ai-catalog.json</code>; "listing path" is how a publisher gets in.</p>
+<table><thead><tr><th>Registry</th><th>Search per spec</th><th>Own manifest</th><th>Entries held</th><th>Listing path</th></tr></thead><tbody>
+<tr><td><b>Neuronto</b> (neuronto.com)</td><td>yes, plus <code>/explore</code> and <code>/agents</code></td><td>yes, both paths</td><td>10,700+</td><td><code>POST /submit</code>, MCP tool <code>publish_resource</code>, CLI <code>ard-publish submit</code>; verified before listing</td></tr>
+<tr><td>WellKnown (wellknownhq.com)</td><td>yes, at <code>/registry/search</code></td><td>yes</td><td>large, thousands</td><td><code>/submit</code> form</td></tr>
+<tr><td>GitHub Agent Finder</td><td>yes, at <code>/api/v1/search</code>; <code>/agents</code> fails conformance</td><td>no <code>ard.json</code> found</td><td>hundreds</td><td>none found; crawl only</td></tr>
+<tr><td>Hugging Face Discover</td><td>yes</td><td>yes, predecessor path</td><td>hundreds, Hugging Face content only</td><td>none found</td></tr>
+<tr><td>Desvela (registry.desvela.dev)</td><td>yes</td><td>yes, predecessor path</td><td>hundreds</td><td>none found; crawls a top-100,000 domain list</td></tr>
+<tr><td>ARD Registry Hub (ardregistry.org)</td><td>no; search at <code>/api/search</code>, not the specified path; no <code>/explore</code> or <code>/agents</code></td><td>predecessor path, 1 entry</td><td>hundreds, largely mirrored</td><td>none found</td></tr>
+<tr><td>smartbench.ai</td><td>no; <code>/search</code>, <code>/api/search</code> and <code>/registry/search</code> all 404</td><td>predecessor path, 1 entry</td><td>1</td><td>none found</td></tr>
+<tr><td>synscribe.com</td><td>no; search paths redirect to pages</td><td>predecessor path, 1 entry</td><td>1</td><td>none found</td></tr>
 </tbody></table>
-<p>They compose rather than compete. An ARD manifest entry can point at an MCP server card or an
-A2A agent card as its resource, and an ARD registry is how an agent finds that entry without
-knowing the domain in advance. The MCP Registry answers "what is this server called and where does
-it run"; ARD answers "what can do this task".</p>
+<p>A site can call itself a registry; the specification is what makes one. A conformant client
+discovers a registry by calling <code>POST /search</code> at its root, so a service that answers only
+at another path, or not at all, is invisible to every client that follows the specification,
+whatever its name says.</p>
+<p>Neuronto federates the registries that do answer, which is why its results carry a
+<code>source</code> field naming the registry each one came from.</p>
+
+<h2>What the numbers mean</h2>
+<h3>GitHub Agent Finder fails conformance</h3>
+<p>Its <code>GET /agents</code> endpoint answers 200 with a body that is not a paginated object, and
+the conformance tool marks the registry FAIL on exactly that. It is otherwise the strongest of the
+incumbents on result quality, and it is the default finder in the official connectors.</p>
+
+<h3>A score spread of 6.7 cannot rank</h3>
+<p>WellKnown returns accurate top results and holds a large index, but the gap between its best and
+worst result averages under seven points. A client cannot tell a strong match from a weak one, which
+defeats the purpose of returning a score.</p>
+
+<h3>Hugging Face Discover is not a general registry</h3>
+<p>It scored zero of six on precision because it indexes only Hugging Face Spaces and Skills. For
+queries about anything else it returns nothing relevant, despite shipping inside an official CLI.</p>
+
+<h3>Nobody implements the default federation mode</h3>
+<p>This is the largest gap in the ecosystem. The specification makes <code>auto</code> the default:
+query your peers, merge, return one set. Tested against all four incumbents, <code>auto</code>
+returned identical results to <code>none</code>, and the only source in every response was the
+registry's own domain.</p>
+<p>Measured across 26 probe queries, the union of all four indexes was <b>68% larger</b> than the
+largest single one. That difference is what a client loses every time it has to pick a registry
+instead of asking one that federates.</p>
 <div class="cta"><p><b>Check your own domain.</b> The console fetches what you
       publish and asks every public registry whether they return you.</p>
       <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>

@@ -3,25 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What is ARD? Agentic Resource Discovery explained | Neuronto ARD Registry</title>
-<meta name="description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
-<link rel="canonical" href="https://neuronto.com/what-is-ard">
+<title>ARD manifest generator: build an ard.json from what you already serve | Neuronto ARD Registry</title>
+<meta name="description" content="Generate an Agentic Resource Discovery (ARD) manifest for your domain from your existing MCP server, OpenAPI document, agent card or llms.txt. Nothing invented: every entry carries the evidence that produced it.">
+<link rel="canonical" href="https://neuronto.com/ard-manifest-generator">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="What is ARD? Agentic Resource Discovery explained | Neuronto ARD Registry">
-<meta property="og:description" content="ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.">
+<meta property="og:title" content="ARD manifest generator: build an ard.json from what you already serve | Neuronto ARD Registry">
+<meta property="og:description" content="Generate an Agentic Resource Discovery (ARD) manifest for your domain from your existing MCP server, OpenAPI document, agent card or llms.txt. Nothing invented: every entry carries the evidence that produced it.">
 <meta property="og:image" content="https://neuronto.com/img/og-v1.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Neuronto Agentic Resource Discovery index">
-<meta property="og:url" content="https://neuronto.com/what-is-ard">
+<meta property="og:image:alt" content="Neuronto ARD Registry, the Agentic Resource Discovery (ARD) index">
+<meta property="og:url" content="https://neuronto.com/ard-manifest-generator">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/what-is-ard", "url": "https://neuronto.com/what-is-ard", "name": "What is ARD? Agentic Resource Discovery explained", "description": "ARD stands for Agentic Resource Discovery: the open spec for how AI agents find tools, skills and APIs at runtime. What it is and how it works.", "isPartOf": {"@id": "https://neuronto.com/#site"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does ARD stand for?", "acceptedAnswer": {"@type": "Answer", "text": "ARD stands for Agentic Resource Discovery. It is an open specification for how AI agents discover the tools, skills, agents and APIs they can call, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake."}}, {"@type": "Question", "name": "Is ARD the same as MCP?", "acceptedAnswer": {"@type": "Answer", "text": "No. MCP is a runtime protocol for calling a tool; ARD is a discovery layer that runs before invocation. ARD tells an agent what exists and where, and the agent then connects using the resource's own protocol, which may be MCP, A2A or a plain HTTP API. They are complementary, not competing."}}, {"@type": "Question", "name": "What is an agentic resource?", "acceptedAnswer": {"@type": "Answer", "text": "An agentic resource is anything an AI client can call to get work done: an MCP server, an A2A agent, a skill, an API or a workflow. ARD describes them all in one common envelope, using an IANA media type to say what each artifact is without constraining its internal schema."}}, {"@type": "Question", "name": "Who maintains the ARD specification?", "acceptedAnswer": {"@type": "Answer", "text": "The specification lives at agenticresourcediscovery.org and in the ards-project/ard-spec repository under Apache-2.0. Its authors are Junjie Bu of Google, R.V. Guha, and Shaun Smith of Hugging Face, with contributions acknowledged from AWS, Cisco, Databricks, GitHub, GoDaddy, Microsoft, Nvidia, Salesforce and Snowflake."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "WebPage", "@id": "https://neuronto.com/ard-manifest-generator", "url": "https://neuronto.com/ard-manifest-generator", "name": "ARD manifest generator: build an ard.json from what you already serve | Neuronto ARD Registry", "description": "Generate an Agentic Resource Discovery (ARD) manifest for your domain from your existing MCP server, OpenAPI document, agent card or llms.txt. Nothing invented: every entry carries the evidence that produced it.", "isPartOf": {"@type": "WebSite", "name": "Neuronto ARD Registry", "url": "https://neuronto.com"}, "dateModified": "2026-09-01"}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -199,69 +199,56 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="doc">
-<p class="eyebrow">Agentic Resource Discovery</p>
-<h1>What is ARD?</h1>
-<p class="answer"><b>ARD stands for Agentic Resource Discovery.</b> It is an open specification for how AI agents find the tools, skills, agents and APIs they need, published in June 2026 by a working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia, Salesforce and Snowflake. It answers one question, <b>“what is available for this task?”</b>, and then gets out of the way.</p>
-
-<h2>The problem ARD solves</h2>
-<p>Today an agent can only use capabilities that somebody wired in beforehand. Every tool has to be
-integrated by hand, and every tool description has to sit in the context window competing for space
-with the actual work. That model does not survive an ecosystem of thousands of tools, let alone
-millions.</p>
-<p>ARD moves the selection problem out of the context window and into a search service. It is the
-same shift the early web made when it went from curated link directories to search engines: you stop
-maintaining a list of everything and start asking a question.</p>
-
-<h2>How ARD works</h2>
-<p>There are two sides, and the specification is deliberately small on both.</p>
-<h3>Publishers describe what they offer</h3>
-<p>A publisher serves a JSON manifest at <code>/.well-known/ard.json</code> on their own domain. Each
-entry names one resource: an identifier, a display name, an IANA media type saying what kind of thing
-it is, a URL, a description, and <b>representative queries</b> phrased the way a person would ask.</p>
-<p>Nobody approves this. There is no marketplace to apply to and no allowlist. Publishing on your own
-domain is the whole mechanism, which is why the specification calls the model web-native.</p>
-<h3>Registries index and answer</h3>
-<p>A registry crawls those manifests and exposes a search API. An agent asks in plain language, the
-registry returns ranked candidates, and the agent connects to whichever it picks.</p>
-<pre>POST /search
-{"query": {"text": "scrape a website behind cloudflare"}}</pre>
-
-<h2>The four discovery paths</h2>
-<p>A publisher can advertise entries four ways, and a consumer may check any of them. Serving only
-one makes you invisible to any client that checks another.</p>
-<table><thead><tr><th>Path</th><th>What it is</th></tr></thead><tbody>
-<tr><td><code>/.well-known/ard.json</code></td><td>The manifest itself. A conformant consumer <b>MUST</b> fetch this one.</td></tr>
-<tr><td><code>Agentmap:</code> in robots.txt</td><td>The agent-facing counterpart to <code>Sitemap:</code>.</td></tr>
-<tr><td><code>&lt;link rel="ard"&gt;</code></td><td>A tag in the page head, for crawlers that only read HTML.</td></tr>
-<tr><td>DNS service records</td><td>Points at a static entry source or a live registry endpoint.</td></tr>
+<p class="eyebrow">Free, no signup</p>
+<h1>ARD manifest generator: build your Agentic Resource Discovery manifest from what you already serve</h1>
+<p class="answer">Most domains never write an ARD manifest by hand. If you already run an MCP server, serve
+an OpenAPI document, publish an A2A agent card or an <code>llms.txt</code>, the manifest is a restatement of
+things a crawler can find. Enter a domain and one is generated from exactly that, and nothing else.</p>
+<div class="note" style="max-width:62ch">
+  <form id="f" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="d" placeholder="example.com" aria-label="Your domain"
+           style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
+    <button class="btn btn--w" type="submit">Generate</button>
+  </form>
+  <p id="ev" class="dim" style="margin:12px 0 0;font-size:13px"></p>
+  <pre id="o" style="margin-top:12px;display:none;white-space:pre-wrap;max-height:480px;overflow:auto"></pre>
+</div>
+<h2>What it looks for</h2>
+<table><thead><tr><th>On your domain</th><th>Becomes</th><th>Proof required</th></tr></thead><tbody>
+<tr><td><code>/mcp</code>, <code>/sse</code>, <code>/api/mcp</code>, <code>/mcp/server</code></td><td>an MCP server entry with its real tool names as representative queries</td><td>a completed MCP <code>initialize</code> handshake; a URL that merely exists is not enough</td></tr>
+<tr><td><code>/openapi.json</code> and the usual variants</td><td>an API entry titled from the document</td><td>the document parses as OpenAPI</td></tr>
+<tr><td><code>/.well-known/agent-card.json</code></td><td>an A2A agent entry</td><td>the card parses</td></tr>
+<tr><td><code>/llms.txt</code></td><td>a documentation entry</td><td>the file serves content</td></tr>
 </tbody></table>
-<p class="note">The predecessor path <code>/.well-known/ai-catalog.json</code> is still read by
-crawlers written against the earlier draft. Serving both costs one route.</p>
-
-<h2>Federation</h2>
-<p>The specification defines three federation modes and makes <code>auto</code> the default: a
-registry queries its peers, merges their results with its own, and returns one set. The other two are
-<code>referrals</code>, where a registry returns pointers to its peers, and <code>none</code>, where
-it answers only from its own index.</p>
-<p>In practice, when we benchmarked every public ARD registry on 31 August 2026, <b>none of them
-implemented the default mode</b>. Asking for <code>auto</code> returned byte-identical results to
-<code>none</code> on all four.</p>
-
-<h2>Trust is deliberately separate</h2>
-<p>ARD is explicit that a relevance score reflects semantic relevance only and <b>must not</b> be
-read as a trust, compliance or safety judgment. Trust evaluation is decoupled and handled through a
-separate trust manifest, so a registry's ranking can never be mistaken for an endorsement.</p>
-<h2>ARD vs the MCP Registry vs A2A agent cards</h2>
-<p>These three are often listed together and they solve different problems.</p>
-<table><thead><tr><th></th><th>What it describes</th><th>Who publishes it</th><th>How it is searched</th></tr></thead><tbody>
-<tr><td><b>ARD</b></td><td>any callable resource: MCP servers, A2A agents, skills, APIs, documentation</td><td>the owning domain, one manifest at <code>/.well-known/ard.json</code></td><td>any ARD registry, over one search API; registries can query each other</td></tr>
-<tr><td><b>MCP Registry</b></td><td>MCP servers only: name, package, remote endpoint</td><td>the server author, into one central catalogue under a namespace</td><td>that catalogue's own API, by name</td></tr>
-<tr><td><b>A2A agent card</b></td><td>one agent's own capabilities and endpoint</td><td>the agent, at <code>/.well-known/agent-card.json</code></td><td>not searched; fetched once you already know the agent</td></tr>
-</tbody></table>
-<p>They compose rather than compete. An ARD manifest entry can point at an MCP server card or an
-A2A agent card as its resource, and an ARD registry is how an agent finds that entry without
-knowing the domain in advance. The MCP Registry answers "what is this server called and where does
-it run"; ARD answers "what can do this task".</p>
+<h2>Nothing is invented</h2>
+<p>Every entry in a generated manifest carries the evidence that produced it. A generated manifest that
+guessed would put a claim on your domain that you never made and cannot defend, so if nothing on the
+list above answers, the result is empty rather than plausible.</p>
+<h2>What to do with it</h2>
+<ol>
+<li>Save it as <code>/.well-known/ard.json</code> on your domain, and as <code>/.well-known/ai-catalog.json</code> too, since most deployed consumers still check the older name.</li>
+<li>Edit the descriptions and add <code>representativeQueries</code> in the words someone would actually ask with. That field is what every registry indexes on.</li>
+<li>Until you serve your own, the generated copy is hosted at <code>https://neuronto.com/m/&lt;your-domain&gt;.json</code>, with a response header saying it was generated rather than authored by you.</li>
+<li>Run the <a href="/console">free audit</a> to see which registries return you.</li>
+</ol>
+<p>The same thing from a terminal: <code>curl -X POST https://neuronto.com/manifest/build -H 'content-type: application/json' -d '{"domain":"example.com"}'</code>, or <code>pip install ard-publish</code> and <code>ard-publish generate example.com</code>.</p>
+<script>
+async function go(e){
+  e.preventDefault();
+  const d=document.getElementById('d').value.trim(), o=document.getElementById('o'), ev=document.getElementById('ev');
+  if(!d) return false;
+  o.style.display='block'; o.textContent='probing '+d+' ...'; ev.textContent='';
+  try{
+    const r=await fetch('/manifest/build',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({domain:d})});
+    const j=await r.json();
+    if(j.error){ o.textContent=j.detail||j.error; return false; }
+    if(!j.entries){ o.textContent='Nothing answered on '+d+': no MCP handshake, and no OpenAPI document, agent card or llms.txt was served. Nothing was generated, because nothing was found.'; return false; }
+    ev.textContent=j.entries+' entr'+(j.entries===1?'y':'ies')+', each from something that answered: '+(j.evidence||[]).map(x=>x.entry+' ('+x.because+')').join('; ')+(j.hosted_at?'. Hosted at '+j.hosted_at:'');
+    o.textContent=JSON.stringify(j.manifest,null,2);
+  }catch(err){ o.textContent=String(err); }
+  return false;
+}
+</script>
 <div class="cta"><p><b>Check your own domain.</b> The console fetches what you
       publish and asks every public registry whether they return you.</p>
       <a class="btn btn--w" href="/console">Run a free audit</a></div></article></div>
