@@ -285,6 +285,13 @@ server that was mid-deploy, a DNS record that had not propagated, or a client th
 after one call still ends up indexed with no second submission from anyone. The queue is
 counted publicly at `/metrics.json` under `submissions`.
 
+**The other write endpoints answer honestly when the index is busy.** `POST /claim/verify`,
+`POST /private/add` and `POST /private/delete` return `503` with a `Retry-After` header and
+`"status": "busy"` instead of failing in an unnamed way; the DNS proof or the request is
+not lost, call again after the stated seconds. `POST /manifest/build` still returns the
+generated manifest and reports `"hosted_at": null` with a note when only the hosted copy
+could not be stored.
+
 **You have no manifest and do not want to write one.** Ask for one to be generated from
 what your domain already exposes, and either copy it or link it.
 
