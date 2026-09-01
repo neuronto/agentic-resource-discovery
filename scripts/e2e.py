@@ -51,6 +51,25 @@ def get(path, timeout=30):
 _KEYED_ROUTES = ("/submit", "/audit", "/manifest/build", "/claim/verify", "/mcp")
 
 
+def not_rate_limited(code, d, what=""):
+    """A 429 from our own limiter is the limiter working, not a defect here.
+
+    The suite spends about fifteen of the sixty hourly submit calls per run, so
+    two runs in an hour used to report the limiter as five product failures and
+    bury whatever else had broken. The limiter has its own three tests; every
+    other test treats a 429 as a reason it could not assert anything.
+    """
+    # The MCP route answers 200 with an isError payload rather than a 429, so
+    # the body has to be checked as well as the status or the same refusal
+    # reads as a product failure on one route and a skip on the other.
+    limited = code == 429 or (isinstance(d, dict) and d.get("error") == "rate_limited")
+    if limited:
+        raise Skip(f"our own rate limiter refused this call{' (' + what + ')' if what else ''}; "
+                   f"retry in {d.get('retryAfter', '?')}s, or set NEURONTO_KEY for the "
+                   f"verified allowance")
+    return code, d
+
+
 def post(path, payload, timeout=40):
     hdrs = dict(UA)
     key = os.getenv("NEURONTO_KEY", "").strip()
@@ -776,7 +795,7 @@ def t_submit_page_renders():
 
 def t_submit_indexes_a_real_publisher():
     """Fetched live from the domain, not taken from the form."""
-    s, d = post("/submit", {"domain": "clickhouse.com"}, timeout=60)
+    s, d = not_rate_limited(*post("/submit", {"domain": "clickhouse.com"}, timeout=60))
     assert s == 200, f"{s} {d}"
     assert d["status"] == "indexed", d
     assert d["manifest_path"], "no manifest path recorded"
@@ -785,7 +804,7 @@ def t_submit_indexes_a_real_publisher():
 
 
 def t_submit_rejects_a_domain_without_a_manifest():
-    s, d = post("/submit", {"domain": "example.com"}, timeout=60)
+    s, d = not_rate_limited(*post("/submit", {"domain": "example.com"}, timeout=60))
     assert s == 404, f"{s} {d}"
     assert d["status"] == "no_manifest"
     assert len(d.get("checked") or []) >= 2, "does not say which paths were tried"
@@ -793,7 +812,7 @@ def t_submit_rejects_a_domain_without_a_manifest():
 
 def t_submit_validates_input():
     for bad in ("../etc/passwd", "..", "not a domain", "", "a.b", "-x.com"):
-        s, d = post("/submit", {"domain": bad}, timeout=30)
+        s, d = not_rate_limited(*post("/submit", {"domain": bad}, timeout=30))
         assert s == 400, f"accepted {bad!r} with {s}"
 
 
@@ -860,7 +879,7 @@ def t_navigation_is_consistent_sitewide():
 
 def t_submit_accepts_a_bare_mcp_endpoint():
     """Most MCP developers have no manifest. They must still be able to submit."""
-    s, d = post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=90)
+    s, d = not_rate_limited(*post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=90))
     assert s == 200, f"{s} {d}"
     assert d["status"] == "indexed", d
     assert d["verified_tools"] > 0, "no tools read from the server"
@@ -869,7 +888,7 @@ def t_submit_accepts_a_bare_mcp_endpoint():
 
 
 def t_submit_rejects_a_url_that_is_not_mcp():
-    s, d = post("/submit", {"endpoint": "https://example.com/"}, timeout=60)
+    s, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/"}, timeout=60))
     assert s == 404, f"{s} {d}"
     assert d["status"] == "not_an_mcp_server"
     assert "handshake" in d["detail"].lower()
@@ -1194,7 +1213,9 @@ def t_publish_resource_verifies_before_indexing():
         _, r = post("/mcp", {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                              "params": {"name": "publish_resource", "arguments": args}})
         res = r["result"]
-        return res.get("isError", False), json.loads(res["content"][0]["text"])
+        body = json.loads(res["content"][0]["text"])
+        not_rate_limited(200, body, "publish_resource")
+        return res.get("isError", False), body
 
     err, _ = call({})
     assert err, "accepted a submission with no endpoint and no domain"
@@ -1694,7 +1715,7 @@ def t_badge_page_gives_a_snippet_and_no_obligation():
 
 
 def t_submit_offers_the_badge_without_requiring_it():
-    s, d = post("/submit", {"domain": "zapier.com"}, timeout=70)
+    s, d = not_rate_limited(*post("/submit", {"domain": "zapier.com"}, timeout=70))
     if d.get("status") != "indexed":
         raise Skip(f"submit returned {d.get('status')}, cannot check the offer")
     b = d.get("badge")
@@ -2046,7 +2067,7 @@ def t_a_refused_submission_says_whose_fault_it_is():
     endpoint from a refusal by us, and that ambiguity is not academic: one
     tried four times, got three failures, and gave up. The response carries a
     machine-readable reason and says plainly which side it came from."""
-    code, d = post("/submit", {"endpoint": "https://example.com/definitely-not-mcp"})
+    code, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/definitely-not-mcp"}))
     assert code == 404 and d.get("status") == "not_an_mcp_server", (code, d)
     assert d.get("reason", "").startswith("error:"), \
         f"no machine-readable reason on a refusal: {d}"
