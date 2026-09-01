@@ -503,21 +503,21 @@ def t_stats_exposes_history_counts():
 # 11. ARD publisher pages, feed, and social preview
 # --------------------------------------------------------------------------
 def t_publishers_index():
-    s, h = _html("/publishers/")
+    s, h = _html("/ard-publishers")
     assert s == 200, s
-    assert h.count('href="/publishers/') >= 150, "publisher list is not complete"
+    assert h.count('href="/ard-publishers/') >= 150, "publisher list is not complete"
     assert "ard.json" in h, "page does not explain what a manifest is"
 
 
 def t_publisher_page_renders():
-    s, h = _html("/publishers/zapier.com")
+    s, h = _html("/ard-publishers/zapier.com")
     assert s == 200, s
     assert "zapier.com" in h and "declared resources" in h
 
 
 def t_publisher_page_shows_the_full_record():
     """The page exists because the manifest is machine-only. Show the manifest."""
-    s, h = _html("/publishers/clickhouse.com")
+    s, h = _html("/ard-publishers/clickhouse.com")
     assert s == 200, s
     for needed in ("endpoint:", "identifier:", "urn:air:", "published to be found for",
                    "with a callable endpoint"):
@@ -527,7 +527,7 @@ def t_publisher_page_shows_the_full_record():
 def t_every_ard_publisher_is_listed():
     """No editorial filter. A publisher without descriptions is still a publisher."""
     for host in ("padlet.com", "supademo.com", "dribba.com"):
-        st, _ = _html(f"/publishers/{host}")
+        st, _ = _html(f"/ard-publishers/{host}")
         assert st == 200, f"{host} missing from the list ({st})"
 
 
@@ -537,7 +537,7 @@ def t_publisher_page_never_claims_an_unmade_check():
     Saying '0 answering' about a real business we never tested is a false
     statement about somebody else's service, which is worse than saying nothing.
     """
-    s, h = _html("/publishers/gstcranes.com")
+    s, h = _html("/ard-publishers/gstcranes.com")
     assert s == 200, s
     assert "not yet checked" in h.lower(), \
         "unprobed publisher does not say the check was not made"
@@ -548,7 +548,7 @@ def t_publisher_page_never_claims_an_unmade_check():
 
 def t_unknown_publisher_404s():
     try:
-        _html("/publishers/definitely-not-real.example")
+        _html("/ard-publishers/definitely-not-real.example")
         raise AssertionError("unknown publisher did not 404")
     except urllib.error.HTTPError as e:
         assert e.code == 404, e.code
@@ -569,7 +569,7 @@ def t_feed_is_valid_rss():
 
 
 def t_social_preview_tags_present():
-    for path in ("/tools/", "/publishers/", "/bench"):
+    for path in ("/tools/", "/ard-publishers", "/bench"):
         s, h = _html(path)
         assert 'property="og:image"' in h, f"{path} has no og:image"
         assert 'name="twitter:card" content="summary_large_image"' in h, \
@@ -589,7 +589,7 @@ def t_sitemap_lists_publishers():
     r = urllib.request.urlopen(urllib.request.Request(
         BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
     sm = r.read().decode()
-    assert "/publishers/" in sm, "sitemap missing publisher pages"
+    assert "/ard-publishers" in sm, "sitemap missing publisher pages"
     assert sm.count("<loc>") >= 100, f"sitemap only has {sm.count('<loc>')} urls"
 
 
@@ -600,7 +600,7 @@ def t_publisher_page_states_the_real_manifest_path():
     the pre-v0.91 /.well-known/ai-catalog.json and 404s on ard.json, so the page
     was wrong about 178 named companies and would have sent readers to a 404.
     """
-    s, h = _html("/publishers/clickhouse.com")
+    s, h = _html("/ard-publishers/clickhouse.com")
     assert s == 200, s
     assert "ai-catalog.json" in h, "page does not state the path actually served"
     import re as _re
@@ -619,6 +619,36 @@ def t_adoption_checks_both_paths():
     for x in w["detail"]:
         if x["publishes"]:
             assert x.get("path"), "a publishing host records no manifest path"
+
+
+def t_old_publisher_urls_redirect():
+    """The pages launched at /publishers and were indexed there. Do not break them."""
+    import urllib.request as _u
+    class NoRedirect(_u.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k): return None
+    op = _u.build_opener(NoRedirect)
+    for old, new in (("/publishers/", "/ard-publishers"),
+                     ("/publishers/zapier.com", "/ard-publishers/zapier.com")):
+        try:
+            op.open(_u.Request(BASE + old, headers={"User-Agent": "e2e"}), timeout=25)
+            raise AssertionError(f"{old} did not redirect")
+        except urllib.error.HTTPError as e:
+            assert e.code == 301, f"{old} returned {e.code}, expected 301"
+            assert e.headers.get("Location", "").endswith(new), e.headers.get("Location")
+
+
+def t_publishers_page_is_query_shaped():
+    """Headings should match what people and answer engines actually ask."""
+    s, h = _html("/ard-publishers")
+    low = h.lower()
+    for q in ("what is an ard publisher", "how do i become an ard publisher",
+              "which path do they actually use"):
+        assert q in low, f"missing question heading: {q!r}"
+    assert "application/ld+json" in h, "no structured data"
+    import re as _re
+    title = _re.search(r"<title>([^<]*)</title>", h).group(1).lower()
+    assert "ard publisher" in title and _re.search(r"\d", title), \
+        f"title is not specific: {title!r}"
 
 
 def main():

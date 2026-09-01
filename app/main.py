@@ -25,7 +25,8 @@ from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
+                               RedirectResponse)
 
 from . import (adoption, audit, badge, bench, catalog, config, embed,
                federation, ingest, liveness, render, search, store,
@@ -334,8 +335,8 @@ async def sitemap():
             # are the pages most worth discovering.
             "/tools/", "/bench", "/adoption"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
-    urls += ["/publishers/"] + [f"/publishers/{p['publisher']}"
-                                for p in catalog.publisher_list(db())]
+    urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
+                                   for p in catalog.publisher_list(db())]
     blog = WEB / "blog"
     if blog.exists():
         urls += sorted(f"/blog/{p.stem}" for p in blog.glob("*.html")
@@ -782,15 +783,15 @@ async def badge_help():
     })
 
 
-@app.get("/publishers", include_in_schema=False)
-@app.get("/publishers/", include_in_schema=False)
+@app.get("/ard-publishers", include_in_schema=False)
+@app.get("/ard-publishers/", include_in_schema=False)
 async def publishers_index():
     html_ = render.cached("pubs-index", 1800,
                           lambda: catalog.render_publishers_index(db()))
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
 
 
-@app.get("/publishers/{host}", include_in_schema=False)
+@app.get("/ard-publishers/{host}", include_in_schema=False)
 async def publisher_page(host: str):
     h = host.strip().lower()
     if not h or len(h) > 100 or not all(c.isalnum() or c in ".-_" for c in h):
@@ -799,6 +800,20 @@ async def publisher_page(host: str):
     if not html_:
         return JSONResponse(status_code=404, content={"error": "not_found"})
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+# The pages launched at /publishers and were submitted to IndexNow there. The
+# canonical slug carries the term now, so the old paths redirect permanently
+# rather than 404 or serve a duplicate.
+@app.get("/publishers", include_in_schema=False)
+@app.get("/publishers/", include_in_schema=False)
+async def publishers_moved():
+    return RedirectResponse("/ard-publishers", status_code=301)
+
+
+@app.get("/publishers/{host}", include_in_schema=False)
+async def publisher_moved(host: str):
+    return RedirectResponse(f"/ard-publishers/{host}", status_code=301)
 
 
 @app.get("/feed.xml", include_in_schema=False)
