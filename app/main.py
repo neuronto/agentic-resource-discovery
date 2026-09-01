@@ -129,7 +129,10 @@ def _warmable():
         ("published",   3600, lambda: catalog.render_published(db())),
         ("adoption-html", 3600, lambda: catalog.render_adoption(adoption.report(db()))),
     ] + [(f"cat-{slug}", 1800, (lambda sl: lambda: catalog.render_category(db(), sl))(slug))
-         for slug in sorted(catalog.published(db()))]
+         # Largest categories first: they are the slowest to build and the most
+         # likely to be opened, so they should be the first to stop being stale.
+         for slug, _n in sorted(catalog.published(db()).items(),
+                                key=lambda kv: -kv[1])]
 
 
 def _warm_all() -> None:
@@ -143,11 +146,20 @@ def _warm_all() -> None:
         return
     built = 0
     try:
+        # The category map first: every category page and the sitemap read it,
+        # and it is the single most expensive thing the request path can touch.
+        try:
+            if render.warm_value("published-map", 1800,
+                                 lambda: catalog._compute_published(db())):
+                built += 1
+                catalog.published(db(), refresh=False)
+        except Exception:
+            pass
         for key, ttl, build in _warmable():
             try:
                 if render.warm(key, ttl, build):
                     built += 1
-                    time.sleep(0.25)
+                    time.sleep(0.12)
             except Exception:
                 continue
     finally:
