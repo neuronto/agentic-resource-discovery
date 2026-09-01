@@ -303,6 +303,14 @@ def tls_conn() -> sqlite3.Connection:
         if not _tls_ready:
             init(c)
             _tls_ready = True
+    # The request path only reads. Every index write from a request runs in a
+    # thread on a fresh connection (`main._index_write`), because a connection
+    # that holds a read snapshot and then writes into a held lock is refused
+    # at once: SQLite skips the busy handler to avoid a deadlock, so the 45 s
+    # timeout above was never consulted and a publisher was refused in 200 ms
+    # (2026-09-01). `query_only` makes that rule unbreakable rather than
+    # remembered: a write on this connection raises instead of contending.
+    c.execute("PRAGMA query_only=1")
     _tls.conn = c
     return c
 

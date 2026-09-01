@@ -161,6 +161,7 @@ async def run():
     # 2. the same target submitted again joins the same row -------------------
     code, d2 = await submit({"endpoint": url})
     check(d2["submission"]["id"] == sid and d2["submission"]["attempts"] == 2, "re-submitting reuses the queue row and counts an attempt")
+    check(d2["submission"]["attempts_left"] == 7, f"...but a hand re-submit does not spend the schedule (attempts_left={d2['submission']['attempts_left']})")
 
     # 3. retrier: still down ---------------------------------------------------
     force_due(sid)
@@ -195,6 +196,14 @@ async def run():
     ev = d.get("evidence") or {}
     check(code == 202 and d["reason"] == "error:handshake", f"an HTML page is a handshake failure ({d['reason']})")
     check(ev.get("content_type", "").startswith("text/html") and "not an mcp" in ev.get("body", ""), f"evidence shows the HTML: {ev}")
+    # 6b. a publisher hammering re-submit while they fix things cannot exhaust
+    # the queue: nine hand re-submits in a row, still pending, still 7 left.
+    # (on 2026-09-02 the e2e suite's own probe target was gave_up after 59 min
+    # because each run's re-submit spent one of the eight scheduled attempts)
+    for _ in range(9):
+        code, d = await submit({"endpoint": url2})
+    check(code == 202 and d["status"] == "pending" and d["submission"]["attempts_left"] == 7 and d["submission"]["attempts"] == 10,
+          f"nine hand re-submits later it is still pending with the schedule intact ({code} {d['status']}, attempts={d['submission']['attempts']}, left={d['submission']['attempts_left']})")
 
     # 7. a JSON-RPC error is recorded as the server's own answer --------------
     MODE["state"] = "rpcerror"
@@ -313,6 +322,25 @@ async def run():
           f"manifest build under a lock is a 200 with the manifest and an honest hosted_note, not a 500 ({resp.status_code}, {took:.1f}s)")
     lock.rollback(); lock.close()
     publisher.infer_resources = _real_infer
+
+    # 15. the request-path connection cannot write at all. This is the guard
+    # behind every check above: a write on the loop connection would sit on a
+    # stale read snapshot, skip the busy handler, and fail in 200 ms exactly
+    # the way the 2026-09-01 refusals did. So it must raise, not contend.
+    loop_conn = main.db()
+    ro = loop_conn.execute("PRAGMA query_only").fetchone()[0]
+    refused = False
+    try:
+        loop_conn.execute("INSERT INTO stats(k,v) VALUES('resilience-ro','1')")
+    except sqlite3.OperationalError as e:
+        refused = "readonly" in str(e)
+    check(ro == 1 and refused,
+          f"the loop connection is read-only and a write on it raises (query_only={ro}, refused={refused})")
+    # 16. ...while the same process still writes through the sanctioned path
+    got = await main._index_write(lambda c: c.execute(
+        "INSERT OR REPLACE INTO stats(k,v) VALUES('resilience-rw','1')").rowcount)
+    await main._index_write(lambda c: c.execute("DELETE FROM stats WHERE k='resilience-rw'"))
+    check(got == 1, f"_index_write on a fresh connection still writes (rowcount={got})")
 
     print("  --------------------------------------------------------------")
     print(f"  {_n} passed, 0 failed\n")

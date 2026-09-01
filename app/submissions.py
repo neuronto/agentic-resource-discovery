@@ -133,8 +133,16 @@ def open(kind: str, target: str, source: str, probe: bool = False) -> str | None
 
 def record(sid: str | None, *, indexed: bool, reason: str, detail: str = "",
            evidence: dict | None = None, entry_key: str | None = None,
-           tools: int | None = None, busy: bool = False) -> dict | None:
-    """Close one attempt. Decides whether there will be another."""
+           tools: int | None = None, busy: bool = False,
+           scheduled: bool = True) -> dict | None:
+    """Close one attempt. Decides whether there will be another.
+
+    `scheduled` is True for the first attempt and for every attempt the
+    retrier makes; False for a publisher re-submitting a target that is
+    already queued. Only scheduled attempts spend the backoff. Before this
+    distinction a target re-submitted nine times in an hour was `gave_up`
+    after fifty-nine minutes, on a schedule that promised 2.7 days.
+    """
     c = _conn()
     if c is None or not sid:
         return None
@@ -148,14 +156,20 @@ def record(sid: str | None, *, indexed: bool, reason: str, detail: str = "",
             hist = json.loads(row["history"] or "[]")
         except Exception:
             hist = []
-        hist.append({"ts": now, "ok": indexed, "reason": reason, "busy": busy})
-        hist = hist[-20:]
+        manual = (not busy) and (not scheduled) and int(row["attempts"]) > 0
+        hist.append({"ts": now, "ok": indexed, "reason": reason, "busy": busy,
+                     "manual": manual})
+        hist = hist[-40:]
+        # The position on the schedule counts the initial attempt plus the
+        # retrier's, never a hand re-submit; a hand re-submit that fails only
+        # restarts the current wait from now.
+        spent = attempts - sum(1 for h in hist if h.get("manual"))
         if indexed:
             status, next_at = "indexed", None
         elif busy:
             status, next_at = "pending", now + BUSY_RETRY_S
-        elif attempts <= len(BACKOFF_S):
-            status, next_at = "pending", now + BACKOFF_S[attempts - 1]
+        elif spent <= len(BACKOFF_S):
+            status, next_at = "pending", now + BACKOFF_S[max(0, spent - 1)]
         else:
             status, next_at = "gave_up", None
         c.execute("""UPDATE submissions
@@ -248,12 +262,12 @@ def public(row: dict | None) -> dict | None:
     if row["status"] == "pending" and row.get("next_at"):
         out["next_attempt_at"] = row["next_at"]
         out["next_attempt_in_s"] = max(0, int(row["next_at"]) - now)
-        left = max(0, len(BACKOFF_S) - int(row["attempts"]))
+        left = max(0, len(BACKOFF_S) - _spent(row))
         out["attempts_left"] = left
         out["retrying_until"] = row["created"] + sum(BACKOFF_S)
         out["note"] = ("not indexed yet. We keep this submission and retry it "
                        f"automatically ({left} more attempts over the next "
-                       f"{_human(sum(BACKOFF_S[int(row['attempts']):]))}), so you do not "
+                       f"{_human(sum(BACKOFF_S[_spent(row):]))}), so you do not "
                        "have to. Fix whatever the evidence shows and the next attempt "
                        "will pick it up; re-submitting is harmless and triggers a "
                        "fresh attempt now.")
@@ -266,6 +280,15 @@ def public(row: dict | None) -> dict | None:
                        f"{_human(sum(BACKOFF_S))} and it never verified. The last evidence "
                        "is above. Submitting again starts a fresh set of attempts.")
     return out
+
+
+def _spent(row: dict) -> int:
+    """How many scheduled attempts a row has used (initial + retrier)."""
+    try:
+        hist = json.loads(row.get("history") or "[]")
+    except Exception:
+        hist = []
+    return max(0, int(row["attempts"]) - sum(1 for h in hist if h.get("manual")))
 
 
 def _human(s: int) -> str:

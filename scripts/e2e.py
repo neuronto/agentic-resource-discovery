@@ -567,23 +567,36 @@ def t_search_records_impressions():
                 h = cand.split("//", 1)[1].split("/", 1)[0].lower()
                 if h and h not in hosts:
                     hosts.append(h)
+    # The search log is written by a batching thread that nobody waits for
+    # (store._log_writer), so the impression is visible a moment after the
+    # answer, not inside it. Give bookkeeping a few seconds before calling it
+    # absent; under the suite's own concurrent load it once lost this race.
     saturated = []
-    for host in hosts[:5]:
-        try:
-            s3, dem = get(f"/demand?domain={host}&limit=200")
-        except urllib.error.HTTPError:
-            continue
-        queries = [q.get("query") for q in (dem.get("queries") or [])]
-        if marker in queries:
-            return
-        # 200 is the ceiling. A publisher past it will not show a query seen
-        # once, which is correct, so that host is inconclusive, not a failure.
-        if len(queries) >= 200:
-            saturated.append(host)
-            continue
+    deadline = _t.time() + 8
+    last = None
+    while True:
+        saturated = []
+        for host in hosts[:5]:
+            try:
+                s3, dem = get(f"/demand?domain={host}&limit=200")
+            except urllib.error.HTTPError:
+                continue
+            queries = [q.get("query") for q in (dem.get("queries") or [])]
+            if marker in queries:
+                return
+            # 200 is the ceiling. A publisher past it will not show a query seen
+            # once, which is correct, so that host is inconclusive, not a failure.
+            if len(queries) >= 200:
+                saturated.append(host)
+                continue
+            last = (host, len(queries))
+        if last is None or _t.time() >= deadline:
+            break
+        _t.sleep(1)
+    if last is not None:
         raise AssertionError(
-            f"the query that returned {host} never reached its demand report "
-            f"({len(queries)} queries listed, none is the probe)")
+            f"the query that returned {last[0]} never reached its demand report "
+            f"({last[1]} queries listed, none is the probe, after 8 s)")
     raise Skip(f"every reachable report was saturated ({saturated}) or absent; "
                f"impressions unverified on this run")
 
