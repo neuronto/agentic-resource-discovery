@@ -435,6 +435,47 @@ def tools_for(conn: sqlite3.Connection, entry_key: str) -> list[dict]:
     return out
 
 
+def demand_for(conn: sqlite3.Connection, host: str, days: int = 30) -> dict:
+    """What agents asked that returned this publisher's resources.
+
+    The question a publisher actually has is not "am I listed" but "did anyone
+    come looking, and for what". We can answer it because every search records
+    which entries it returned and at what rank, and we can answer it without
+    tracking anyone: the query text is a product signal, the person who typed it
+    is not our business, so no client identifier is stored to aggregate.
+    """
+    since = int(time.time()) - days * 86400
+    host = host.lower().strip()
+    keys = [r["key"] for r in conn.execute(
+        "SELECT key FROM entries WHERE lower(publisher)=?", (host,))]
+    if not keys:
+        return {"domain": host, "indexed": 0, "impressions": 0, "queries": [],
+                "resources": [], "days": days}
+    marks = ",".join("?" * len(keys))
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM impressions WHERE ts>=? AND entry_key IN ({marks})",
+        [since] + keys).fetchone()[0]
+    queries = [{"query": r["q"], "times": r["n"], "best_rank": r["best"],
+                "avg_rank": round(r["avg_r"], 1)}
+               for r in conn.execute(
+        f"""SELECT s.q, COUNT(*) n, MIN(i.rank) best, AVG(i.rank) avg_r
+            FROM impressions i JOIN searches s ON s.id = i.search_id
+            WHERE i.ts>=? AND i.entry_key IN ({marks})
+            GROUP BY s.q ORDER BY n DESC, best ASC LIMIT 25""",
+        [since] + keys)]
+    resources = [{"name": r["display_name"] or r["identifier"],
+                  "identifier": r["identifier"], "impressions": r["n"],
+                  "best_rank": r["best"]}
+                 for r in conn.execute(
+        f"""SELECT e.display_name, e.identifier, COUNT(*) n, MIN(i.rank) best
+            FROM impressions i JOIN entries e ON e.key = i.entry_key
+            WHERE i.ts>=? AND i.entry_key IN ({marks})
+            GROUP BY e.key ORDER BY n DESC LIMIT 25""", [since] + keys)]
+    return {"domain": host, "indexed": len(keys), "impressions": total,
+            "distinct_queries": len(queries), "queries": queries,
+            "resources": resources, "days": days}
+
+
 def history_counts(conn: sqlite3.Connection) -> dict:
     """Size of the accumulating record. Surfaced so it cannot rot unnoticed."""
     q = lambda s: conn.execute(s).fetchone()

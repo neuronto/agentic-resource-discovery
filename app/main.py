@@ -605,6 +605,75 @@ async def audit_endpoint(body: dict) -> JSONResponse:
     return JSONResponse(report)
 
 
+@app.get("/metrics.json", include_in_schema=False)
+async def metrics_json():
+    """Public operating numbers, so our claims can be checked rather than taken.
+
+    Every figure we publish anywhere is derived from these. Exposing them is the
+    cheapest possible way to be falsifiable, which matters more for an index than
+    for most things: the whole product is a claim about what exists.
+    """
+    conn = db()
+    c = store.counts(conn)
+    t = store.tool_counts(conn)
+    h = store.history_counts(conn)
+    q = lambda s: conn.execute(s).fetchone()[0]
+    return JSONResponse({
+        "generated": int(time.time()),
+        "index": {"entries": c["entries"], "publishers": c["publishers"],
+                  "by_kind": c["families"], "sources": c["sources"]},
+        "verified": {"tools": t["tools"], "servers_introspected": t["introspected"],
+                     "servers_with_tools": t["servers_with_tools"],
+                     "servers_requiring_auth": t["auth_required"]},
+        "liveness": {"answering": c["live"], "not_answering": c["dead"],
+                     "unprobed": c["unprobed"]},
+        "ard_publishers": {
+            "verified_manifests": q("SELECT COUNT(*) FROM crawl_seen WHERE manifest_path IS NOT NULL"),
+            "domains_crawled": q("SELECT COUNT(*) FROM crawl_seen"),
+            "by_path": {r[0]: r[1] for r in conn.execute(
+                "SELECT manifest_path, COUNT(*) FROM crawl_seen "
+                "WHERE manifest_path IS NOT NULL GROUP BY 1")},
+        },
+        "history": h,
+        "federation": {"upstreams": [u[1] for u in config.UPSTREAMS],
+                       "budget_ms": config.FEDERATION_BUDGET_MS},
+        "retrieval": {"dense": embed.status(conn)["configured"],
+                      "dense_coverage": embed.status(conn)["coverage"]},
+        "note": ("everything this project publishes is derived from these numbers. "
+                 "No client identifiers are collected, so none appear here."),
+    }, headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.get("/demand")
+async def demand_endpoint(domain: str = Query(..., min_length=3),
+                          days: int = Query(30, ge=1, le=365)) -> JSONResponse:
+    """Did anyone come looking, and what did they ask?
+
+    Being listed is not the question a publisher has; this is. Every search
+    records which entries it returned and at what rank, so the answer is exact
+    rather than modelled. No client identifier is ever stored, so this can say
+    what was asked and never who asked.
+    """
+    host = (domain.replace("https://", "").replace("http://", "")
+                  .strip("/").split("/")[0].lower())
+    if not host or "." not in host or len(host) > 253:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "domain is required"})
+    d = store.demand_for(db(), host, days)
+    if not d["indexed"]:
+        return JSONResponse(status_code=404, content={
+            "domain": host, "status": "not_indexed",
+            "detail": ("nothing from this domain is in the index yet, so there is no "
+                       "demand to report. Submit it at " + config.PUBLIC_BASE + "/submit"),
+        })
+    d["note"] = ("counts every search on this index that returned one of your resources, "
+                 "with the query text and the position you appeared at. Query text is a "
+                 "product signal; no identifier of who asked is stored, so none can be "
+                 "reported. Federated results served from other registries are not counted.")
+    d["console"] = f"{config.PUBLIC_BASE}/console?domain={host}"
+    return JSONResponse(d, headers={"Cache-Control": "private, max-age=60"})
+
+
 @app.get("/console", include_in_schema=False)
 async def console_page():
     f = WEB / "console.html"
