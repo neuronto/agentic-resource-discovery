@@ -651,6 +651,38 @@ def t_publishers_page_is_query_shaped():
         f"title is not specific: {title!r}"
 
 
+# --------------------------------------------------------------------------
+# 12. Submission: the only way a new publisher can reach an index today
+# --------------------------------------------------------------------------
+def t_submit_page_renders():
+    s, h = _html("/submit")
+    assert s == 200, s
+    assert "submit" in h.lower() and "ard-publishers" in h
+
+
+def t_submit_indexes_a_real_publisher():
+    """Fetched live from the domain, not taken from the form."""
+    s, d = post("/submit", {"domain": "clickhouse.com"}, timeout=60)
+    assert s == 200, f"{s} {d}"
+    assert d["status"] == "indexed", d
+    assert d["manifest_path"], "no manifest path recorded"
+    assert d["resources_indexed"] > 0, d
+    assert d["page"].endswith("/ard-publishers/clickhouse.com"), d["page"]
+
+
+def t_submit_rejects_a_domain_without_a_manifest():
+    s, d = post("/submit", {"domain": "example.com"}, timeout=60)
+    assert s == 404, f"{s} {d}"
+    assert d["status"] == "no_manifest"
+    assert len(d.get("checked") or []) >= 2, "does not say which paths were tried"
+
+
+def t_submit_validates_input():
+    for bad in ("../etc/passwd", "..", "not a domain", "", "a.b", "-x.com"):
+        s, d = post("/submit", {"domain": bad}, timeout=30)
+        assert s == 400, f"accepted {bad!r} with {s}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

@@ -593,6 +593,13 @@ def publisher_list(conn: sqlite3.Connection) -> list[dict]:
 _pubset: set[str] | None = None
 
 
+def invalidate_publishers() -> None:
+    """Forget the membership cache after an ingest, so a submission appears now."""
+    global _pubset, _published
+    _pubset = None
+    _published = None
+
+
 def publisher_ok(conn: sqlite3.Connection, host: str) -> bool:
     global _pubset
     if _pubset is None:

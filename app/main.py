@@ -333,7 +333,7 @@ async def sitemap():
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
-            "/tools/", "/bench", "/adoption"]
+            "/tools/", "/bench", "/adoption", "/submit"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
     urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
                                    for p in catalog.publisher_list(db())]
@@ -859,6 +859,151 @@ async def feed():
            + "".join(items) + "</channel></rss>")
     return Response(xml, media_type="application/rss+xml",
                     headers={"Cache-Control": "public, max-age=900"})
+
+
+# ---------------------------------------------------------------------------
+# Submission. The gap this closes is real: a domain that deployed a manifest an
+# hour ago is invisible to every registry until one happens to crawl it, and
+# our own crawl has covered 66,721 of 375,958 seed domains, so "eventually" can
+# mean never. WellKnown is the only peer offering this at all; Desvela and
+# Hugging Face Discover have no submission path.
+#
+# We fetch live rather than trusting the form, index what we find in the same
+# request, and hand back the audit. Nothing is taken on the submitter's word,
+# so there is nothing to spam: a domain without a manifest simply does not get
+# added, and one with a manifest was always going to be legitimate to index.
+# ---------------------------------------------------------------------------
+
+@app.post("/submit")
+async def submit_endpoint(body: dict) -> JSONResponse:
+    dom = str((body or {}).get("domain") or "").strip()
+    host = (dom.replace("https://", "").replace("http://", "")
+               .strip("/").split("/")[0].lower())
+    # A hostname, strictly. `../etc/passwd` reduces to `..` after the path split,
+    # which passed a naive "contains a dot" check and reached the fetcher.
+    labels = host.split(".")
+    if (not host or len(host) > 253 or len(labels) < 2
+            or not all(l and l[0].isalnum() and l[-1].isalnum()
+                       and all(c.isalnum() or c == "-" for c in l) for l in labels)
+            or not labels[-1].isalpha() or len(labels[-1]) < 2):
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": "a hostname is required, for example {\"domain\": \"example.com\"}"})
+
+    conn = db()
+    before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
+                          (host,)).fetchone()[0]
+    # Live fetch and ingest, both well-known paths, exactly as the crawler does.
+    # A long maintenance job can hold the write lock; that is our problem, not the
+    # submitter's, so it gets an honest 503 with a retry rather than a 500.
+    try:
+        got = await ingest.crawl_domains(conn, [host], concurrency=2, skip_seen_hours=0)
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            return JSONResponse(status_code=503, headers={"Retry-After": "60"}, content={
+                "status": "busy",
+                "domain": host,
+                "detail": ("the index is mid-maintenance and cannot accept a write right "
+                           "now. Your domain was not indexed; try again in a minute."),
+            })
+        raise
+    after = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
+                         (host,)).fetchone()[0]
+    row = conn.execute("SELECT manifest_path FROM crawl_seen WHERE domain=?",
+                       (host,)).fetchone()
+    path = row["manifest_path"] if row else None
+    catalog.invalidate_publishers()
+    render.invalidate()
+
+    if not path and after == 0:
+        return JSONResponse(status_code=404, content={
+            "status": "no_manifest",
+            "domain": host,
+            "checked": ingest.PATHS,
+            "detail": ("no ARD manifest found at either well-known path. Serve one and "
+                       "submit again; see " + config.PUBLIC_BASE + "/publish"),
+        })
+
+    return JSONResponse({
+        "status": "indexed",
+        "domain": host,
+        "manifest_path": path,
+        "resources_indexed": after,
+        "newly_added": max(0, after - before),
+        "page": f"{config.PUBLIC_BASE}/ard-publishers/{host}",
+        "crawl": got,
+        "note": ("fetched live from your domain, not taken from this form. Endpoint "
+                 "reachability is probed separately and is not a trust or safety rating"),
+    })
+
+
+@app.get("/submit", include_in_schema=False)
+async def submit_page():
+    B = config.PUBLIC_BASE
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / Submit</div>
+  <h1>Submit your domain to the ARD index</h1>
+  <p class="lede">If you serve an Agentic Resource Discovery manifest, this indexes it now
+  rather than whenever a crawler reaches you. We fetch it live from your domain, so there is
+  nothing to fill in beyond the hostname. No account, no allowlist, no charge, no paid
+  ranking.</p>
+</div>
+
+<div class="note" style="max-width:62ch">
+  <form id="f" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="d" placeholder="example.com" aria-label="Your domain"
+           style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);
+                  border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
+    <button class="btn btn--w" type="submit">Index my domain</button>
+  </form>
+  <pre id="o" style="margin-top:14px;display:none;white-space:pre-wrap"></pre>
+</div>
+
+<h2 style="margin-top:34px;font-size:20px">What happens when you submit</h2>
+<ol class="lede">
+  <li>We request both well-known manifest paths on your domain, live.</li>
+  <li>Whatever parses as a manifest is indexed immediately, with your declared types,
+      identifiers and representative queries preserved exactly as written.</li>
+  <li>Your endpoints are probed for reachability, and any MCP server among them is asked
+      for its tool list, so the index records what your servers actually expose.</li>
+  <li>You get a page at <code>{B}/ard-publishers/&lt;your-domain&gt;</code> and become
+      searchable through <code>/search</code> and the MCP endpoint.</li>
+</ol>
+
+<h2 style="margin-top:30px;font-size:20px">Do it from the command line</h2>
+<pre style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>curl -s -X POST {B}/submit \\
+  -H 'content-type: application/json' \\
+  -d '{{"domain":"example.com"}}'</code></pre>
+
+<div class="note">
+  Nothing here is taken on your word: the manifest is fetched from your domain, so a
+  submission cannot inject anything you do not actually publish. If no manifest is found you
+  get told which paths were tried. Not publishing yet? The
+  <a href="/publish">ten-minute guide</a> and the <a href="/console">free audit</a> both help.
+</div>
+
+<script>
+async function go(e){{
+  e.preventDefault();
+  const d=document.getElementById('d').value.trim(), o=document.getElementById('o');
+  if(!d) return false;
+  o.style.display='block'; o.textContent='fetching '+d+' ...';
+  try{{
+    const r=await fetch('/submit',{{method:'POST',headers:{{'content-type':'application/json'}},
+      body:JSON.stringify({{domain:d}})}});
+    const j=await r.json();
+    o.textContent=JSON.stringify(j,null,2);
+  }}catch(err){{ o.textContent=String(err); }}
+  return false;
+}}
+</script>
+"""
+    return HTMLResponse(render.page(
+        "Submit your domain to the ARD index",
+        "Index your Agentic Resource Discovery manifest now. We fetch it live from your "
+        "domain: no account, no allowlist, no charge.",
+        body, f"{B}/submit"))
 
 
 @app.get("/blog", include_in_schema=False)
