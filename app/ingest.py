@@ -14,6 +14,7 @@ Three sources, in descending order of what they are worth:
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import json
 import time
 
@@ -153,6 +154,37 @@ async def from_upstreams(conn, queries: list[str] | None = None) -> list[dict]:
 PATHS = ["/.well-known/ard.json", "/.well-known/ai-catalog.json"]
 
 
+
+def _flush(conn, pending: list[tuple], tries: int = 6) -> bool:
+    """Write the crawl_seen batch, waiting out a busy writer.
+
+    An unhandled `database is locked` here used to end the whole crawl. With a
+    supervised service that means a restart loop that never advances, because
+    the next run hits the same contended moment. Retry with backoff, and on
+    persistent failure keep the batch rather than dropping the record of work
+    already done.
+    """
+    if not pending:
+        return True
+    delay = 0.5
+    for _ in range(tries):
+        try:
+            conn.executemany("""INSERT INTO crawl_seen(domain,last_crawl,status,entries)
+                VALUES(?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
+                last_crawl=excluded.last_crawl, status=excluded.status,
+                entries=excluded.entries""", pending)
+            conn.commit()
+            pending.clear()
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 20)
+    print("    warning: could not commit crawl batch, will retry next flush", flush=True)
+    return False
+
+
 async def crawl_domains(conn, domains: list[str], concurrency: int | None = None,
                         skip_seen_hours: int = 168) -> dict:
     """Fetch the well-known paths across a domain list.
@@ -207,6 +239,15 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
                 try:
                     if store.upsert_entry(conn, e, "crawl"):
                         got += 1
+                except sqlite3.OperationalError:
+                    # Contended writer: give it a moment rather than dropping
+                    # the publisher we just successfully fetched.
+                    time.sleep(1.0)
+                    try:
+                        if store.upsert_entry(conn, e, "crawl"):
+                            got += 1
+                    except Exception:
+                        continue
                 except Exception:
                     # A malformed entry from a third party is expected, not
                     # exceptional. Skip it and keep crawling.
@@ -215,11 +256,7 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
                 found += 1; entries += got
         pending.append((dom, int(time.time()), "found" if got else "none", got))
         if len(pending) >= 400:
-            conn.executemany("""INSERT INTO crawl_seen(domain,last_crawl,status,entries)
-                VALUES(?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
-                last_crawl=excluded.last_crawl, status=excluded.status,
-                entries=excluded.entries""", pending)
-            conn.commit(); pending.clear()
+            _flush(conn, pending)
 
     try:
         # Chunked so a very large seed list does not build hundreds of thousands
@@ -229,12 +266,7 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
             batch = todo[i:i + CH]
             await asyncio.gather(*(one(d, clients[j % len(clients)])
                                    for j, d in enumerate(batch)))
-            if pending:
-                conn.executemany("""INSERT INTO crawl_seen(domain,last_crawl,status,entries)
-                    VALUES(?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
-                    last_crawl=excluded.last_crawl, status=excluded.status,
-                    entries=excluded.entries""", pending)
-                conn.commit(); pending.clear()
+            _flush(conn, pending)
             print(f"    crawled {min(i+CH, len(todo))}/{len(todo)}  publishers={found}  entries={entries}",
                   flush=True)
     finally:
