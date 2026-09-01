@@ -24,6 +24,16 @@ UA = {"User-Agent": "neuronto-e2e/1.0", "Content-Type": "application/json",
 
 _passed: list[str] = []
 _failed: list[tuple[str, str]] = []
+_skipped: list[tuple[str, str]] = []
+
+
+class Skip(Exception):
+    """Raised by a test that cannot run here. Reported as skipped, never passed.
+
+    A check that silently passes when it did not run is testing nothing, which
+    is exactly how two earlier checks in this project stayed green for weeks
+    while asserting nothing.
+    """
 
 
 def get(path, timeout=30):
@@ -50,6 +60,9 @@ def check(name, fn):
         fn()
         _passed.append(name)
         print(f"  PASS  {name}", flush=True)
+    except Skip as e:
+        _skipped.append((name, str(e)))
+        print(f"  SKIP  {name}\n          {e}", flush=True)
     except AssertionError as e:
         _failed.append((name, str(e)))
         print(f"  FAIL  {name}\n          {e}", flush=True)
@@ -1164,13 +1177,225 @@ def t_audit_advice_names_a_fixable_cause():
         assert len(r) > 40, f"advice too thin to act on: {r}"
 
 
+# ---------------------------------------------------------------------------
+# Boundaries. These assert what must NOT happen, so they are the ones that
+# matter after a refactor. The key-gated ones skip without a key rather than
+# fail, because the suite must stay runnable by anyone against production.
+# ---------------------------------------------------------------------------
+
+import os
+KEY  = os.getenv("NEURONTO_KEY", "").strip()
+KEY2 = os.getenv("NEURONTO_KEY2", "").strip()
+# A token that appears nowhere in the public index. "canary" alone is a false
+# positive: ai.canaryusers is a real publisher, which cost one debugging round.
+#
+# A private entry carrying this token is kept permanently on neuronto.com as a
+# tripwire. Without it the leak tests below would pass while asserting nothing,
+# which is the exact failure this project has hit before: a check that cannot
+# fail is testing nothing. If those tests go green after the entry is deleted,
+# they are lying. RUNBOOK has the command to restore it.
+CANARY = "zqxjv7f3a"
+
+
+def _auth(path, payload, key, method="POST"):
+    req = urllib.request.Request(BASE + path,
+                                 data=json.dumps(payload).encode() if payload is not None else None,
+                                 headers={**UA, "Authorization": f"Bearer {key}"}, method=method)
+    try:
+        r = urllib.request.urlopen(req, timeout=60)
+        return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except Exception:
+            return e.code, {}
+
+
+def t_manifest_build_refuses_private_addresses():
+    """It fetches on an arbitrary caller's behalf, so it must not reach inside."""
+    for host in ("127.0.0.1", "localhost", "169.254.169.254", "10.0.0.1",
+                 "192.168.1.1", "[::1]", "0.0.0.0", "metadata.google.internal"):
+        s, d = post("/manifest/build", {"domain": host})
+        got = d.get("entries", 0) if isinstance(d, dict) else 0
+        assert s >= 400 or got == 0, f"{host} produced {got} entries (status {s})"
+
+
+def t_claim_validates_the_hostname():
+    for host in ("localhost", "..", "a..b", "-x.com", "x-.com", "", ".",
+                 "a" * 300 + ".com", "exa mple.com"):
+        s, d = post("/claim", {"domain": host})
+        assert s >= 400, f"accepted hostname {host!r} (status {s})"
+    # A scheme is stripped rather than refused, deliberately and identically to
+    # /audit. What matters is that it normalises to the bare host, nothing more.
+    s, d = post("/claim", {"domain": "http://x.com/some/path?q=1"})
+    assert s == 200 and d.get("domain") == "x.com", f"normalisation: {d.get('domain')!r}"
+
+
+def t_malformed_bearer_tokens_are_all_rejected():
+    for k in ("", "nk_", "nk_x", "Bearer", "null", "undefined", "nk_" + "A" * 200,
+              "nk_' OR 1=1 --", "../../etc/passwd", "nk_%00"):
+        s, _ = _auth("/private/entries", None, k, method="GET")
+        assert s == 401, f"token {k[:24]!r} gave {s}, want 401"
+
+
+def t_no_private_entry_reaches_any_public_surface():
+    """The isolation claim, checked across every public read path at once."""
+    for mode in ("auto", "none", "referrals"):
+        s, d = post("/search", {"query": {"text": f"{CANARY} private canary marker"},
+                                "federation": mode, "pageSize": 30}, timeout=70)
+        assert s == 200, f"{mode}: {s}"
+        bad = [r for r in d.get("results", []) if r.get("visibility") == "private"]
+        assert not bad, f"LEAK via federation={mode}: {bad[:1]}"
+    s, d = post("/explore", {"query": {"text": f"{CANARY} canary"},
+                             "resultType": {"facets": [{"field": "type"},
+                                                       {"field": "publisher"}]}})
+    assert s == 200, f"/explore: {s} {str(d)[:120]}"
+    assert CANARY not in json.dumps(d).lower(), "/explore leaked a private entry"
+    for off in (0, 100, 500):
+        s, d = get(f"/agents?limit=100&offset={off}")
+        assert s == 200, s
+        assert CANARY not in json.dumps(d).lower(), f"/agents leaked at offset {off}"
+    for path in ("/feed.xml", "/sitemap.xml", "/badge/neuronto.com.svg",
+                 "/publisher/neuronto.com", "/metrics.json"):
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                BASE + path, headers={"User-Agent": UA["User-Agent"]}), timeout=40)
+            assert CANARY not in r.read().decode("utf-8", "replace").lower(), \
+                f"{path} leaked a private entry"
+        except urllib.error.HTTPError as e:
+            assert e.code in (400, 404), f"{path} -> {e.code}"
+
+
+def t_public_counts_reconcile():
+    """A hidden class of entry would show up here as a mismatch."""
+    s, d = get("/metrics.json")
+    assert s == 200
+    total = d["index"]["entries"]
+    assert sum(d["index"]["by_kind"].values()) == total, \
+        "by_kind does not reconcile with the entry total"
+    assert sum(d["index"]["sources"].values()) >= total, \
+        "an entry exists with no recorded source"
+
+
+def t_publish_resource_is_idempotent():
+    ids = []
+    for _ in range(2):
+        _, r = post("/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params":
+                    {"name": "publish_resource",
+                     "arguments": {"endpoint": "https://mcp.deepwiki.com/mcp"}}}, timeout=70)
+        ids.append(json.loads(r["result"]["content"][0]["text"]).get("identifier"))
+    assert ids[0] and ids[0] == ids[1], f"not idempotent: {ids}"
+
+
+def t_generation_and_submission_agree():
+    s, d = post("/manifest/build", {"domain": "mcp.deepwiki.com"}, timeout=70)
+    built = {e["identifier"] for e in (d.get("manifest") or {}).get("entries", [])}
+    s2, d2 = post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=70)
+    assert d2.get("identifier") in built, \
+        f"generation and submission disagree: {d2.get('identifier')} not in {built}"
+
+
+def t_audit_competition_agrees_with_search():
+    """The report must never claim a rank the index does not actually give."""
+    s, d = post("/audit", {"domain": "vercel.com"}, timeout=120)
+    assert s == 200, s
+    for q in (d.get("competition") or {}).get("queries", [])[:2]:
+        s2, d2 = post("/search", {"query": {"text": q["query"]},
+                                  "federation": "none", "pageSize": 10}, timeout=70)
+        rank = None
+        for i, r in enumerate(d2.get("results", []), 1):
+            if "vercel.com" in (r.get("url", "") + r.get("identifier", "")).lower():
+                rank = i
+                break
+        assert rank == q["your_best_rank"], \
+            f"{q['query']!r}: report says {q['your_best_rank']}, search says {rank}"
+
+
+def t_owner_sees_own_private_entries():
+    if not KEY:
+        raise Skip("set NEURONTO_KEY to a verified domain's key")
+    s, d = post("/search", {"query": {"text": f"{CANARY} private canary marker"},
+                            "federation": "none", "pageSize": 25}, timeout=70)
+    assert not [r for r in d["results"] if r.get("visibility") == "private"]
+    req = urllib.request.Request(BASE + "/search",
+        data=json.dumps({"query": {"text": f"{CANARY} private canary marker"},
+                         "federation": "none", "pageSize": 25}).encode(),
+        headers={**UA, "Authorization": f"Bearer {KEY}"}, method="POST")
+    body = urllib.request.urlopen(req, timeout=70).read().decode()
+    for line in body.splitlines():
+        if line.startswith("data: "):
+            body = line[6:]
+    res = json.loads(body)["results"]
+    priv = [r for r in res if r.get("visibility") == "private"]
+    assert len(priv) == 1, f"owner sees {len(priv)} private entries, want 1"
+    assert priv[0]["score"] >= 90, f"full-coverage match scored {priv[0]['score']}"
+
+
+def t_one_tenant_cannot_reach_another():
+    if not (KEY and KEY2):
+        raise Skip("set NEURONTO_KEY and NEURONTO_KEY2 to two verified domains' keys")
+    s, d = _auth("/private/entries", None, KEY2, method="GET")
+    assert s == 200, s
+    assert not any(CANARY.upper() in str(e.get("displayName", "")).upper()
+                   for e in d.get("entries", [])), "cross-tenant read"
+    s2, d2 = _auth("/private/entries",
+                   {"identifier": "urn:air:neuronto.com:private:adversary-canary"},
+                   KEY2, method="DELETE")
+    assert s2 == 404, f"cross-tenant delete returned {s2}"
+    s3, d3 = _auth("/private/entries", None, KEY, method="GET")
+    assert d3.get("count", 0) >= 1, "another tenant's key destroyed the entry"
+
+
+def t_score_is_relative_and_the_envelope_says_so():
+    """A caller must be able to tell "best of nothing" from a real answer.
+
+    Every top result scores near 100 by construction, because the score is
+    relative to its own result set. Measured on the live index, the nonsense
+    query below scored 100. An agent acting without a human cannot see the
+    difference from the score alone, so the envelope carries an absolute one.
+    """
+    s, d = post("/search", {"query": {"text": "zzzz nonexistent capability qqqq"},
+                            "federation": "none", "pageSize": 5}, timeout=70)
+    assert s == 200, s
+    m = d.get("queryMatch")
+    assert m, "no queryMatch in the search envelope"
+    assert m["coverage"] == 0.0 and m["confidence"] == "none", \
+        f"nonsense query reported {m['confidence']} at coverage {m['coverage']}"
+    assert "relative" in m["note"] and "never a trust" in m["note"]
+
+    s2, d2 = post("/search", {"query": {"text": "send an email"},
+                              "federation": "none", "pageSize": 5}, timeout=70)
+    m2 = d2["queryMatch"]
+    assert m2["coverage"] >= 0.6 and m2["confidence"] in ("medium", "high"), \
+        f"a real capability query reported {m2['confidence']} at {m2['coverage']}"
+    # the point of the field: the two are indistinguishable by score alone
+    assert d["results"][0]["score"] >= 90 and d2["results"][0]["score"] >= 90, \
+        "premise changed: top scores are no longer both near 100"
+
+
+def t_query_match_never_claims_correctness():
+    """Coverage is word overlap. It must not be described as more than that."""
+    s, d = post("/search", {"query": {"text": "get the weather forecast"},
+                            "federation": "none", "pageSize": 3}, timeout=70)
+    m = d["queryMatch"]
+    assert set(m["matchedTerms"]) <= set(m["queryTerms"]), "matched a term not in the query"
+    assert abs(m["coverage"] - len(m["matchedTerms"]) / max(1, len(m["queryTerms"]))) < 1e-6, \
+        "coverage does not equal matched over total, so it is not what it says"
+    assert "not correctness" in m["note"], "the note must not overclaim"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
         if name.startswith("t_") and callable(fn):
             check(name[2:].replace("_", " "), fn)
     print("  " + "-" * 62)
-    print(f"  {len(_passed)} passed, {len(_failed)} failed")
+    tail = f", {len(_skipped)} skipped" if _skipped else ""
+    print(f"  {len(_passed)} passed, {len(_failed)} failed{tail}")
+    if _skipped:
+        print("\n  SKIPPED (these assert nothing until you supply what they need):")
+        for n, why in _skipped:
+            print(f"   - {n}: {why}")
     if _failed:
         print("\n  FAILURES:")
         for n, e in _failed:

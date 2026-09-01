@@ -383,3 +383,48 @@ def clean(entries: list[dict]) -> list[dict]:
         d = {k: v for k, v in e.items() if not k.startswith("_") and v is not None}
         out.append(d)
     return out
+
+
+def query_match(text: str, results: list[dict]) -> dict:
+    """How much of the query the best result actually accounts for.
+
+    The `score` on each entry is deliberately relative to the best hit in its
+    own result set, because BM25 magnitudes are corpus- and query-dependent and
+    mean nothing on their own. That is correct for ordering and misleading on
+    its own: measured on the live index, the nonsense query "zzzz nonexistent
+    capability qqqq" returned a top score of 100, because something always ranks
+    first. A caller reading that number, very often an agent about to act
+    without a human in the loop, has no way to tell it apart from a real answer.
+
+    So the envelope carries one absolute number next to the relative ones. It is
+    corpus-independent, unlike every other signal here, which is exactly the
+    property needed: the fraction of the query's content words the top result's
+    own text accounts for. It is not a correctness claim, and it cannot be, but
+    it separates "this is the best of several good answers" from "this is the
+    best of nothing".
+    """
+    terms = _content_terms(text)
+    if not results or not terms:
+        return {"coverage": 0.0, "confidence": "none", "queryTerms": terms,
+                "note": "no result, or no content words in the query"}
+    top = results[0]
+    hay = " ".join(str(top.get(k) or "") for k in ("displayName", "description")) + " " \
+          + " ".join(str(x) for x in (top.get("representativeQueries") or [])) + " " \
+          + " ".join(str(x) for x in (top.get("tags") or []))
+    words = set(re.findall(r"[a-z0-9]+", hay.lower()))
+    hit = [t for t in terms
+           if any(w.startswith(t) or t.startswith(w) for w in words)]
+    cov = len(hit) / len(terms)
+    conf = ("high" if cov >= 0.75 else "medium" if cov >= 0.4
+            else "low" if cov > 0 else "none")
+    return {
+        "coverage": round(cov, 3),
+        "confidence": conf,
+        "matchedTerms": hit,
+        "queryTerms": terms,
+        "note": ("each result's `score` is relative to the best hit in this response, "
+                 "so the top result always scores near 100 even when nothing matched. "
+                 "`coverage` is absolute: the fraction of the query's content words the "
+                 "top result's own text accounts for. It measures overlap, not "
+                 "correctness, and it is never a trust or safety rating."),
+    }
