@@ -1753,12 +1753,26 @@ def t_header_and_footer_are_grouped_and_fit():
         assert 'class="navquick"' in h, f"{path}: no mobile quick links"
 
 
+def _re_email():
+    import re as _re
+    return _re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", _re.I)
+
+
 def t_contact_address_is_an_image_only():
     """Published deliberately, and never as text a scraper can lift."""
+    # The address itself is not written here either: a test that hard-codes it
+    # publishes it just as effectively as the page would. Supply it through the
+    # environment to check exactly, or the generic patterns always apply.
+    import os as _os
+    addr = _os.getenv("NEURONTO_CONTACT", "").strip().lower()
     s_, h = _html("/")
     assert "/img/contact.png" in h, "no contact image in the footer"
-    for form in ("hello@neuronto", "mailto:", "hello&#64;", "hello [at]"):
-        assert form.lower() not in h.lower(), f"the address appears as text: {form}"
+    low = h.lower()
+    for form in ("mailto:", "&#64;", "[at]", " (at) "):
+        assert form not in low, f"an address appears as text: {form}"
+    assert not _re_email().search(h), "an address appears as text in the page"
+    if addr:
+        assert addr not in low, "the exact address appears as text"
     r = urllib.request.urlopen(urllib.request.Request(
         BASE + "/img/contact.png", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
     assert r.status == 200 and r.headers.get("content-type") == "image/png"
@@ -1767,7 +1781,10 @@ def t_contact_address_is_an_image_only():
         try:
             rr = urllib.request.urlopen(urllib.request.Request(
                 BASE + path, headers={"User-Agent": UA["User-Agent"]}), timeout=30)
-            assert b"hello@neuronto" not in rr.read().lower(), f"{path} carries the address"
+            body = rr.read().decode("utf-8", "replace")
+            assert not _re_email().search(body), f"{path} carries an address"
+            if addr:
+                assert addr not in body.lower(), f"{path} carries the address"
         except urllib.error.HTTPError:
             pass
 
