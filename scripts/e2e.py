@@ -1932,6 +1932,53 @@ def t_llms_txt_tells_an_agent_how_to_be_listed():
     assert "/submit" in t and "publish_resource" in t
 
 
+def t_hero_search_hint_survives_without_a_script():
+    """The rotating hint is drawn into an overlay, so the input's own
+    placeholder is the only thing a reader gets with no JavaScript, with
+    reduced motion set, or if the script throws. Losing it is silent: the page
+    still looks finished, just with an empty box and no idea what to type."""
+    import re as _re
+    s, h = _html("/")
+    assert s == 200, s
+    assert 'class="bigsearch bigsearch--hero"' in h, "hero search lost its modifier"
+    for need in ('id="hsType"', 'id="hsTypeText"', 'class="hsCaret"'):
+        assert need in h, f"animated hint markup is missing {need}"
+    m = _re.search(r'<input id="q"[^>]*placeholder="([^"]+)"', h)
+    assert m and len(m.group(1)) > 8, "the no-script fallback placeholder is gone"
+    # The overlay must start hidden, or a no-script reader sees a bare caret.
+    assert _re.search(r"\.hsType\{display:none", h), "the hint overlay is not hidden by default"
+
+
+def t_hero_search_cannot_zoom_ios_on_focus():
+    """Mobile Safari zooms the viewport when a focused input is set below 16px
+    and never zooms back out, which leaves the page stuck wider than the
+    screen. The floor is load bearing, so it is asserted rather than trusted."""
+    import re as _re
+    s, h = _html("/")
+    m = _re.search(r"\.hsField\{[^}]*font-size:clamp\(\s*([\d.]+)px", h)
+    assert m, "the hero field no longer sets its own type scale"
+    assert float(m.group(1)) >= 16, f"hero input floor is {m.group(1)}px, must be >= 16"
+
+
+def t_every_search_shortcut_returns_something():
+    """The shortcuts under the hero are one tap from an empty results page if
+    the index drifts away from them. Each is run rather than eyeballed."""
+    import re as _re
+    s, h = _html("/")
+    phrases = []
+    for name in ("HINTS", "HINTS_SHORT"):
+        m = _re.search(r"const %s=\[(.*?)\];" % name, h, _re.S)
+        assert m, f"the {name} list is gone or was renamed"
+        phrases += _re.findall(r'"([^"]+)"', m.group(1))
+    assert len(phrases) >= 18, f"only {len(phrases)} hints"
+    empty = []
+    for q in phrases:
+        code, d = post("/search", {"query": {"text": q}, "federation": "none", "pageSize": 3})
+        if code != 200 or not d.get("results"):
+            empty.append(q)
+    assert not empty, f"these hints lead to an empty page: {empty}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
