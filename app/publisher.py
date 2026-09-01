@@ -26,12 +26,10 @@ import json
 import re
 import secrets
 import time
-from typing import Any
 
 import httpx
 
 from . import config, store
-from .normalize import media_family
 
 TXT_PREFIX = "neuronto-site-verification="
 DOH = "https://cloudflare-dns.com/dns-query"

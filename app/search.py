@@ -264,7 +264,12 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     if mode not in ("auto", "referrals", "none"):
         mode = "auto"
 
-    local = local_search(conn, text, flt, max(page_size, 10) * 3, owner_domain)
+    # The lexical leg is synchronous SQLite work and used to run right here, on
+    # the event loop, so concurrent searches ran one after another: ten at once
+    # took 1.2 seconds each where one takes forty milliseconds. It runs in the
+    # threadpool now, on that thread's own connection.
+    local = await asyncio.to_thread(
+        lambda: local_search(store.tls_conn(), text, flt, max(page_size, 10) * 3, owner_domain))
 
     if mode == "none":
         return {"results": local[:page_size], "_federated": [], "_dense": None}
