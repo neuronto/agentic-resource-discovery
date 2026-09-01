@@ -737,7 +737,39 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
   sees when it reads your manifest.
 </div>
 """
-    return render.page(title, desc, body, f"{B}/ard-publishers/{host}")
+    # Structured data. This is the page the badge points at, so it is the page a
+    # machine follows the badge to read. Without it a reader gets prose and has
+    # to infer the subject; with it the publisher and the resource list are
+    # stated outright. Every value here is one we measured.
+    ld = json.dumps({
+        "@context": "https://schema.org",
+        "@graph": [{
+            "@type": "WebPage",
+            "@id": f"{B}/ard-publishers/{host}",
+            "url": f"{B}/ard-publishers/{host}",
+            "name": title,
+            "description": desc,
+            "isPartOf": {"@type": "WebSite", "name": "Neuronto ARD Registry", "url": B},
+            "about": {"@type": "Organization", "name": host, "url": f"https://{host}",
+                      "identifier": f"did:web:{host}"},
+            "primaryImageOfPage": {"@type": "ImageObject", "url": f"{B}/badge/{host}.svg",
+                                   "caption": f"{host} on the Neuronto ARD Registry"},
+            "mainEntity": {
+                "@type": "ItemList",
+                "name": f"Agentic resources published by {host}",
+                "numberOfItems": len(rows),
+                "itemListElement": [
+                    {"@type": "ListItem", "position": i,
+                     "item": {"@type": "SoftwareApplication",
+                              "name": (r["display_name"] or r["identifier"]),
+                              "applicationCategory": KIND_LABEL.get(r["type_family"],
+                                                                    r["type_family"]),
+                              "url": r["url"] or f"https://{host}",
+                              "identifier": r["identifier"]}}
+                    for i, r in enumerate(rows[:25], start=1)]},
+        }]}, ensure_ascii=False)
+    return render.page(title, desc, body, f"{B}/ard-publishers/{host}",
+                       jsonld=f'<script type="application/ld+json">{ld}</script>')
 
 
 
@@ -961,99 +993,171 @@ def render_published(conn: sqlite3.Connection) -> str:
 
 
 def render_badge_page(conn: sqlite3.Connection, domain: str = "") -> str:
-    """The badge, why it is worth embedding, and the snippet, for one domain."""
+    """The badge, what it says, and the snippet, for one domain.
+
+    Styles are scoped to this page rather than borrowed. The first version
+    reused site classes for prose and left the preview images in a flex row,
+    where they were shrunk to 94px against a natural 206 and the code block
+    overflowed its container by 500px. Both were only visible in a browser.
+    """
     from . import badge as _badge
     B = config.PUBLIC_BASE
     dom = re.sub(r"^https?://", "", (domain or "").strip().lower()).strip("/").split("/")[0]
     dom = dom if re.match(r"^[a-z0-9.-]{3,100}$", dom or "") else ""
     sample = dom or "example.com"
     sn = _badge.snippet(sample)
-    state = ""
+
     if dom:
         st = _badge.stats_for(conn, dom)
-        state = (f"<p class=\"src\">We hold {st[1]} MCP server(s) for <b>{esc(dom)}</b>, "
-                 f"{st[0]} verified tool(s), {st[2]} answering.</p>" if st else
-                 f"<p class=\"src\">We do not hold <b>{esc(dom)}</b> yet. The badge will say "
-                 f"so until you <a href=\"/submit\">submit it</a>, and change on its own "
-                 f"once we have fetched it.</p>")
+        state = (f'<p class="bstate"><b>{esc(dom)}</b> is indexed: {st[1]} MCP server'
+                 f'{"s" if st[1] != 1 else ""}, <b>{st[0]}</b> verified tool'
+                 f'{"s" if st[0] != 1 else ""}, {st[2]} answering when last probed.</p>'
+                 if st else
+                 f'<p class="bstate">We hold nothing for <b>{esc(dom)}</b> yet. The badge says so '
+                 f'until you <a href="/submit">submit it</a>, then corrects itself within the hour.</p>')
+    else:
+        state = ('<p class="bstate">Enter your domain to see your own badge. '
+                 'The preview below uses <code>example.com</code>.</p>')
 
     body = f"""
+<style>
+.bwrap{{max-width:70ch}}
+.bstate{{color:var(--fg2);font-size:14px;line-height:1.6;margin:14px 0 0}}
+.bform{{display:flex;gap:8px;flex-wrap:wrap;margin:0}}
+.bform input{{flex:1 1 240px;min-width:0;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono);font-size:14px}}
+.swatches{{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;
+  margin:22px 0 0;max-width:none}}
+.sw{{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}}
+.sw .stage{{display:flex;align-items:center;justify-content:center;padding:20px 14px;min-height:64px}}
+.sw .stage img{{flex:0 0 auto;height:20px;width:auto;max-width:100%}}
+.sw .cap{{border-top:1px solid var(--line);padding:8px 12px;font-size:12px;color:var(--mut);
+  display:flex;justify-content:space-between;gap:10px;align-items:baseline}}
+.sw .cap code{{font-size:11px;color:var(--fg2)}}
+.stage-l{{background:#FFFFFF}} .stage-d{{background:#0A0A0B}}
+/* The default badge follows the reader's own system setting, not the colour
+   behind it, so it is shown on a neutral ground. An earlier version put it on a
+   half-light half-dark stage, which implied it adapts to its surroundings. */
+.stage-a{{background:var(--panel2)}}
+.snip{{margin:18px 0 0}}
+.snip .lbl{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 6px}}
+.snip .lbl span{{font-size:13px;color:var(--fg2)}}
+.snip button{{background:var(--panel2);border:1px solid var(--line2);color:var(--fg2);
+  border-radius:var(--r);padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}}
+.snip button:hover{{color:var(--fg);border-color:var(--fg2)}}
+.snip pre{{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 14px;margin:0;font-size:12px;line-height:1.55;
+  white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}}
+.states{{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:12px}}
+.states li{{display:grid;grid-template-columns:minmax(0,15em) 1fr;gap:16px;align-items:start;
+  font-size:14px;line-height:1.6;color:var(--fg2)}}
+.states b{{color:var(--fg);font-weight:560}}
+@media(max-width:640px){{.states li{{grid-template-columns:1fr;gap:2px}}}}
+</style>
+
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / Badge</div>
   <h1>The ARD Registry badge</h1>
   <p class="lede">A small, monochrome badge stating what was actually verified about your
   resources: how many tools your server returned to <code>tools/list</code>, and whether the
-  endpoint answered when probed. It is evidence, not a score, and it updates itself.</p>
+  endpoint answered when probed. It is evidence rather than a score, and it keeps itself
+  current.</p>
 </div>
 
-<div class="note" style="max-width:64ch">
-  <form id="bf" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
+<div class="bwrap">
+  <form class="bform" id="bf" onsubmit="return go(event)" style="margin-top:26px">
     <input id="bd" value="{esc(dom)}" placeholder="example.com" aria-label="Your domain"
-      style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);
-             border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
+           autocomplete="off" spellcheck="false">
     <button class="btn btn--w" type="submit">Get my badge</button>
   </form>
   {state}
-  <div style="margin-top:16px;display:flex;gap:22px;align-items:center;flex-wrap:wrap">
-    <img id="prev" src="{B}/badge/{esc(sample)}.svg" alt="{esc(sn['alt'])}" height="20">
-    <img src="{B}/badge/{esc(sample)}.svg?theme=light" alt="light variant" height="20"
-         style="background:#fff;padding:6px;border-radius:4px">
-    <img src="{B}/badge/{esc(sample)}.svg?theme=dark" alt="dark variant" height="20"
-         style="background:#0A0A0B;padding:6px;border-radius:4px">
-  </div>
-  <p class="src" style="margin-top:10px">Left to right: follows the reader's theme, light, dark.
-  Add <code>?theme=light</code> or <code>?theme=dark</code> to pin one.</p>
 </div>
 
-<h2 style="margin-top:34px;font-size:20px">Copy one of these</h2>
-<p class="lede">HTML, for your own site or documentation:</p>
-<pre id="h" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>{esc(sn['html'])}</code></pre>
-<p class="lede">Markdown, for a README:</p>
-<pre id="m" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>{esc(sn['markdown'])}</code></pre>
+<div class="swatches">
+    <div class="sw"><div class="stage stage-a">
+      <img src="{B}/badge/{esc(sample)}.svg" alt="{esc(sn['alt'])}"></div>
+      <div class="cap"><span>follows the reader's system theme</span><code>default</code></div></div>
+    <div class="sw"><div class="stage stage-l">
+      <img src="{B}/badge/{esc(sample)}.svg?theme=light" alt="Light variant"></div>
+      <div class="cap"><span>pinned light</span><code>?theme=light</code></div></div>
+    <div class="sw"><div class="stage stage-d">
+      <img src="{B}/badge/{esc(sample)}.svg?theme=dark" alt="Dark variant"></div>
+      <div class="cap"><span>pinned dark</span><code>?theme=dark</code></div></div>
+</div>
 
-<h2 style="margin-top:34px;font-size:20px">What it says, and what it never says</h2>
-<p class="lede">Three states, all of them observations:</p>
-<ul class="lede">
-  <li><b>N tools verified</b>, we completed an MCP handshake with your endpoint and it
-      returned that many tools, and it answered the last time we probed it.</li>
-  <li><b>endpoint verified</b>, your endpoint answered, and returned no public tool list
-      because it requires credentials first.</li>
-  <li><b>not indexed yet</b>, we have not fetched anything from you. The badge corrects
-      itself within the hour once we have.</li>
-</ul>
-<p class="lede">It is deliberately monochrome and carries no score, no grade and no stars.
-A graded badge invites the reader to treat it as a quality or safety judgment, and the
-specification is explicit that discovery is separate from trust. We will not imply one.</p>
+<h2 style="margin-top:40px;font-size:20px">Copy one of these</h2>
+<div class="bwrap">
+  <div class="snip">
+    <div class="lbl"><span>HTML, for your own site or documentation</span>
+      <button type="button" onclick="cp('sh',this)">Copy</button></div>
+    <pre id="sh">{esc(sn['html'])}</pre>
+  </div>
+  <div class="snip">
+    <div class="lbl"><span>Markdown, for a README</span>
+      <button type="button" onclick="cp('sm',this)">Copy</button></div>
+    <pre id="sm">{esc(sn['markdown'])}</pre>
+  </div>
+  <div class="snip">
+    <div class="lbl"><span>reStructuredText, for Python docs</span>
+      <button type="button" onclick="cp('sr',this)">Copy</button></div>
+    <pre id="sr">{esc(sn['rst'])}</pre>
+  </div>
+  <div class="snip">
+    <div class="lbl"><span>Plain text link, where an image would look out of place</span>
+      <button type="button" onclick="cp('st',this)">Copy</button></div>
+    <pre id="st">{esc(sn['text_html'])}</pre>
+  </div>
+</div>
 
-<h2 style="margin-top:34px;font-size:20px">Where to put it</h2>
-<p class="lede">Wherever someone is deciding whether to depend on you. Your documentation
-and integrations pages reach the person evaluating your product; a README reaches the
-developer about to install it. Both are worth having:</p>
-<ol class="lede">
-  <li>your documentation, integrations or developer page</li>
-  <li>your repository README, near the other badges</li>
-  <li>your MCP server's own listing wherever else you publish it</li>
-</ol>
-<p class="lede">The badge links to <code>{B}/ard-publishers/&lt;your-domain&gt;</code>, a real
-page listing what you publish, what answered and when it was last checked. It is a page
-about you, not an advertisement for us, which is the only reason it is worth linking to.</p>
+<h2 style="margin-top:40px;font-size:20px">What it says, and what it never says</h2>
+<div class="bwrap">
+  <ul class="states">
+    <li><b>N tools verified</b><span>We completed an MCP handshake with your endpoint, it
+      returned that many tools, and it answered the last time we probed it.</span></li>
+    <li><b>endpoint verified</b><span>Your endpoint answered and returned no public tool list,
+      because it asks for credentials first.</span></li>
+    <li><b>not indexed yet</b><span>We have not fetched anything from you. It corrects itself
+      within the hour once we have.</span></li>
+  </ul>
+  <p class="lede" style="margin-top:18px">There is no score, no grade and no stars, and there
+  never will be. A graded badge invites the reader to treat it as a quality or safety
+  judgment, and the specification is explicit that discovery is separate from trust. This
+  badge reports an observation, and it will report an unflattering one just as readily.</p>
+</div>
 
-<div class="note" style="margin-top:24px">
-  Nothing here is required. Submitting to this index does not oblige you to display
-  anything, indexing is free either way, and no ranking depends on it.
+<h2 style="margin-top:40px;font-size:20px">Where to put it</h2>
+<div class="bwrap">
+  <p class="lede">Wherever someone is deciding whether to depend on you. Your documentation
+  and integrations pages reach the person evaluating your product; a README reaches the
+  developer about to install it. Both are worth having.</p>
+  <p class="lede" style="margin-top:14px">It links to
+  <code>{B}/ard-publishers/&lt;your-domain&gt;</code>, a page listing what you publish, what
+  answered, and when it was last checked. Your reader can verify the claim rather than take
+  it, which is the only reason a badge is worth anything.</p>
+  <div class="note" style="margin-top:20px">
+    Displaying it is entirely optional. Indexing is free either way, nothing about your
+    ranking depends on it, and we will never ask you to add it to keep a listing.
+  </div>
 </div>
 
 <script>
 function go(e){{
   e.preventDefault();
-  const d=document.getElementById('bd').value.trim().replace(/^https?:\\/\\//,'').split('/')[0];
+  const d=document.getElementById('bd').value.trim().replace(/^https?:[/][/]/,'').split('/')[0];
   if(d) location.search='?domain='+encodeURIComponent(d);
   return false;
+}}
+function cp(id,btn){{
+  const t=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>{{
+    const o=btn.textContent; btn.textContent='Copied';
+    setTimeout(()=>{{btn.textContent=o;}},1400);
+  }});
 }}
 </script>
 """
     return render.page(
         "Badge: show what was verified about your resources",
         "A monochrome badge stating how many tools your MCP server returned to tools/list "
-        "and whether the endpoint answers. Evidence, not a score. Free, updates itself.",
+        "and whether the endpoint answers. Evidence, not a score. Free, and it updates itself.",
         body, f"{B}/badge")

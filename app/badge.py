@@ -175,11 +175,18 @@ def snippet(publisher: str, theme: str = "auto") -> dict:
     img = f"{B}/badge/{publisher}.svg{q}"
     href = f"{B}/ard-publishers/{publisher}"
     alt = f"{publisher} on the Neuronto ARD Registry"
+    # An image link carries no anchor text, so a text variant is offered too: it
+    # is the only form where the words describing the link are the link. Both are
+    # plain links; nothing here adds `nofollow`, and `noopener` is a security
+    # attribute that has no effect on how a link is followed or read.
+    text_label = f"Verified on the Neuronto ARD Registry"
     return {
         "html": (f'<a href="{href}" target="_blank" rel="noopener">'
                  f'<img src="{img}" alt="{alt}" height="20"></a>'),
         "markdown": f"[![{alt}]({img})]({href})",
         "rst": f".. image:: {img}\n   :alt: {alt}\n   :target: {href}",
+        "text_html": f'<a href="{href}" rel="noopener">{text_label}</a>',
+        "text_markdown": f"[{text_label}]({href})",
         "image": img,
         "link": href,
         "alt": alt,

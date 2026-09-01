@@ -13,7 +13,10 @@ copy to drift.
 from __future__ import annotations
 
 import html
+import os
 import re
+import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -57,7 +60,7 @@ NAV = """<nav><div class="wrap">
 </div></nav>"""
 
 FOOTER = """<footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/ard-registries">Registries</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/badge">Badge</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/ard-conformance">Conformance</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="/published">Published</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/ard-registries">Registries</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/badge">Badge</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/ard-conformance">Conformance</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="/published">Published</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div style="max-width:70ch">An Agentic Resource Discovery registry, index and publisher.
   Relevance scores are semantic only and are never a trust, compliance or safety rating.
   A tool listed as verified was read from that server's own tools/list; verification is a
@@ -143,21 +146,183 @@ def page(title: str, description: str, body: str, canonical: str,
 </body></html>"""
 
 
+# The page cache is on disk, shared by every worker, and survives a restart.
+#
+# It began as a dict per worker, and the failure was measured rather than
+# theorised: the capability index took **22.4 seconds** to build and 2ms to
+# serve, the service runs several workers so each cold miss happened once per
+# worker, every deploy emptied all of them, and the reverse proxy gives up at 30
+# seconds. Under crawl load that became a 504 on a page that is fast in the warm
+# case, which is the worst possible shape of slow.
+#
+# Three properties fix it, and the third is the one that matters:
+#   * shared, so one worker's work serves the others
+#   * durable, so a restart does not send the next visitor to the back of a
+#     22 second queue
+#   * **stale while revalidate**, so an expired entry is served immediately and
+#     rebuilt behind the request. After the very first build of a key, nobody
+#     ever waits for a rebuild again.
+_CACHE_DB = Path(os.getenv("NEURONTO_PAGECACHE_DB",
+                           str(Path(os.getenv("NEURONTO_DB", "./data/neuronto.db")).parent
+                               / "pagecache.db")))
+_local = threading.local()
+_building: set[str] = set()
+_build_lock = threading.Lock()
+
+
+def _cdb() -> sqlite3.Connection | None:
+    """One connection per thread. SQLite objects are not shareable across them."""
+    c = getattr(_local, "conn", None)
+    if c is not None:
+        return c
+    try:
+        _CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(str(_CACHE_DB), timeout=5)
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA synchronous=OFF")      # a cache; losing it costs a rebuild
+        c.execute("PRAGMA busy_timeout=4000")
+        c.execute("""CREATE TABLE IF NOT EXISTS pages(
+                       key TEXT PRIMARY KEY, built REAL NOT NULL, html TEXT NOT NULL
+                     ) WITHOUT ROWID""")
+        c.commit()
+        _local.conn = c
+        return c
+    except Exception:
+        return None
+
+
+def _read(key: str):
+    c = _cdb()
+    if c is None:
+        return _cache.get(key)
+    try:
+        r = c.execute("SELECT built, html FROM pages WHERE key=?", (key,)).fetchone()
+        return (r[0], r[1]) if r else None
+    except Exception:
+        return _cache.get(key)
+
+
+def _write(key: str, html_: str) -> None:
+    _cache[key] = (time.time(), html_)          # in-process copy, avoids a read per hit
+    c = _cdb()
+    if c is None:
+        return
+    try:
+        c.execute("INSERT INTO pages(key,built,html) VALUES(?,?,?) "
+                  "ON CONFLICT(key) DO UPDATE SET built=excluded.built, html=excluded.html",
+                  (key, time.time(), html_))
+        c.commit()
+    except Exception:
+        pass
+
+
+def _rebuild(key: str, build) -> None:
+    try:
+        _write(key, build())
+    except Exception:
+        pass
+    finally:
+        with _build_lock:
+            _building.discard(key)
+
+
 def cached(key: str, ttl: int, build) -> str:
-    """Serve a generated page from memory for `ttl` seconds.
+    """Serve a generated page, rebuilding behind the request when it is stale.
 
     These pages aggregate tens of thousands of rows. Rebuilding one per request
     would spend the whole latency budget on work whose inputs change a few times
-    a day.
+    a day, and rebuilding one *during* a request is how a fast page becomes a
+    gateway timeout.
     """
-    now = time.time()
-    got = _cache.get(key)
-    if got and now - got[0] < ttl:
+    got = _cache.get(key) or _read(key)
+    if got:
+        if time.time() - got[0] >= ttl:
+            # Stale: hand back what we have and refresh out of the way. One
+            # rebuild per key at a time, or a burst of traffic on an expired
+            # page starts a thread per request.
+            with _build_lock:
+                fresh = key not in _building
+                if fresh:
+                    _building.add(key)
+            if fresh:
+                threading.Thread(target=_rebuild, args=(key, build),
+                                 name=f"rebuild:{key}", daemon=True).start()
         return got[1]
+    # Nothing at all: this is the only path that waits, and warm_pages() exists
+    # so that a visitor is not the one who pays for it.
     html_ = build()
-    _cache[key] = (now, html_)
+    _write(key, html_)
     return html_
+
+
+def claim_warm(holder: str, ttl: int = 300) -> bool:
+    """Claim the right to warm the cache, across processes.
+
+    Every worker starts at the same moment and each was warming the same 40-odd
+    expensive pages independently. On a two core box that saturated both for a
+    minute after every deploy, which is exactly when traffic arrives, and it was
+    entirely duplicated work: the cache is shared, so one worker building it
+    serves all of them. The claim lives in the cache itself, so it needs no
+    extra coordination and expires on its own if a worker dies mid-warm.
+    """
+    c = _cdb()
+    if c is None:
+        return True                              # no shared store, warm locally
+    now = time.time()
+    try:
+        r = c.execute("SELECT built, html FROM pages WHERE key='__warmlock__'").fetchone()
+        if r and now - r[0] < ttl:
+            return False                         # somebody else is warming
+        c.execute("INSERT INTO pages(key,built,html) VALUES('__warmlock__',?,?) "
+                  "ON CONFLICT(key) DO UPDATE SET built=excluded.built, html=excluded.html",
+                  (now, holder))
+        c.commit()
+        return True
+    except Exception:
+        return True
+
+
+def release_warm() -> None:
+    c = _cdb()
+    if c is None:
+        return
+    try:
+        c.execute("DELETE FROM pages WHERE key='__warmlock__'")
+        c.commit()
+    except Exception:
+        pass
+
+
+def warm(key: str, ttl: int, build) -> bool:
+    """Build a page if it is missing or stale. Returns True if it built."""
+    got = _read(key)
+    if got and time.time() - got[0] < ttl:
+        return False
+    _write(key, build())
+    return True
 
 
 def invalidate() -> None:
     _cache.clear()
+    c = _cdb()
+    if c is None:
+        return
+    try:
+        c.execute("DELETE FROM pages")
+        c.commit()
+    except Exception:
+        pass
+
+
+def cache_stats() -> dict:
+    c = _cdb()
+    out = {"backend": "sqlite" if c else "memory", "in_process": len(_cache)}
+    if c:
+        try:
+            out["stored"] = c.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+            out["bytes"] = c.execute("SELECT COALESCE(SUM(LENGTH(html)),0) FROM pages").fetchone()[0]
+            out["oldest_s"] = int(time.time() - (c.execute(
+                "SELECT MIN(built) FROM pages").fetchone()[0] or time.time()))
+        except Exception:
+            pass
+    return out
