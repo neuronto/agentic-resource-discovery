@@ -1080,18 +1080,30 @@ async def manifest_build(body: dict) -> JSONResponse:
                            "/llms.txt"],
         })
     man = publisher.manifest_for(host, found)
-    conn = db()
-    conn.execute("""INSERT INTO stats(k,v) VALUES(?,?)
-                    ON CONFLICT(k) DO UPDATE SET v=excluded.v""",
-                 (f"manifest:{host}", json.dumps(man, ensure_ascii=False)))
-    conn.commit()
+    # Off the loop, own connection. On 2026-09-01 this INSERT ran on the
+    # request connection and met the crawl's lock twice in one minute: two
+    # 500s for a caller who had done nothing wrong. The manifest itself is
+    # computed already, so a busy index costs only the hosted copy.
+    hosted = True
+    try:
+        await _index_write(lambda c: c.execute(
+            """INSERT INTO stats(k,v) VALUES(?,?)
+               ON CONFLICT(k) DO UPDATE SET v=excluded.v""",
+            (f"manifest:{host}", json.dumps(man, ensure_ascii=False))))
+    except Exception as e:
+        if not _busy(e):
+            raise
+        hosted = False
     return JSONResponse({
         "domain": host,
         "entries": len(man["entries"]),
         "evidence": [{"entry": e.get("displayName"), "because": e.get("_evidence")}
                      for e in found],
         "manifest": man,
-        "hosted_at": f"{config.PUBLIC_BASE}/m/{host}.json",
+        "hosted_at": f"{config.PUBLIC_BASE}/m/{host}.json" if hosted else None,
+        **({} if hosted else {"hosted_note": (
+            "the index was busy and the hosted copy was not stored; the manifest "
+            "above is complete, save it or call again in 30 seconds")}),
         "how_to_adopt": [
             f"Serve this JSON yourself at https://{host}/.well-known/ard.json, or",
             f"point at ours: add to robots.txt   Agentmap: {config.PUBLIC_BASE}/m/{host}.json",
@@ -1151,7 +1163,13 @@ async def claim_verify(body: dict) -> JSONResponse:
             "detail": ("the proof record is not visible yet. DNS changes can take a few "
                        "minutes to propagate; try again shortly."),
         })
-    key = publisher.issue_key(db(), host)
+    try:
+        key = await _index_write(lambda c: publisher.issue_key(c, host))
+    except Exception as e:
+        if not _busy(e):
+            raise
+        return _busy_response("your key", domain=host, verified=True,
+                              note="the DNS proof is verified; no change needed on your side")
     return JSONResponse({
         "domain": host, "verified": True, "api_key": key,
         "grants": [f"read and write private entries for {host}",
@@ -1162,7 +1180,7 @@ async def claim_verify(body: dict) -> JSONResponse:
 
 
 @app.post("/private/entries")
-def private_add(body: dict, request: Request) -> JSONResponse:
+async def private_add(body: dict, request: Request) -> JSONResponse:
     """Register an internal service, visible only to this domain's key.
 
     An organisation's list of approved internal services usually lives in a
@@ -1178,7 +1196,12 @@ def private_add(body: dict, request: Request) -> JSONResponse:
             "error": "unauthorized",
             "detail": f"verify your domain first: POST {config.PUBLIC_BASE}/claim"})
     ent = (body or {}).get("entry") or body or {}
-    k = publisher.add_private(conn, owner, ent)
+    try:
+        k = await _index_write(lambda c: publisher.add_private(c, owner, ent))
+    except Exception as e:
+        if not _busy(e):
+            raise
+        return _busy_response("the entry", owner=owner)
     if not k:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "entry.displayName is required"})
@@ -1202,7 +1225,7 @@ def private_list(request: Request) -> JSONResponse:
 
 
 @app.delete("/private/entries")
-def private_delete(body: dict, request: Request) -> JSONResponse:
+async def private_delete(body: dict, request: Request) -> JSONResponse:
     """Remove an internal service. Scoped to the caller's own domain."""
     key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
     conn = db()
@@ -1213,7 +1236,12 @@ def private_delete(body: dict, request: Request) -> JSONResponse:
     if not ident:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "identifier is required"})
-    gone = store.delete_private(conn, owner, ident)
+    try:
+        gone = await _index_write(lambda c: store.delete_private(c, owner, ident))
+    except Exception as e:
+        if not _busy(e):
+            raise
+        return _busy_response("the deletion", owner=owner)
     events.emit("private_delete", a=owner, ok=gone)
     return JSONResponse({"status": "deleted" if gone else "not_found",
                          "owner": owner, "private_entries": store.private_count(conn, owner)},
@@ -1634,8 +1662,9 @@ async def retry_due_submissions(limit: int = 5) -> list[dict]:
     return done
 
 
-async def _index_write(fn) -> None:
-    """Run an index write in a thread on its own connection.
+async def _index_write(fn):
+    """Run an index write in a thread on its own connection. Returns what
+    `fn(conn)` returns.
 
     Two things wrong with doing it inline. The connection on the event loop
     has a 45 second busy timeout, so a write that meets the crawl's lock
@@ -1649,8 +1678,9 @@ async def _index_write(fn) -> None:
         c = store.connect()
         c.execute("PRAGMA busy_timeout=5000")
         try:
-            fn(c)
+            out = fn(c)
             c.commit()
+            return out
         except Exception:
             try:
                 c.rollback()
@@ -1659,7 +1689,18 @@ async def _index_write(fn) -> None:
             raise
         finally:
             c.close()
-    await asyncio.to_thread(run)
+    return await asyncio.to_thread(run)
+
+
+def _busy_response(what: str, retry_s: int = 30, **extra) -> JSONResponse:
+    """The index takes one writer. When a request-side write meets the crawl,
+    the honest answer is a 503 with a time, not a 45 second freeze and not a
+    500. Nothing the caller did was wrong and the answer says so."""
+    return JSONResponse(status_code=503, headers={"Retry-After": str(retry_s)}, content={
+        "status": "busy", **extra,
+        "detail": (f"the index was busy writing and could not record {what} right now. "
+                   f"Nothing is wrong on your side; call again in {retry_s} seconds."),
+    })
 
 
 def _busy(e: Exception) -> bool:
@@ -1795,10 +1836,19 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
     conn = db()
     before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                           (host,)).fetchone()[0]
-    try:
-        got = await ingest.crawl_domains(conn, [host], concurrency=2, skip_seen_hours=0)
-    except sqlite3.OperationalError as e:
-        if "locked" in str(e).lower():
+    # Network first, with nothing held; then the write, in a thread on its own
+    # connection. The 2026-09-01 loss was a write on the loop connection meeting
+    # the crawl's lock; the domain path had the same shape until 2026-09-02.
+    async with limits.outbound():
+        data, path = await ingest.fetch_manifest(host)
+    got = {"considered": 1, "crawled": 1, "manifest": path, "entries": 0}
+    if data:
+        try:
+            got["entries"] = await _index_write(
+                lambda c: ingest.index_manifest(c, host, data, path, strict=True))
+        except Exception as e:
+            if not _busy(e):
+                raise
             detail = ("the index was busy writing and could not take this domain right "
                       "now. Nothing is wrong on your side; it will be retried "
                       "automatically within a minute.")
@@ -1806,12 +1856,18 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
                                      evidence=None, busy=True)
             return _not_indexed("busy", row, domain=host, reason="busy", detail=detail,
                                 evidence=None)
-        raise
+    else:
+        # Nothing to write but the fact that we looked, which the publisher
+        # page and `verified_manifests` read. Best effort: a busy index must
+        # not turn "no manifest" into a 500.
+        try:
+            await _index_write(lambda c: ingest.index_manifest(c, host, {"entries": []},
+                                                               None, strict=True))
+        except Exception as e:
+            if not _busy(e):
+                raise
     after = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                          (host,)).fetchone()[0]
-    row = conn.execute("SELECT manifest_path FROM crawl_seen WHERE domain=?",
-                       (host,)).fetchone()
-    path = row["manifest_path"] if row else None
     catalog.invalidate_publishers(); render.invalidate()
 
     if not path and after == 0:

@@ -196,6 +196,84 @@ def _flush(conn, pending: list[tuple], tries: int = 6) -> bool:
     return False
 
 
+async def fetch_manifest(dom: str, client: httpx.AsyncClient | None = None
+                         ) -> tuple[dict | None, str | None]:
+    """The network half of a crawl: the first well-known path that answers with
+    a manifest, and which path it was. No database, so it can run on the event
+    loop with nothing held."""
+    base = dom if dom.startswith("http") else f"https://{dom}"
+    own = client is None
+    if own:
+        client = httpx.AsyncClient(headers=HEADERS, timeout=config.CRAWL_TIMEOUT_S,
+                                   follow_redirects=True)
+    try:
+        for path in PATHS:
+            try:
+                r = await client.get(base + path)
+                if r.status_code == 200 and r.headers.get("content-type", "").find("json") >= 0:
+                    d = r.json()
+                    if isinstance(d, dict) and isinstance(d.get("entries"), list):
+                        return d, path
+            except Exception:
+                continue
+    finally:
+        if own:
+            await client.aclose()
+    return None, None
+
+
+def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
+                   strict: bool = True) -> int:
+    """The write half: upsert every entry of a fetched manifest in one
+    transaction and record the crawl. Pure SQLite, so a request can run it in
+    a thread on its own connection (`main._index_write`) and never on the loop.
+
+    `strict` is for the submit path: a locked index must surface as the
+    exception so the caller can answer `busy` and queue the submission. The
+    bulk crawler passes False and rides through contention entry by entry, as
+    it always did, because one dropped entry there is cheaper than one dropped
+    domain."""
+    got = 0
+    for e in data.get("entries") or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            if store.upsert_entry(conn, e, "crawl"):
+                got += 1
+        except sqlite3.OperationalError:
+            if strict:
+                raise
+            # Contended writer: give it a moment rather than dropping
+            # the publisher we just successfully fetched.
+            time.sleep(1.0)
+            try:
+                if store.upsert_entry(conn, e, "crawl"):
+                    got += 1
+            except Exception:
+                continue
+        except Exception:
+            # A malformed entry from a third party is expected, not
+            # exceptional. Skip it and keep crawling.
+            continue
+    if strict:
+        conn.execute("""INSERT INTO crawl_seen(domain,last_crawl,status,entries,manifest_path)
+            VALUES(?,?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
+            last_crawl=excluded.last_crawl, status=excluded.status,
+            entries=excluded.entries,
+            manifest_path=COALESCE(excluded.manifest_path, crawl_seen.manifest_path)""",
+            (dom, int(time.time()), "found" if got else "none", got, hit_path))
+        conn.commit()
+    else:
+        # Bound the transaction to one domain. These writes run inside a
+        # gather of up to 2000 coroutines, so without this the lock is held
+        # for the whole chunk while every one of them is still fetching.
+        try:
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+    return got
+
+
 async def crawl_domains(conn, domains: list[str], concurrency: int | None = None,
                         skip_seen_hours: int = 168) -> dict:
     """Fetch the well-known paths across a domain list.
@@ -229,50 +307,14 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
 
     async def one(dom: str, client: httpx.AsyncClient):
         nonlocal found, entries, checked
-        base = dom if dom.startswith("http") else f"https://{dom}"
-        got, data, hit_path = 0, None, None
         async with sem:
-            for path in PATHS:
-                try:
-                    r = await client.get(base + path)
-                    if r.status_code == 200 and r.headers.get("content-type", "").find("json") >= 0:
-                        d = r.json()
-                        if isinstance(d, dict) and isinstance(d.get("entries"), list):
-                            data = d
-                            hit_path = path
-                            break
-                except Exception:
-                    continue
+            data, hit_path = await fetch_manifest(dom, client)
         checked += 1
+        got = 0
         if data:
-            for e in data["entries"]:
-                if not isinstance(e, dict):
-                    continue
-                try:
-                    if store.upsert_entry(conn, e, "crawl"):
-                        got += 1
-                except sqlite3.OperationalError:
-                    # Contended writer: give it a moment rather than dropping
-                    # the publisher we just successfully fetched.
-                    time.sleep(1.0)
-                    try:
-                        if store.upsert_entry(conn, e, "crawl"):
-                            got += 1
-                    except Exception:
-                        continue
-                except Exception:
-                    # A malformed entry from a third party is expected, not
-                    # exceptional. Skip it and keep crawling.
-                    continue
+            got = index_manifest(conn, dom, data, hit_path, strict=False)
             if got:
                 found += 1; entries += got
-            # Bound the transaction to one domain. These writes run inside a
-            # gather of up to 2000 coroutines, so without this the lock is held
-            # for the whole chunk while every one of them is still fetching.
-            try:
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
         # Record WHICH path answered. This used to be dropped here, so every
         # publisher the crawler found had a manifest and no record of where,
         # and `verified_manifests` (which counts a non-null path) undercounted
