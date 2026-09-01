@@ -891,6 +891,12 @@ PUBLISHED = [
          "https://pypi.org/project/agentic-resource-discovery/",
          "Alias package for the same tool."),
     ]),
+    ("Profiles", [
+        ("LinkedIn", "https://www.linkedin.com/company/neuronto/",
+         "Company page for Neuronto Agentic Resource Discovery (ARD) Index."),
+        ("Facebook", "https://www.facebook.com/neuronto/",
+         "Page for Neuronto Agentic Resource Discovery (ARD) Index."),
+    ]),
     ("Registries and directories", [
         ("Official MCP Registry",
          "https://registry.modelcontextprotocol.io/v0/servers?search=neuronto",
