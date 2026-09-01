@@ -976,6 +976,42 @@ def t_preview_crawlers_get_html_not_json():
     assert isinstance(d, dict) and "targets" in d, "API client no longer gets JSON"
 
 
+def t_demand_reports_real_queries():
+    """The question a publisher has is not "am I listed" but "did anyone look"."""
+    s, d = get("/demand?domain=clickhouse.com")
+    assert s == 200, s
+    assert d["indexed"] > 0, d
+    assert "queries" in d and "resources" in d, d
+    for q in d["queries"]:
+        assert q["query"] and q["times"] >= 1 and q["best_rank"] >= 1, q
+    # privacy is a property of the schema, not a promise in prose
+    blob = json.dumps(d).lower()
+    for leak in ("ip", "user_agent", "useragent", "session", "cookie"):
+        assert f'"{leak}"' not in blob, f"demand response exposes {leak}"
+
+
+def t_demand_404s_for_an_unindexed_domain():
+    try:
+        get("/demand?domain=definitely-not-indexed.example")
+        raise AssertionError("expected 404")
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
+
+
+def t_metrics_json_is_public_and_complete():
+    """Every published claim must be checkable against one endpoint."""
+    s, d = get("/metrics.json")
+    assert s == 200, s
+    for sec in ("index", "verified", "liveness", "ard_publishers", "history",
+                "federation", "retrieval"):
+        assert sec in d, f"metrics missing {sec}"
+    assert d["index"]["entries"] > 5000
+    assert d["verified"]["tools"] > 1000
+    assert d["ard_publishers"]["verified_manifests"] > 100
+    # the path split is the finding we reported upstream; it must stay visible
+    assert d["ard_publishers"]["by_path"], "manifest path split not published"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
