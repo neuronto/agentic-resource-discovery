@@ -8,17 +8,22 @@ the scrapers that read HTML, and it does not stop anybody willing to run OCR.
 That is the trade being made, deliberately, and it is why the address here is a
 role account and never a person's.
 
-    python3 scripts/make_contact.py            # writes web/img/contact.png
+    NEURONTO_CONTACT=... python3 scripts/make_contact.py    # writes web/img/contact.png
 """
 from __future__ import annotations
 
 import glob
+import os
 import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-ADDRESS = "hello@neuronto.com"
+# Read from the environment, never committed. Writing it here would put the
+# address in a public repository as plain text, which is exactly what rendering
+# it as pixels is meant to avoid: the image would be pointless while the source
+# beside it is greppable.
+ADDRESS = os.getenv("NEURONTO_CONTACT", "").strip()
 OUT = Path(__file__).resolve().parent.parent / "web" / "img" / "contact.png"
 SCALE = 3                       # drawn large and downsampled, so it stays crisp on any display
 FG = (250, 250, 250)            # var(--fg), the footer sets its own opacity
@@ -36,6 +41,8 @@ def _font(px: int):
 
 
 def build() -> Path:
+    if not ADDRESS:
+        raise SystemExit("set NEURONTO_CONTACT to the address to render")
     f = _font(SIZE_PT * SCALE)
     tmp = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
     box = tmp.textbbox((0, 0), ADDRESS, font=f)
