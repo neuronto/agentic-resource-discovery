@@ -1,6 +1,6 @@
 <div align="center">
 
-# Neuronto Agentic Resource Discovery (ARD) Index
+# Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index
 
 **One search across every public ARD registry, plus a verified index of what MCP servers
 actually expose.**

@@ -70,50 +70,117 @@ def stats_for(conn: sqlite3.Connection, publisher: str) -> tuple | None:
     return out
 
 
-def _svg(label: str, value: str, value_color: str) -> str:
-    lw, vw = _text_w(label), _text_w(value)
-    w = lw + vw
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" role="img" aria-label="{label}: {value}">
-<title>{label}: {value}</title>
-<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
-<clipPath id="r"><rect width="{w}" height="20" rx="3" fill="#fff"/></clipPath>
-<g clip-path="url(#r)">
-<rect width="{lw}" height="20" fill="#1b1b1e"/>
-<rect x="{lw}" width="{vw}" height="20" fill="{value_color}"/>
-<rect width="{w}" height="20" fill="url(#s)"/>
-</g>
-<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-<text x="{lw/2:.0f}" y="14" fill="#010101" fill-opacity=".3">{label}</text>
-<text x="{lw/2:.0f}" y="13">{label}</text>
-<text x="{lw + vw/2:.0f}" y="14" fill="#010101" fill-opacity=".3">{value}</text>
-<text x="{lw + vw/2:.0f}" y="13">{value}</text>
-</g></svg>"""
+# Per-character advance for the 11px UI stack below, measured against the
+# common fallbacks. Digits and capitals are wider; a table beats one average.
+_ADV = {**{c: 6.3 for c in "abcdeghknopqsuvxyz"}, **{c: 3.0 for c in "iljt.,:'|!"},
+        **{c: 4.6 for c in "fr "}, **{c: 6.9 for c in "mw"},
+        **{c: 7.2 for c in "ABCDEFGHKLNOPQRSTUVXYZ0123456789"},
+        **{c: 8.6 for c in "MW"}, **{c: 3.6 for c in "-"}}
 
 
-def render(conn: sqlite3.Connection, publisher: str) -> str:
+def _text_w(s: str) -> float:
+    return sum(_ADV.get(c, 6.4) for c in s)
+
+
+# Monochrome by design. A colour-graded badge invites the reader to treat it as
+# a score, and this is not a score: it is a statement that we fetched something
+# and it answered. Black on white, white on black, and a variant that follows
+# the reader's own setting, because a badge that fights the page it sits in is
+# the thing maintainers quietly delete.
+_THEMES = {
+    "light": ("#FFFFFF", "#0A0A0B", "#D6D6DA", "#6C6C74"),
+    "dark":  ("#0A0A0B", "#FAFAFA", "#2A2A2E", "#8A8A93"),
+}
+_FONT = ("ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,"
+         "Helvetica,Arial,sans-serif")
+
+# The mark: three ascending bars, the same glyph as the site favicon, drawn as
+# paths so no font or external file is needed.
+_MARK = ('<rect x="0" y="5.5" width="2.4" height="5" rx="1.2" fill="{fg}"/>'
+         '<rect x="4" y="2.5" width="2.4" height="8" rx="1.2" fill="{fg}"/>'
+         '<rect x="8" y="0" width="2.4" height="10.5" rx="1.2" fill="{fg}"/>')
+
+
+def _svg(label: str, value: str, theme: str = "auto") -> str:
+    """A flat, monochrome badge. `theme` is light, dark or auto."""
+    pad, gap, mark_w = 9.0, 7.0, 10.4
+    lw = mark_w + 5.0 + _text_w(label)
+    left_w = pad + lw + gap
+    right_w = _text_w(value) + pad + gap
+    w = round(left_w + right_w, 1)
+    h = 20.0
+    lx = pad + mark_w + 5.0
+    vx = left_w + (right_w - gap) / 2 - pad / 2 + gap / 2
+    aria = f"{label}: {value}"
+
+    if theme in _THEMES:
+        bg, fg, border, mut = _THEMES[theme]
+        style = (f"<style>.bg{{fill:{bg}}}.fg{{fill:{fg}}}.bd{{stroke:{border}}}"
+                 f".mut{{fill:{mut}}}</style>")
+    else:
+        lb, lf, lbd, lm = _THEMES["light"]
+        db, df, dbd, dm = _THEMES["dark"]
+        style = (f"<style>.bg{{fill:{lb}}}.fg{{fill:{lf}}}.bd{{stroke:{lbd}}}.mut{{fill:{lm}}}"
+                 f"@media(prefers-color-scheme:dark){{.bg{{fill:{db}}}.fg{{fill:{df}}}"
+                 f".bd{{stroke:{dbd}}}.mut{{fill:{dm}}}}}</style>")
+
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.0f}" height="20" '
+        f'viewBox="0 0 {w:.1f} 20" role="img" aria-label="{aria}">'
+        f'<title>{aria}</title>{style}'
+        f'<rect x=".5" y=".5" width="{w-1:.1f}" height="19" rx="4" class="bg bd" '
+        f'fill-opacity="1" stroke-width="1"/>'
+        f'<g transform="translate({pad:.1f},4.7)">' + _MARK.replace("{fg}", "currentColor")
+        .replace('fill="currentColor"', 'class="fg"') + '</g>'
+        f'<text x="{lx:.1f}" y="13.6" class="fg" font-family="{_FONT}" font-size="11" '
+        f'font-weight="560" letter-spacing=".1">{label}</text>'
+        f'<line x1="{left_w-gap/2:.1f}" y1="4" x2="{left_w-gap/2:.1f}" y2="16" '
+        f'class="bd" stroke-width="1"/>'
+        f'<text x="{left_w:.1f}" y="13.6" class="mut" font-family="{_FONT}" font-size="11" '
+        f'letter-spacing=".1">{value}</text>'
+        f'</svg>')
+
+
+def render(conn: sqlite3.Connection, publisher: str, theme: str = "auto") -> str:
     """The badge for one publisher.
 
-    A publisher we do not hold gets a neutral "not indexed" badge rather than
-    an error: the URL will be pasted into READMEs before we have crawled the
-    domain, and a broken image where a badge should be reads as our failure,
-    not theirs.
+    A publisher we do not hold gets a neutral badge rather than an error: the
+    URL will be pasted into a README before we have crawled the domain, and a
+    broken image where a badge should be reads as our failure, not theirs.
     """
     st = stats_for(conn, publisher)
     if st is None:
-        return _svg("neuronto", "not indexed yet", "#6c6c74")
+        return _svg("ARD Registry", "not indexed yet", theme)
     tools, servers, responding = st
     if tools > 0:
-        label = f"{tools:,} verified tool" + ("s" if tools != 1 else "")
-        if responding:
-            return _svg("neuronto", label + " · responding", "#2f6f4f")
-        return _svg("neuronto", label, "#3a5f8a")
+        return _svg("ARD Registry", f"{tools:,} tool" + ("s" if tools != 1 else "")
+                    + (" verified" if responding else " indexed"), theme)
     if responding:
-        return _svg("neuronto", "responding · auth required", "#3a5f8a")
-    return _svg("neuronto", "indexed", "#6c6c74")
+        return _svg("ARD Registry", "endpoint verified", theme)
+    return _svg("ARD Registry", "indexed", theme)
 
 
-def snippet(publisher: str) -> str:
-    """The paste-ready markdown a maintainer embeds."""
+def snippet(publisher: str, theme: str = "auto") -> dict:
+    """Paste-ready embeds.
+
+    The link goes to the publisher's own page on this index, not to the home
+    page: it is a real page about them, so the badge sends their reader
+    somewhere useful rather than to an advertisement.
+
+    The `alt` text is not decoration. An image link carries no anchor text, so
+    the alt attribute is the only description a machine reading the page gets.
+    """
     B = config.PUBLIC_BASE
-    return (f"[![Neuronto verified tools]({B}/badge/{publisher}.svg)]"
-            f"({B}/console?domain={publisher})")
+    q = "" if theme == "auto" else f"?theme={theme}"
+    img = f"{B}/badge/{publisher}.svg{q}"
+    href = f"{B}/ard-publishers/{publisher}"
+    alt = f"{publisher} on the Neuronto ARD Registry"
+    return {
+        "html": (f'<a href="{href}" target="_blank" rel="noopener">'
+                 f'<img src="{img}" alt="{alt}" height="20"></a>'),
+        "markdown": f"[![{alt}]({img})]({href})",
+        "rst": f".. image:: {img}\n   :alt: {alt}\n   :target: {href}",
+        "image": img,
+        "link": href,
+        "alt": alt,
+    }

@@ -131,12 +131,12 @@ TOOLS = [
 def server_card() -> dict:
     B = config.PUBLIC_BASE
     return {
-        "serverInfo": {"name": "neuronto", "version": "1.0.0", "title": "Neuronto Agentic Resource Discovery (ARD) Index",
+        "serverInfo": {"name": "neuronto", "version": "1.0.0", "title": "Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index",
                        "description": "Agentic Resource Discovery (ARD) index. Search every public ARD "
                                       "registry and the MCP ecosystem at once for a server, skill or "
                                       "agent that can do a task.",
                        "websiteUrl": B},
-        "name": "neuronto", "title": "Neuronto Agentic Resource Discovery (ARD) Index",
+        "name": "neuronto", "title": "Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index",
         "description": "Federated Agentic Resource Discovery (ARD) index. One search across every "
                        "public ARD registry and the MCP ecosystem.",
         "protocolVersion": PROTOCOL,

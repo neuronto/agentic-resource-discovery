@@ -15,9 +15,10 @@ __pycache__/
 # working notes for outbound submissions, not part of the product
 submissions/
 
-# Deployment configuration stays private. It describes the machine this runs
-# on, which is no part of the product, and publishing it hands an attacker a
-# map for nothing in return.
+# Deployment configuration stays private. Service units, nginx vhosts and the
+# sync script describe the machine this runs on: paths, ports, resource limits,
+# certificate locations. None of that is any part of the product, and publishing
+# it hands an attacker a map for nothing in return.
 deploy/
 
 # internal working guidance, never published
@@ -34,14 +35,15 @@ leakscan.sh
 # the scanner lives outside this project; it must never ship with it
 **/leakscan.sh
 
-# internal operational docs: paths, ports, hosts, service names, box layout.
-# NEVER published. This directory is both the deployment AND the git repo,
-# so anything not ignored here goes public on the next push.
+# internal operational docs: paths, ports, hosts, service names.
+# Never published. See rule in CLAUDE.md.
 internal/
 
-# build artefacts, never committed
-*.egg-info/
-dist/
-build/
+# The analytics system is server-only and is never published.
+analytics/
+
+# Build artefacts. The dataset is exported for publishing elsewhere and is
+# regenerated; it is not source, and it is tens of megabytes.
 dataset/
-._*
+sdk/**/dist/
+sdk/**/*.egg-info/
