@@ -295,6 +295,12 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
             "registries": [{"name": f["name"], "source": f["source"],
                             "ok": f["ok"], "ms": f["ms"],
                             "results": len(f["results"]),
+                            # Say when an answer came from cache rather than
+                            # from the registry just now. A federating index
+                            # that presents a stored answer as a live one is
+                            # making a claim it cannot support.
+                            **({"cached": True, "age_s": f.get("age_s", 0)}
+                               if f.get("cached") else {}),
                             **({"error": f["error"]} if f.get("error") else {})}
                            for f in fed],
         }
@@ -1504,9 +1510,17 @@ async def submit_endpoint(body: dict) -> JSONResponse:
                 resp = JSONResponse(d, status_code=resp.status_code)
         b = body or {}
         target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or "")[:120]
+        ok = resp.status_code < 400 and d.get("status") == "indexed"
+        # Record WHY, not just that it failed. Without this a publisher who
+        # cannot get in leaves an `ok=0` and nothing else, and answering "was
+        # that us or them" means correlating request timings against the
+        # systemd journal. It cost a full investigation on 2026-09-01 and the
+        # first answer was wrong. The status carries the reason already; the
+        # detail line carries the specific one where there is one.
         events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
-                    b=target, n=d.get("verified_tools"),
-                    ok=resp.status_code < 400 and d.get("status") == "indexed")
+                    b=target, n=d.get("verified_tools"), ok=ok,
+                    detail=None if ok else
+                    f"{resp.status_code} {d.get('status') or '?'}: {str(d.get('detail') or '')[:110]}")
     except Exception:
         pass
     return resp
@@ -1548,8 +1562,15 @@ async def _submit(body: dict) -> JSONResponse:
             return JSONResponse(status_code=404, content={
                 "status": "not_an_mcp_server",
                 "endpoint": endpoint,
+                # The machine-readable reason as well as the sentence: a
+                # publisher retrying blind cannot tell a transient error on
+                # their side from a refusal on ours, and that is precisely the
+                # confusion that made one give up after four attempts.
+                "reason": res["status"],
                 "detail": ("this URL did not complete an MCP initialize handshake "
-                           f"({res['status']}). Nothing was indexed."),
+                           f"({res['status']}). Nothing was indexed. This is what "
+                           "your endpoint returned to us, not a limit on our side; "
+                           "if it is transient, retrying shortly will work."),
             })
         host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
         name = res.get("server_name") or host
