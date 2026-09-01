@@ -1,12 +1,11 @@
 <div align="center">
 
-# Neuronto
+# Neuronto Agentic Resource Discovery (ARD) Index
 
-**The Agentic Resource Discovery index.**
+**One search across every public ARD registry, plus a verified index of what MCP servers
+actually expose.**
 
-One search across every public ARD registry.
-
-[neuronto.com](https://neuronto.com) · [API](https://neuronto.com/api-docs) · [Manifest](https://neuronto.com/.well-known/ard.json)
+[neuronto.com](https://neuronto.com) · [API](https://neuronto.com/api-docs) · [Submit your server](https://neuronto.com/submit) · [Benchmark](https://neuronto.com/bench) · [Dataset](https://huggingface.co/datasets/AgenticResourceDiscovery/verified-mcp-tools) · [Manifest](https://neuronto.com/.well-known/ard.json)
 
 </div>
 
