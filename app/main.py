@@ -1751,7 +1751,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
                       f"({res['status']}). Nothing was indexed yet. `evidence` is exactly "
                       "what your endpoint returned to us.")
             row = submissions.record(sid, indexed=False, reason=res["status"], detail=detail,
-                                     evidence=res.get("evidence"))
+                                     evidence=res.get("evidence"),
+                                     scheduled=(source == "retry"))
             return _not_indexed("not_an_mcp_server", row, endpoint=endpoint,
                                 reason=res["status"], detail=detail,
                                 evidence=res.get("evidence"))
@@ -1878,7 +1879,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
                   + config.PUBLIC_BASE + "/publish")
         ev = {"checked": ingest.PATHS, "crawl": _small(got)}
         srow = submissions.record(sid, indexed=False, reason="no_manifest", detail=detail,
-                                  evidence=ev)
+                                  evidence=ev, scheduled=(source == "retry"))
         return _not_indexed("no_manifest", srow, domain=host, reason="no_manifest",
                             detail=detail, evidence=ev, checked=ingest.PATHS)
 
