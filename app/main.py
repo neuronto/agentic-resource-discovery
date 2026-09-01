@@ -17,9 +17,11 @@ specification v0.91, including the parts nobody else does:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import urllib.parse
@@ -34,7 +36,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 
 from . import (adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, render, search,
-               store, tools_index)
+               store, submissions, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
@@ -160,6 +162,20 @@ async def _startup() -> None:
 
     asyncio.ensure_future(_refresher())
 
+    async def _retrier():
+        # Pending submissions come back here until they index or give up.
+        # Both workers run this; the row claim in `submissions.due` makes
+        # that safe, and a worker dying mid-attempt only delays the row.
+        await asyncio.sleep(20)
+        while True:
+            try:
+                await retry_due_submissions()
+            except Exception:
+                pass
+            await asyncio.sleep(SUBMIT_RETRY_EVERY_S)
+
+    asyncio.ensure_future(_retrier())
+
 
 # Set here and nowhere else. The policy allows exactly what the pages use:
 # their own inline scripts and styles, Google Fonts, and the CDN the API
@@ -208,6 +224,29 @@ async def _too_deep(request: Request, exc: RecursionError) -> JSONResponse:
     # is the caller's problem, and it was being reported as ours.
     return JSONResponse(status_code=400, content={"error": "invalid_request",
                                                   "detail": "request body is nested too deeply"})
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+    """Every unhandled error is answered, recorded and alerted on.
+
+    Three distinct 500s went to the journal on 2026-09-01 and nobody read
+    them; two public pages were down for hours. The traceback still goes to
+    the journal (the server middleware re-raises after this returns), but the
+    fact now also goes to the event sink, which is where someone is looking.
+    """
+    ref = secrets.token_hex(4)
+    try:
+        events.emit("error", a=request.url.path[:80], b=type(exc).__name__,
+                    ok=False, detail=f"{ref} {str(exc)[:140]}")
+    except Exception:
+        pass
+    return JSONResponse(status_code=500, headers={"Cache-Control": "no-store"}, content={
+        "error": "internal",
+        "ref": ref,
+        "detail": ("this is a fault on our side, not in your request, and it has been "
+                   "recorded. Quote the ref if you write to us."),
+    })
 
 
 # ─────────────────────────── Registry REST API (§5.3) ───────────────────────
@@ -596,6 +635,11 @@ indefinitely. To be indexed here, send the domain or the endpoint.
   initialize handshake and its own tools/list is read back.
 - MCP tool publish_resource on https://neuronto.com/mcp does the same thing
   from inside a conversation.
+- A submission that does not verify at that moment is not dropped: the answer is
+  202 with status "pending", a submission id and the evidence of what the endpoint
+  returned, and it is retried automatically for about two and a half days.
+  GET https://neuronto.com/submit/status/<id> shows where it stands. One call is
+  enough; there is no need to resubmit.
 - POST https://neuronto.com/audit    {{"domain":"example.com"}}
   Reports which registries return you, and whether this one can index you now.
 
@@ -760,7 +804,7 @@ def home():
 
 @app.get("/about", include_in_schema=False)
 @app.get("/registry", include_in_schema=False)
-async def _pages(): return await home()
+def _pages(): return home()
 
 
 # ─────────────────────────── MCP wrapper (§5.3.5) ───────────────────────────
@@ -785,7 +829,11 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
                                          "text": json.dumps(note, indent=2)}],
                             "isError": True}},
                 status_code=200, headers={**hdrs, "retry-after": str(retry)})
-    status, payload = await handle(db(), body)
+    tok = _PROBE.set(_is_probe(request))
+    try:
+        status, payload = await handle(db(), body)
+    finally:
+        _PROBE.reset(tok)
     if (body or {}).get("method") == "tools/call":
         events.emit("mcp_call", a=str((body.get("params") or {}).get("name") or "?")[:60],
                     ok=not ((payload or {}).get("result") or {}).get("isError", False))
@@ -947,6 +995,9 @@ def metrics_json():
         "history": h,
         "federation": {"upstreams": [u[1] for u in config.UPSTREAMS],
                        "budget_ms": config.FEDERATION_BUDGET_MS},
+        # The queue a submission sits in until it indexes. Published because
+        # "we never drop a submission" is a claim, and a claim gets a number.
+        "submissions": submissions.stats(),
         "retrieval": {"dense": embed.status(conn)["configured"],
                       "dense_coverage": embed.status(conn)["coverage"]},
         "note": ("everything this project publishes is derived from these numbers. "
@@ -1488,9 +1539,20 @@ def feed():
 # added, and one with a manifest was always going to be legitimate to index.
 # ---------------------------------------------------------------------------
 
-@app.post("/submit")
-async def submit_endpoint(body: dict) -> JSONResponse:
-    resp = await _submit(body)
+@app.post("/submit", responses={
+    200: {"description": "verified and indexed; `submission.id` is the receipt"},
+    202: {"description": "kept and retried: not verified at this moment, `evidence` says "
+                         "what the endpoint returned, `retry.status_url` shows progress"},
+    400: {"description": "malformed request, nothing queued"},
+    404: {"description": "every retry attempt failed; the last `evidence` is included"},
+})
+async def submit_endpoint(body: dict, request: Request = None) -> JSONResponse:
+    """Index an MCP endpoint (`{"endpoint": url}`) or a manifest-serving domain
+    (`{"domain": host}`). A submission that does not verify right now is kept
+    and retried on a fixed schedule for about two and a half days."""
+    b = body or {}
+    probe = _is_probe(request)
+    resp = await _submit(b, source="http" if request is not None else "mcp", probe=probe)
     try:
         d = json.loads(bytes(resp.body).decode() or "{}")
         # A successful submission is the one moment the publisher is looking at
@@ -1498,7 +1560,7 @@ async def submit_endpoint(body: dict) -> JSONResponse:
         # with what it says, and never as a condition of being indexed.
         if resp.status_code < 400 and d.get("status") == "indexed":
             host = (d.get("identifier") or "").split(":")[2] if (d.get("identifier") or "").count(":") > 2 else ""
-            host = host or str((body or {}).get("domain") or "").strip().lower()
+            host = host or str(b.get("domain") or "").strip().lower()
             if host:
                 d["badge"] = {
                     **badge.snippet(host),
@@ -1508,25 +1570,103 @@ async def submit_endpoint(body: dict) -> JSONResponse:
                     "customise": f"{config.PUBLIC_BASE}/badge?domain={host}",
                 }
                 resp = JSONResponse(d, status_code=resp.status_code)
-        b = body or {}
-        target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or "")[:120]
-        ok = resp.status_code < 400 and d.get("status") == "indexed"
-        # Record WHY, not just that it failed. Without this a publisher who
-        # cannot get in leaves an `ok=0` and nothing else, and answering "was
-        # that us or them" means correlating request timings against the
-        # systemd journal. It cost a full investigation on 2026-09-01 and the
-        # first answer was wrong. The status carries the reason already; the
-        # detail line carries the specific one where there is one.
-        events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
-                    b=target, n=d.get("verified_tools"), ok=ok,
-                    detail=None if ok else
-                    f"{resp.status_code} {d.get('status') or '?'}: {str(d.get('detail') or '')[:110]}")
+        _emit_submit(b, resp.status_code, d, probe=probe)
     except Exception:
         pass
     return resp
 
 
-async def _submit(body: dict) -> JSONResponse:
+_PROBE: contextvars.ContextVar[bool] = contextvars.ContextVar("nb_probe", default=False)
+
+
+def _is_probe(request) -> bool:
+    """Our own suites, so their queue rows and alerts are told apart from a
+    publisher's. Never affects what the request is allowed to do."""
+    if request is None:
+        return _PROBE.get()
+    try:
+        h = request.headers
+        return h.get("x-neuronto-probe") == "1" or "neuronto-e2e" in (h.get("user-agent") or "")
+    except Exception:
+        return False
+
+
+def _emit_submit(b: dict, code: int, d: dict, probe: bool = False,
+                 source: str = "http") -> None:
+    """Record WHY, not just that it failed. Without this a publisher who
+    cannot get in leaves an `ok=0` and nothing else, and answering "was that
+    us or them" means correlating request timings against the systemd
+    journal. It cost a full investigation on 2026-09-01 and the answer was
+    still unknowable."""
+    target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or "")[:120]
+    ok = code < 400 and d.get("status") == "indexed"
+    sub = d.get("submission") or {}
+    events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
+                b=target, n=d.get("verified_tools"), ok=ok, probe=probe, source=source,
+                attempt=sub.get("attempts"), submission=sub.get("id"),
+                final=(d.get("status") == "gave_up"),
+                detail=None if ok and (sub.get("attempts") or 1) == 1 else
+                f"{code} {d.get('status') or '?'} {d.get('reason') or ''}: "
+                f"{str(d.get('detail') or '')[:100]}")
+
+
+SUBMIT_RETRY_EVERY_S = int(os.getenv("NEURONTO_SUBMIT_RETRY_EVERY", "60"))
+
+
+async def retry_due_submissions(limit: int = 5) -> list[dict]:
+    """One pass of the retrier. Called on a timer by the app, and directly by
+    the resilience test. Returns the rows it attempted."""
+    done = []
+    for row in submissions.due(limit):
+        body = {row["kind"]: row["target"]}
+        try:
+            resp = await _submit(body, source="retry", probe=bool(row.get("probe")))
+            d = json.loads(bytes(resp.body).decode() or "{}")
+            _emit_submit(body, resp.status_code, d, probe=bool(row.get("probe")),
+                         source="retry")
+            done.append(d)
+        except Exception as e:
+            # The attempt itself failed on our side; release the row so the
+            # next pass retries rather than leaving it claimed for CLAIM_S.
+            submissions.record(row["id"], indexed=False, reason="error:internal",
+                               detail=f"{type(e).__name__}: {str(e)[:120]}",
+                               evidence={"exception": f"{type(e).__name__}: {str(e)[:160]}"})
+    return done
+
+
+async def _index_write(fn) -> None:
+    """Run an index write in a thread on its own connection.
+
+    Two things wrong with doing it inline. The connection on the event loop
+    has a 45 second busy timeout, so a write that meets the crawl's lock
+    freezes every request this worker is serving for up to 45 seconds; that
+    is what the one "successful" submission on 2026-09-01 looked like. And a
+    freeze that long is indistinguishable from an outage to the publisher.
+    Off the loop, with a short timeout: five seconds of patience, then it is
+    a `busy` and the queue takes it back thirty seconds later.
+    """
+    def run():
+        c = store.connect()
+        c.execute("PRAGMA busy_timeout=5000")
+        try:
+            fn(c)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            c.close()
+    await asyncio.to_thread(run)
+
+
+def _busy(e: Exception) -> bool:
+    return isinstance(e, sqlite3.OperationalError) and "locked" in str(e).lower()
+
+
+async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
 
     `{"domain": "..."}` fetches the ARD manifest and indexes everything it
@@ -1538,6 +1678,11 @@ async def _submit(body: dict) -> JSONResponse:
     is nearly every MCP developer. Provenance is recorded rather than blurred:
     an entry from a manifest carries source `crawl`, one from a direct
     submission carries `submitted`, and the two are distinguishable in the API.
+
+    Every call past input validation is a submission row first and an outcome
+    second (see `submissions`). A failed attempt answers 202 with the reason,
+    the evidence and when we will try again; only a request that could never
+    verify (a malformed one) is answered with a plain refusal.
     """
     b = body or {}
     endpoint = str(b.get("endpoint") or b.get("mcp") or "").strip()
@@ -1549,29 +1694,26 @@ async def _submit(body: dict) -> JSONResponse:
             return JSONResponse(status_code=400, content={
                 "error": "invalid_request",
                 "detail": 'endpoint must be an absolute http(s) URL'})
-        conn = db()
+        sid = submissions.open("endpoint", endpoint, source, probe)
         import httpx as _httpx
         try:
             async with _httpx.AsyncClient(follow_redirects=True) as c:
                 async with limits.outbound():
-                    res = await tools_index.introspect_one(c, endpoint)
-        except Exception:
-            res = {"status": "error:unreachable", "tools": [], "auth": False,
-                   "server_name": None}
+                    res = await tools_index.introspect_one(c, endpoint, retries=1)
+        except Exception as e:
+            res = {"status": f"error:{type(e).__name__}", "tools": [], "auth": False,
+                   "server_name": None,
+                   "evidence": {"exception": f"{type(e).__name__}: {str(e)[:160]}",
+                                "stage": "before the request was sent"}}
         if not res["status"].startswith("ok") and res["status"] != "auth":
-            return JSONResponse(status_code=404, content={
-                "status": "not_an_mcp_server",
-                "endpoint": endpoint,
-                # The machine-readable reason as well as the sentence: a
-                # publisher retrying blind cannot tell a transient error on
-                # their side from a refusal on ours, and that is precisely the
-                # confusion that made one give up after four attempts.
-                "reason": res["status"],
-                "detail": ("this URL did not complete an MCP initialize handshake "
-                           f"({res['status']}). Nothing was indexed. This is what "
-                           "your endpoint returned to us, not a limit on our side; "
-                           "if it is transient, retrying shortly will work."),
-            })
+            detail = ("this URL did not complete an MCP initialize handshake "
+                      f"({res['status']}). Nothing was indexed yet. `evidence` is exactly "
+                      "what your endpoint returned to us.")
+            row = submissions.record(sid, indexed=False, reason=res["status"], detail=detail,
+                                     evidence=res.get("evidence"))
+            return _not_indexed("not_an_mcp_server", row, endpoint=endpoint,
+                                reason=res["status"], detail=detail,
+                                evidence=res.get("evidence"))
         host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
         name = res.get("server_name") or host
         entry = {
@@ -1585,38 +1727,42 @@ async def _submit(body: dict) -> JSONResponse:
                             f"MCP server at {host}. Requires credentials before listing tools."
                             if res["auth"] else f"MCP server at {host}."),
         }
+        key_box: dict = {}
+
+        def write(c):
+            key = store.upsert_entry(c, entry, "submitted")
+            if res["tools"]:
+                store.replace_tools(c, key, res["tools"])
+            store.mark_introspection(c, key, res["status"], len(res["tools"]),
+                                     res["auth"], res.get("server_name"))
+            store.mark_liveness(c, key, True, 200, None)
+            key_box["key"] = key
+
         # A publisher joining the index is the rarest and most valuable write we
-        # take, and it is worth more than one attempt. A background refresh that
-        # overlapped this used to refuse them outright: on 2026-09-01 a real
-        # publisher was turned away three times in five minutes while our own
-        # ingest held the write lock. The long-held transactions that caused it
-        # are fixed, and this retry is the belt to that braces.
-        for attempt in range(3):
+        # take. It gets two quick tries here; if the crawl is holding the lock
+        # through both, the queue brings it back in thirty seconds rather than
+        # asking the publisher to.
+        for attempt in range(2):
             try:
-                key = store.upsert_entry(conn, entry, "submitted")
-                if res["tools"]:
-                    store.replace_tools(conn, key, res["tools"])
-                store.mark_introspection(conn, key, res["status"], len(res["tools"]),
-                                         res["auth"], res.get("server_name"))
-                store.mark_liveness(conn, key, True, 200, None)
-                conn.commit()
+                await _index_write(write)
                 break
-            except sqlite3.OperationalError as e:
-                if "locked" not in str(e).lower():
+            except Exception as e:
+                if not _busy(e):
                     raise
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                if attempt == 2:
-                    return JSONResponse(status_code=503, headers={"Retry-After": "30"},
-                                        content={"status": "busy", "endpoint": endpoint,
-                                                 "detail": ("the index was busy writing and could "
-                                                            "not accept this submission. Nothing "
-                                                            "is wrong with your server, retry "
-                                                            "shortly.")})
-                await asyncio.sleep(1.5 * (attempt + 1))
+                if attempt == 1:
+                    detail = ("your server verified, and the index was busy writing so it "
+                              "is not searchable yet. Nothing is wrong with your server; "
+                              "it will be indexed automatically within a minute.")
+                    row = submissions.record(sid, indexed=False, reason="busy", detail=detail,
+                                             evidence={"verified": True,
+                                                       "tools": len(res["tools"])},
+                                             busy=True)
+                    return _not_indexed("busy", row, endpoint=endpoint, reason="busy",
+                                        detail=detail, evidence=None, verified=True)
+                await asyncio.sleep(1.0)
         catalog.invalidate_publishers(); render.invalidate()
+        row = submissions.record(sid, indexed=True, reason="indexed",
+                                 entry_key=key_box.get("key"), tools=len(res["tools"]))
         return JSONResponse({
             "status": "indexed",
             "endpoint": endpoint,
@@ -1625,6 +1771,7 @@ async def _submit(body: dict) -> JSONResponse:
             "tools": [t.get("name") for t in res["tools"]][:40],
             "auth_required": res["auth"],
             "identifier": entry["identifier"],
+            "submission": submissions.public(row),
             "note": ("verified by handshaking with your server and reading its own "
                      "tools/list. To have your whole domain indexed, including skills, "
                      "APIs and agents, publish an ARD manifest and submit the domain: "
@@ -1644,6 +1791,7 @@ async def _submit(body: dict) -> JSONResponse:
             "detail": ('send {"domain": "example.com"} for a whole domain, or '
                        '{"endpoint": "https://example.com/mcp"} for a single MCP server')})
 
+    sid = submissions.open("domain", host, source, probe)
     conn = db()
     before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                           (host,)).fetchone()[0]
@@ -1651,11 +1799,13 @@ async def _submit(body: dict) -> JSONResponse:
         got = await ingest.crawl_domains(conn, [host], concurrency=2, skip_seen_hours=0)
     except sqlite3.OperationalError as e:
         if "locked" in str(e).lower():
-            return JSONResponse(status_code=503, headers={"Retry-After": "60"}, content={
-                "status": "busy", "domain": host,
-                "detail": ("the index is mid-maintenance and cannot accept a write right "
-                           "now. Your domain was not indexed; try again in a minute."),
-            })
+            detail = ("the index was busy writing and could not take this domain right "
+                      "now. Nothing is wrong on your side; it will be retried "
+                      "automatically within a minute.")
+            row = submissions.record(sid, indexed=False, reason="busy", detail=detail,
+                                     evidence=None, busy=True)
+            return _not_indexed("busy", row, domain=host, reason="busy", detail=detail,
+                                evidence=None)
         raise
     after = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                          (host,)).fetchone()[0]
@@ -1665,17 +1815,18 @@ async def _submit(body: dict) -> JSONResponse:
     catalog.invalidate_publishers(); render.invalidate()
 
     if not path and after == 0:
-        return JSONResponse(status_code=404, content={
-            "status": "no_manifest",
-            "domain": host,
-            "checked": ingest.PATHS,
-            "detail": ("no ARD manifest found at either well-known path. If you have an "
-                       "MCP server, submit it directly with "
-                       '{"endpoint": "https://your-host/mcp"} and we will verify it by '
-                       "handshake. To list everything on your domain, publish a manifest: "
-                       + config.PUBLIC_BASE + "/publish"),
-        })
+        detail = ("no ARD manifest found at either well-known path. If you have an "
+                  "MCP server, submit it directly with "
+                  '{"endpoint": "https://your-host/mcp"} and we will verify it by '
+                  "handshake. To list everything on your domain, publish a manifest: "
+                  + config.PUBLIC_BASE + "/publish")
+        ev = {"checked": ingest.PATHS, "crawl": _small(got)}
+        srow = submissions.record(sid, indexed=False, reason="no_manifest", detail=detail,
+                                  evidence=ev)
+        return _not_indexed("no_manifest", srow, domain=host, reason="no_manifest",
+                            detail=detail, evidence=ev, checked=ingest.PATHS)
 
+    srow = submissions.record(sid, indexed=True, reason="indexed", tools=after)
     return JSONResponse({
         "status": "indexed",
         "domain": host,
@@ -1684,9 +1835,76 @@ async def _submit(body: dict) -> JSONResponse:
         "newly_added": max(0, after - before),
         "page": f"{config.PUBLIC_BASE}/ard-publishers/{host}",
         "crawl": got,
+        "submission": submissions.public(srow),
         "note": ("fetched live from your domain, not taken from this form. Endpoint "
                  "reachability is probed separately and is not a trust or safety rating"),
     })
+
+
+def _small(x, n: int = 600):
+    try:
+        s = json.dumps(x, ensure_ascii=False, default=str)
+        return json.loads(s) if len(s) <= n else s[:n]
+    except Exception:
+        return str(x)[:n]
+
+
+def _not_indexed(why: str, row: dict | None, **fields) -> JSONResponse:
+    """The answer to an attempt that did not index.
+
+    202 while we are still going to retry, 404 once we have given up. The
+    body always carries the machine readable reason, the evidence and the
+    submission so a caller retrying blind never has to guess whose side the
+    problem is on. A `busy` never counts against the publisher.
+    """
+    pub = submissions.public(row)
+    still = bool(pub and pub.get("status") == "pending")
+    body = {
+        "status": "pending" if still else ("gave_up" if pub else why),
+        "indexed": False,
+        "refusal": why,
+        **{k: v for k, v in fields.items() if v is not None or k in ("evidence",)},
+        "submission": pub,
+    }
+    if still and pub:
+        body["detail"] = (fields.get("detail") or "") + " " + pub["note"]
+        body["retry"] = {"next_attempt_in_s": pub["next_attempt_in_s"],
+                         "attempts_left": pub["attempts_left"],
+                         "status_url": pub["status_url"]}
+    return JSONResponse(status_code=202 if still else 404, content=body,
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/submit/status/{sid}")
+def submit_status(sid: str) -> JSONResponse:
+    """Where a submission stands. Public, because the id is the only
+    credential a publisher has for it and there is nothing sensitive in it."""
+    if not re.fullmatch(r"[0-9a-f]{12}", sid or ""):
+        return JSONResponse(status_code=400, content={"error": "invalid_request",
+                                                      "detail": "not a submission id"})
+    row = submissions.get(sid)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "not_found",
+                                                      "detail": "no such submission"})
+    return JSONResponse(submissions.public(row), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/submit/status")
+def submit_status_for(endpoint: str = Query(None), domain: str = Query(None)) -> JSONResponse:
+    """The latest submission for a target, for a publisher who lost the id."""
+    if endpoint:
+        row = submissions.latest_for("endpoint", endpoint.strip())
+    elif domain:
+        host = (domain.replace("https://", "").replace("http://", "")
+                      .strip("/").split("/")[0].lower())
+        row = submissions.latest_for("domain", host)
+    else:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "give endpoint= or domain="})
+    if not row:
+        return JSONResponse(status_code=404, content={
+            "error": "not_found", "detail": "nothing has been submitted for that target"})
+    return JSONResponse(submissions.public(row), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/submit", include_in_schema=False)
@@ -1760,10 +1978,23 @@ catalogues and packages, normalised so a filter finds them however you spelled t
   -H 'content-type: application/json' \\
   -d '{{"domain":"example.com"}}'</code></pre>
 
+<h2 style="margin-top:30px;font-size:20px">What happens when it does not verify</h2>
+<p class="lede">It is kept. A submission that cannot be verified at that moment, for any
+reason, answers <code>202</code> with <code>"status": "pending"</code>, a submission id and
+<code>evidence</code>: the HTTP status, content type and first bytes your endpoint actually
+returned, or the JSON-RPC error it sent, so you can see exactly what we saw. We then retry
+it ourselves on a fixed schedule (1 minute, 5, 15, 1 hour, 4, 12, 24, 24) until it verifies
+or the attempts run out, and <code>GET {B}/submit/status/&lt;id&gt;</code> shows where it
+stands at any time. A refusal caused by us rather than by you, such as the index being busy,
+costs none of those attempts. Submitting again is harmless and joins the same queue. So a
+server that was mid-deploy or a DNS record that had not propagated still ends up indexed
+with no second submission from you, and if every attempt fails you are told that too, with
+the last evidence, rather than left guessing.</p>
+
 <div class="note">
   Nothing here is taken on your word: the manifest is fetched from your domain, so a
   submission cannot inject anything you do not actually publish. If no manifest is found you
-  get told which paths were tried. Not publishing yet? The
+  get told which paths were tried, and the submission is retried. Not publishing yet? The
   <a href="/publish">ten-minute guide</a> and the <a href="/console">free audit</a> both help.
 </div>
 
@@ -1774,8 +2005,9 @@ async function go(e){{
   if(!d) return false;
   o.style.display='block'; o.textContent='fetching '+d+' ...';
   try{{
+    const body=(d.startsWith('http://')||d.startsWith('https://'))?{{endpoint:d}}:{{domain:d}};
     const r=await fetch('/submit',{{method:'POST',headers:{{'content-type':'application/json'}},
-      body:JSON.stringify({{domain:d}})}});
+      body:JSON.stringify(body)}});
     const j=await r.json();
     o.textContent=JSON.stringify(j,null,2);
   }}catch(err){{ o.textContent=String(err); }}

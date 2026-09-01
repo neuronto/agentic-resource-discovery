@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/ard-publish)](https://pypi.org/project/ard-publish/)
 [![Licence](https://img.shields.io/pypi/l/ard-publish)](https://github.com/neuronto/ard-publish/blob/main/LICENSE)
 
-Build, validate and verify an **Agentic Resource Discovery (ARD)** manifest — the
+Build, validate and verify an **Agentic Resource Discovery (ARD)** manifest, the
 `/.well-known/ard.json` file that lets AI agents find what you offer at runtime,
 without anyone installing your tool in advance.
 
@@ -19,8 +19,10 @@ pip install ard-publish
 ## How do I make my API discoverable by AI agents?
 
 Serve an ARD manifest on your own domain describing what you offer, with 2 to 5
-representative queries per entry. Registries crawl it. There is no submission form,
-no marketplace to apply to and no allowlist.
+representative queries per entry. Registries crawl it. There is no marketplace to apply
+to and no allowlist. If you already run an MCP server you do not even need the manifest:
+`ard-publish submit https://yourdomain.com/mcp` has the registry handshake with it and
+index what the server itself reports.
 
 ```python
 from ard_publish import Manifest, Entry
@@ -45,7 +47,7 @@ agents find the tools, skills, agents and APIs they need, published in June 2026
 working group including Google, Microsoft, Hugging Face, AWS, Cisco, GitHub, Nvidia,
 Salesforce and Snowflake.
 
-It answers one question — *"what is available for this task?"* — then gets out of the
+It answers one question, *"what is available for this task?"*, then gets out of the
 way. It is a discovery layer, not a runtime, and it does not replace MCP or A2A.
 
 ## Why this package exists
@@ -63,11 +65,26 @@ error to notice.
 ard-publish init example.com > .well-known/ard.json   # scaffold a valid manifest
 ard-publish validate .well-known/ard.json             # check it locally
 ard-publish check example.com                         # check it for real
+ard-publish generate example.com                      # build one from what you already serve
+ard-publish submit https://example.com/mcp            # index an MCP server, verified by handshake
+ard-publish submit example.com                        # index a domain that serves a manifest
+ard-publish status <id|endpoint|domain>               # where a submission stands
+ard-publish claim example.com                         # DNS TXT record proving you own the domain
+ard-publish verify example.com                        # verify it, receive a key
 ```
+
+`generate` is for the common case where you have no manifest and do not want to write
+one: it probes your domain for an MCP server, an OpenAPI document, an agent card and
+`llms.txt`, and emits an entry only for what actually answered, each with the evidence
+that produced it. Nothing is guessed.
+
+`claim` and `verify` give you a key. Export it as `ARD_KEY` to raise your rate limit,
+and to register private entries: internal services only your own agents should find,
+searched in the same query as the public index and never visible to anyone else.
 
 `check` is the one that matters. It fetches your live manifest, validates it, and asks
 **every public ARD registry** whether they return your domain for your own
-representative queries — because publishing and being indexed are different things.
+representative queries, because publishing and being indexed are different things.
 
 ```
 example.com  grade B  82/100
@@ -82,13 +99,17 @@ example.com  grade B  82/100
     yes  Neuronto
      no  GitHub Agent Finder
     yes  WellKnown
+
+  for your own representative queries, who is returned instead of you:
+    'what is the weather in Berlin': you rank 4
+       ahead: OpenWeather MCP  (12 tools read from its own tools/list; endpoint answered when probed)
 ```
 
 ## How do I publish my MCP server so agents can find it?
 
-Three steps, about ten minutes.
+Four steps, about ten minutes.
 
-**1. Write the manifest** — `ard-publish init yourdomain.com`
+**1. Write the manifest:** `ard-publish init yourdomain.com`
 
 **2. Advertise it on all four discovery paths.** Serving only one makes you invisible
 to any client that checks another:
@@ -102,7 +123,28 @@ DNS service records            optional
 
 `Manifest.robots_line()` and `.link_tags()` generate two of those for you.
 
-**3. Verify** — `ard-publish check yourdomain.com`
+**3. Tell a registry it exists:** `ard-publish submit yourdomain.com`
+
+This is the step people skip, and it is the one that decides whether any of the previous
+work is visible. Serving a manifest is not being indexed. Registries crawl domain lists they
+chose; one public registry crawls a top-100,000 list, so a domain outside it is invisible to
+that registry indefinitely.
+
+Nothing is taken on your word: the manifest is fetched from your domain at that moment, so a
+submission cannot list anything you do not actually publish. If you have an MCP server and
+never wrote a manifest, submit the endpoint instead and skip steps 1 and 2 entirely:
+
+```bash
+ard-publish submit https://yourdomain.com/mcp
+```
+
+A submission that cannot be verified right now is not dropped. The registry keeps it,
+answers `pending` with the exact response your endpoint gave, and retries on its own
+schedule for about two and a half days, so a deploy that was a minute late or a
+server that was down when you typed the command still ends up indexed with no second
+command from you. `ard-publish status <id>` (the id is printed) shows where it stands.
+
+**4. Verify:** `ard-publish check yourdomain.com`
 
 ## The mistake that costs you everything
 
@@ -148,7 +190,7 @@ Helpers are provided for each resource kind:
 
 - [Agentic Resource Discovery specification](https://agenticresourcediscovery.org/spec)
 - [Publishing guide](https://neuronto.com/publish)
-- [Free ARD audit — which registries return you](https://neuronto.com/console)
+- [Free ARD audit, which registries return you](https://neuronto.com/console)
 - [Neuronto, the federated ARD index](https://neuronto.com)
 - [Source](https://github.com/neuronto/ard-publish)
 

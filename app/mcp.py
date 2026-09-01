@@ -196,14 +196,25 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             from .main import submit_endpoint
             resp = await submit_endpoint({"endpoint": endpoint, "domain": domain})
             payload = json.loads(bytes(resp.body).decode() or "{}")
-            ok = resp.status_code < 400 and payload.get("status") not in (
-                "not_an_mcp_server", "no_manifest")
-            if ok:
+            indexed = resp.status_code < 400 and payload.get("status") == "indexed"
+            pending = resp.status_code == 202 and payload.get("status") == "pending"
+            if indexed:
                 payload.setdefault("note",
                     "indexed and searchable. It will be re-checked periodically; an "
                     "endpoint that stops answering is demoted, not deleted.")
+            elif pending:
+                # Not an error from the agent's point of view: the submission
+                # is accepted and we are the ones who will keep trying. Marking
+                # it isError made one agent call this four times in five
+                # minutes on 2026-09-01, each time starting from nothing.
+                payload["indexed"] = False
+                payload["next_step"] = ("nothing to do on your side unless the evidence "
+                                        "shows a fault in the endpoint; we retry on the "
+                                        "schedule in `retry`. Check `submission.status_url` "
+                                        "for the outcome.")
             return 200, {"jsonrpc": "2.0", "id": rid,
-                         "result": {**_text(payload), **({} if ok else {"isError": True})}}
+                         "result": {**_text(payload),
+                                    **({} if (indexed or pending) else {"isError": True})}}
 
         if name == "registry_stats":
             c = store.counts(conn)
