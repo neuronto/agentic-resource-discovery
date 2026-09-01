@@ -28,7 +28,9 @@ def chrome_css() -> str:
     on every page and had drifted into three slightly different whites."""
     css = render.EXTRA_CSS
     out = []
-    for block in ("/* ── Buttons ", "/* ── Footer ", "/* ── Navigation "):
+    # Order matters and is the source order: a media query adds no specificity,
+    # so the responsive block must come last or the plain rules above it win.
+    for block in ("/* ── Buttons ", "/* ── Footer ", "/* ── Navigation ", "/* ── Responsive "):
         i = css.find(block)
         if i < 0:
             continue

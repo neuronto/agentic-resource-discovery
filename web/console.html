@@ -166,7 +166,9 @@ ul.ahead .an{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:
 @media(max-width:640px){ul.ahead li{grid-template-columns:1fr;gap:2px}}
 .tools3{border-top:1px solid var(--line);margin-top:54px;padding-top:8px}
 .t3{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-top:22px}
-.t3 article{min-width:0}
+.t3 article{min-width:0;overflow:hidden}
+.t3 .src{white-space:normal;font-size:12.5px}
+@media(max-width:900px){.t3{grid-template-columns:1fr;gap:34px}}
 .t3 h3{font-size:15px;margin:0 0 9px}
 .t3 p{font-size:13.5px;line-height:1.62;margin:0 0 11px}
 .t3 pre{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);
@@ -336,14 +338,14 @@ ul.ahead .an{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:
 .tile .t{font-weight:500;margin-bottom:6px}
 .tile .n{font-family:var(--mono);font-size:12px;color:var(--mut)}
 table.tl{width:100%;border-collapse:collapse;margin:20px 0;font-size:13px}
-table.tl th{text-align:left;font-weight:500;color:var(--mut);font-size:11px;
+table.tl th{text-align:left;font-weight:500;color:var(--mut);font-size:12.5px;
   text-transform:uppercase;letter-spacing:.06em;padding:0 12px 10px;border-bottom:1px solid var(--line)}
 table.tl td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 table.tl td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 .tn{font-family:var(--mono);color:var(--fg);font-size:12.5px}
 .sv{color:var(--fg2);font-size:12px}
 .dsc{color:var(--mut);font-size:12px;line-height:1.5;max-width:62ch;margin-top:4px}
-.tag{display:inline-block;font-size:10.5px;font-family:var(--mono);padding:2px 6px;
+.tag{display:inline-block;font-size:12px;font-family:var(--mono);padding:2px 6px;
   border:1px solid var(--line2);border-radius:4px;color:var(--mut);margin-left:6px}
 .tag.ok{color:var(--pos);border-color:#1E3A2A}
 .tag.auth{color:#E3B341;border-color:#3A3020}
@@ -353,6 +355,45 @@ table.tl td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 .mtable td{padding:7px 10px;border-bottom:1px solid var(--line)}
 .mtable td.num{text-align:right;font-family:var(--mono);color:var(--fg2)}
 .bar{height:5px;background:var(--line2);border-radius:3px;display:block}
+
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+/* Every rule here was a measured failure at a real viewport, not a guess. */
+img{max-width:100%;height:auto}
+/* A flex item's default min-width is its content width, so an input inside a
+   flex row refuses to shrink and pushes its button off the screen at 320px. */
+.bigsearch input,.navsearch input{min-width:0}
+/* Long unbroken strings (URLs, identifiers) break rather than widen the page.
+   A bare `a` needs it too: a full URL used as link text was the last thing
+   still pushing the tools index past a 320px screen. */
+td,th,a,.dsc,.src,.nm,.mono,pre code,code{overflow-wrap:anywhere}
+p.src{white-space:normal}
+@media(max-width:760px){
+  table,.tbl,.mtable,table.tl{display:block;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  pre{overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+}
+@media(max-width:900px){
+  /* Tap targets. The guideline is 44px and links in tables and lists were 20,
+     which on a phone is a coin toss between two adjacent rows. Padding rather
+     than height so the text keeps its position in the row. */
+  .fg a,.ms a{padding:11px 0;display:block}
+  .navquick a{padding:12px 3px;display:inline-block}
+  td a,.tbl a,.fl a,li a{display:inline-block;padding:12px 0;min-height:44px;
+    line-height:20px;box-sizing:border-box}
+  .ngp-in a{padding:13px 11px}
+  /* Type floor: metadata set at 11px reads as 9 on a phone. */
+  td,th,.dsc,.src,.fnote,.fg a,.nd,.cap,.num{font-size:12.5px}
+  code,.tbl code{font-size:12px}
+  /* The menu control is a primary tap target and was 32px tall. */
+  .burger{height:44px;width:44px}
+  .eyebrow{font-size:11px}
+}
+/* On a large screen 11px metadata is legible and deliberate, but it was being
+   used for prose as well as for labels. Anything that is a sentence gets the
+   body floor; only true labels stay small. */
+code,kbd,samp,.tbl code,td code,.mono{font-size:12px}
+th,td,.dsc,p.src{font-size:12.5px}
+.tbl code,td code{font-size:12px}
 
 <!--/chrome:css-->
 </style>

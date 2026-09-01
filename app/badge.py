@@ -32,15 +32,6 @@ from . import config
 _CACHE: dict[str, tuple[float, tuple]] = {}
 _TTL = 3600
 
-# Approximate glyph advance for Verdana 11px, the shields.io convention. Close
-# enough for badge layout; text is also centred so small errors split evenly.
-_W = 6.9
-
-
-def _text_w(s: str) -> int:
-    return int(len(s) * _W) + 10
-
-
 def stats_for(conn: sqlite3.Connection, publisher: str) -> tuple | None:
     """(tools, servers, responding_servers) for one publisher, cached.
 

@@ -24,7 +24,6 @@ import json
 import re
 import sqlite3
 import time
-from typing import Any
 
 from . import config, render, store
 from .render import esc, fmt
@@ -824,7 +823,7 @@ def render_publishers_index(conn: sqlite3.Connection) -> str:
         f'<div class="dsc">{esc(" · ".join(KIND_LABEL.get(k, k).lower() for k in p["kinds"][:4] if k))}</div></td>'
         f'<td class="num">{fmt(p["entries"])}</td>'
         f'<td class="num">{fmt(p["live"]) if p["probed"] else "<span style=color:var(--dim)>not checked</span>"}</td>'
-        f'<td><code style="font-size:11px">{esc((p["path"] or "").replace("/.well-known/",""))}</code></td>'
+        f'<td><code style="font-size:12px">{esc((p["path"] or "").replace("/.well-known/",""))}</code></td>'
         f'</tr>' for p in pubs)
 
     ld = json.dumps({
@@ -975,7 +974,7 @@ def render_published(conn: sqlite3.Connection) -> str:
         rows = "".join(
             f'<tr><td><a href="{esc(u)}" rel="noopener">{esc(name)}</a>'
             f'<div class="dsc">{esc(desc)}</div>'
-            f'<div class="dsc"><code style="font-size:11px">{esc(u)}</code></div></td></tr>'
+            f'<div class="dsc"><code style="font-size:12px">{esc(u)}</code></div></td></tr>'
             for name, u, desc in items)
         secs.append(f'<h2 style="margin-top:34px;font-size:20px">{esc(title)}</h2>'
                     f'<table class="tl"><tbody>{rows}</tbody></table>')
@@ -1056,7 +1055,7 @@ def render_badge_page(conn: sqlite3.Connection, domain: str = "") -> str:
 .sw .stage img{{flex:0 0 auto;height:20px;width:auto;max-width:100%}}
 .sw .cap{{border-top:1px solid var(--line);padding:8px 12px;font-size:12px;color:var(--mut);
   display:flex;justify-content:space-between;gap:10px;align-items:baseline}}
-.sw .cap code{{font-size:11px;color:var(--fg2)}}
+.sw .cap code{{font-size:12px;color:var(--fg2)}}
 .stage-l{{background:#FFFFFF}} .stage-d{{background:#0A0A0B}}
 /* The default badge follows the reader's own system setting, not the colour
    behind it, so it is shown on a neutral ground. An earlier version put it on a
@@ -1098,13 +1097,13 @@ def render_badge_page(conn: sqlite3.Connection, domain: str = "") -> str:
 
 <div class="swatches">
     <div class="sw"><div class="stage stage-a">
-      <img src="{B}/badge/{esc(sample)}.svg" alt="{esc(sn['alt'])}"></div>
+      <img src="{B}/badge/{esc(sample)}.svg" alt="{esc(sn['alt'])}" height="20" width="206"></div>
       <div class="cap"><span>follows the reader's system theme</span><code>default</code></div></div>
     <div class="sw"><div class="stage stage-l">
-      <img src="{B}/badge/{esc(sample)}.svg?theme=light" alt="Light variant"></div>
+      <img src="{B}/badge/{esc(sample)}.svg?theme=light" alt="Light variant" height="20" width="206"></div>
       <div class="cap"><span>pinned light</span><code>?theme=light</code></div></div>
     <div class="sw"><div class="stage stage-d">
-      <img src="{B}/badge/{esc(sample)}.svg?theme=dark" alt="Dark variant"></div>
+      <img src="{B}/badge/{esc(sample)}.svg?theme=dark" alt="Dark variant" height="20" width="206"></div>
       <div class="cap"><span>pinned dark</span><code>?theme=dark</code></div></div>
 </div>
 

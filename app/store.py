@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
 import sqlite3
+import threading
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import config
 from .normalize import dedupe_key, media_family, normalize_identifier, publisher_of
@@ -230,6 +232,10 @@ CREATE TABLE IF NOT EXISTS private_entries (
   created      INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_private_owner ON private_entries(owner_domain);
+-- Every publisher lookup is `lower(publisher)=?`, which the plain index on
+-- publisher cannot serve: it was a full scan on each demand report, badge and
+-- publisher page. An expression index matches the query as written.
+CREATE INDEX IF NOT EXISTS idx_entries_publisher_lower ON entries(lower(publisher));
 
 CREATE VIRTUAL TABLE IF NOT EXISTS private_fts USING fts5(
   key UNINDEXED, display_name, description, rep_queries, tags, tokenize='porter'
@@ -264,6 +270,37 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # `database is locked`. WAL already allows concurrent readers, so waiting
     # here costs nothing that matters and prevents losing hours of work.
     c.execute("PRAGMA busy_timeout=45000")
+    # WAL plus NORMAL is the standard production setting: a commit no longer
+    # waits for an fsync, the file cannot be corrupted by a crash, and at worst
+    # the last few transactions before a power loss are lost. With FULL, every
+    # logged search paid an fsync on the request path; measured as ten
+    # concurrent searches taking 1.2 seconds each where one takes forty ms.
+    c.execute("PRAGMA synchronous=NORMAL")
+    return c
+
+
+_tls = threading.local()
+_tls_lock = threading.Lock()
+_tls_ready = False
+
+
+def tls_conn() -> sqlite3.Connection:
+    """A connection for the calling thread, schema initialised exactly once.
+
+    SQLite serialises every statement on a connection behind its own mutex, so
+    one shared connection makes readers queue however many threads there are.
+    One per thread is cheap and lets WAL do what it exists for.
+    """
+    global _tls_ready
+    c = getattr(_tls, "conn", None)
+    if c is not None:
+        return c
+    c = connect()
+    with _tls_lock:
+        if not _tls_ready:
+            init(c)
+            _tls_ready = True
+    _tls.conn = c
     return c
 
 
@@ -655,46 +692,68 @@ def row_to_entry(r: sqlite3.Row) -> dict:
 PRIVATE_QUERY_PLACEHOLDER = "(authenticated search, text not recorded)"
 
 
+_logq: "queue.Queue[tuple]" = queue.Queue(maxsize=50000)
+_logthread: threading.Thread | None = None
+
+
+def _log_writer() -> None:
+    """Drain the search log in batches, one transaction per batch.
+
+    Logging used to happen inline: an insert, an impressions insert and a
+    commit on every search, on the event loop, with an fsync each. It is
+    bookkeeping, and bookkeeping must never sit between a caller and their
+    answer. A batch of two hundred searches now costs one commit on a thread
+    that nobody is waiting for. A crash loses at most the unflushed batch of
+    log rows, which is the right thing to lose.
+    """
+    c = connect()
+    while True:
+        first = _logq.get()
+        batch = [first]
+        try:
+            while len(batch) < 200:
+                batch.append(_logq.get_nowait())
+        except queue.Empty:
+            pass
+        try:
+            for (q, mode, results, ms, federated, ents, authenticated, now) in batch:
+                cur = c.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
+                                   VALUES(?,?,?,?,?,?)""",
+                                (PRIVATE_QUERY_PLACEHOLDER if authenticated else q[:200],
+                                 mode, results, ms, federated, now))
+                if ents and not authenticated:
+                    c.executemany(
+                        """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
+                           VALUES(?,?,?,?,?)""",
+                        [(cur.lastrowid, k, i, sc, now) for i, (k, sc) in enumerate(ents, start=1)])
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+
 def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
                ms: int, federated: int, entries: list[dict] | None = None,
                authenticated: bool = False) -> None:
-    """Record a query and what it returned. Never let bookkeeping fail a search.
+    """Record a query and what it returned, off the request path.
 
-    The impressions half is what turns a query log into a report a publisher
-    would pay attention to: not "somebody searched for pdf" but "your resource
-    was returned for these queries, at these positions".
-
-    **An authenticated search is not recorded.** A caller presenting a domain
-    key is searching their own private registry as well as the public index, and
-    what an organisation looks for internally is their business, not a product
-    signal. This was found the hard way: the query text of a private-registry
-    search reached the public `/stats` feed verbatim, because logging happened
-    before anyone asked whether this particular query should be logged at all.
-    The count and the latency are still recorded, so operational numbers stay
-    honest, and the text and the impressions are dropped.
-
-    Impressions are also never written for a private entry. Nothing reads them
-    for one today, because every reader joins through `entries` and private rows
-    are not there, but "no current reader" is not a boundary. The row simply
-    should not exist.
+    `conn` is accepted for compatibility and unused: the writer thread holds
+    its own connection. See `_log_writer` for why this is not inline, and
+    `PRIVATE_QUERY_PLACEHOLDER` for why an authenticated search keeps neither
+    its text nor its impressions.
     """
+    global _logthread
+    ents = [(e.get("_key"), e.get("score")) for e in (entries or [])[:10]
+            if e.get("_key") and e.get("visibility") != "private"]
     try:
-        now = int(time.time())
-        cur = conn.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
-                              VALUES(?,?,?,?,?,?)""",
-                           (PRIVATE_QUERY_PLACEHOLDER if authenticated else q[:200],
-                            mode, results, ms, federated, now))
-        sid = cur.lastrowid
-        if entries and not authenticated:
-            conn.executemany(
-                """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
-                   VALUES(?,?,?,?,?)""",
-                [(sid, e.get("_key"), i, e.get("score"), now)
-                 for i, e in enumerate(entries[:10], start=1)
-                 if e.get("_key") and e.get("visibility") != "private"])
-        conn.commit()
-    except Exception:
-        pass
+        _logq.put_nowait((q, mode, results, ms, federated, ents, authenticated, int(time.time())))
+    except queue.Full:
+        return
+    if _logthread is None or not _logthread.is_alive():
+        _logthread = threading.Thread(target=_log_writer, name="search-log", daemon=True)
+        _logthread.start()
 
 
 def daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:

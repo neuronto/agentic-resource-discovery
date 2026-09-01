@@ -21,7 +21,6 @@ import time
 import httpx
 
 from . import config, store
-from .normalize import media_family
 
 HEADERS = {"user-agent": config.USER_AGENT}
 

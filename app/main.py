@@ -89,34 +89,9 @@ _conn: sqlite3.Connection | None = None
 WEB = Path(__file__).resolve().parent.parent / "web"
 
 
-_dbtls = threading.local()
-_db_init_lock = threading.Lock()
-_db_ready = False
-
-
 def db() -> sqlite3.Connection:
-    """A connection for this thread.
-
-    One shared connection was the original design, and it is the wrong one as
-    soon as anything runs in a threadpool: SQLite serialises every statement on
-    a connection behind its own mutex, so readers queue behind each other even
-    though WAL was built so they would not have to. A connection per thread is
-    cheap, and read-only handlers then genuinely run in parallel.
-
-    Schema setup still happens exactly once, under a lock, on the first
-    connection any thread opens.
-    """
-    global _db_ready
-    c = getattr(_dbtls, "conn", None)
-    if c is not None:
-        return c
-    c = store.connect()
-    with _db_init_lock:
-        if not _db_ready:
-            store.init(c)
-            _db_ready = True
-    _dbtls.conn = c
-    return c
+    """A connection for this thread. See store.tls_conn for why not one shared."""
+    return store.tls_conn()
 
 
 # The expensive pages, with the TTL each is served at. Warmed on startup and
@@ -124,6 +99,7 @@ def db() -> sqlite3.Connection:
 # pays for a 22 second build.
 def _warmable():
     return [
+        ("home",        600,  _render_home),
         ("tools-index", 1800, lambda: catalog.render_index(db())),
         ("pubs-index",  1800, lambda: catalog.render_publishers_index(db())),
         ("published",   3600, lambda: catalog.render_published(db())),
@@ -185,13 +161,53 @@ async def _startup() -> None:
     asyncio.ensure_future(_refresher())
 
 
+# Set here and nowhere else. The policy allows exactly what the pages use:
+# their own inline scripts and styles, Google Fonts, and the CDN the API
+# documentation page loads its viewer from. Nothing may frame these pages.
+# Set here and nowhere else. It allows exactly what these pages actually load:
+# their own inline scripts and styles, Google Fonts, the CDN the API reference
+# loads its viewer from, and the tag manager running at the edge together with
+# the analytics tool it injects. The first version omitted the last of those and
+# silently broke it; a policy that blocks a tool the site is meant to be using
+# is a bug in the policy.
+_CSP = ("default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
+        "https://static.cloudflareinsights.com https://*.hotjar.com https://*.hotjar.io; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net "
+        "https://*.hotjar.com; "
+        "font-src 'self' data: https://fonts.gstatic.com https://*.hotjar.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://*.hotjar.com https://*.hotjar.io wss://*.hotjar.com "
+        "https://static.cloudflareinsights.com https://cloudflareinsights.com; "
+        "frame-src https://*.hotjar.com; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
+_SECURITY = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Content-Security-Policy": _CSP,
+}
+
+
 @app.middleware("http")
 async def _timing(request: Request, call_next):
     """Latency is the product claim, so every response carries its own measurement."""
     t0 = time.perf_counter()
     resp = await call_next(request)
     resp.headers["X-Response-Time-Ms"] = f"{(time.perf_counter() - t0) * 1000:.1f}"
+    for k, v in _SECURITY.items():
+        resp.headers.setdefault(k, v)
     return resp
+
+
+@app.exception_handler(RecursionError)
+async def _too_deep(request: Request, exc: RecursionError) -> JSONResponse:
+    # A body nested thousands of levels deep exhausts the parser's stack. That
+    # is the caller's problem, and it was being reported as ours.
+    return JSONResponse(status_code=400, content={"error": "invalid_request",
+                                                  "detail": "request body is nested too deeply"})
 
 
 # ─────────────────────────── Registry REST API (§5.3) ───────────────────────
@@ -210,6 +226,11 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request",
             "detail": "query.text is required for Search (spec 5.3.2)."})
+    if len(text) > 2000:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": "query.text is longer than 2000 characters. A query is a request "
+                      "in a sentence or two, not a document."})
     # The spec nests filter inside query (5.3.2). A caller who puts it at the top
     # level previously got unfiltered results and no indication anything was
     # wrong, which is worse than either honouring it or rejecting it. We honour
@@ -696,8 +717,10 @@ PAGE_CACHE = {"Cache-Control": "public, max-age=900"}
 
 
 @app.get("/", include_in_schema=False)
-async def home():
-    return HTMLResponse(_render_home(), headers=PAGE_CACHE)
+def home():
+    # Built from live counts, so it is cached like the other aggregate pages
+    # rather than rendered per request; crawlers reach the origin for it.
+    return HTMLResponse(render.cached("home", 600, _render_home), headers=PAGE_CACHE)
 
 @app.get("/about", include_in_schema=False)
 @app.get("/registry", include_in_schema=False)
@@ -803,7 +826,7 @@ async def audit_endpoint(body: dict) -> JSONResponse:
 
 
 @app.post("/e", include_in_schema=False)
-async def client_event(body: dict, request: Request) -> Response:
+def client_event(body: dict, request: Request) -> Response:
     """A page reporting itself.
 
     Pages are served from a CDN, so most views never reach this server and
@@ -1156,7 +1179,7 @@ def image(name: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/tools")
-async def tools_endpoint(body: dict) -> JSONResponse:
+def tools_endpoint(body: dict) -> JSONResponse:
     q = body.get("query") or {}
     text = (q.get("text") if isinstance(q, dict) else str(q)) or body.get("q") or ""
     text = str(text).strip()
@@ -1188,7 +1211,7 @@ async def tools_get(q: str | None = Query(None),
     and a crawler handed `/tools` gets a page it can read.
     """
     if q:
-        return await tools_endpoint({"query": {"text": q}, "limit": limit,
+        return tools_endpoint({"query": {"text": q}, "limit": limit,
                                      "withSchema": withSchema})
     html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})

@@ -30,7 +30,6 @@ import asyncio
 import json
 import struct
 import time
-from typing import Any
 
 import httpx
 

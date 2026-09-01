@@ -1789,6 +1789,73 @@ def t_contact_address_is_an_image_only():
             pass
 
 
+def t_security_headers_on_every_response():
+    """One owner, present on HTML, JSON and images alike."""
+    want = {"strict-transport-security": "max-age=", "x-content-type-options": "nosniff",
+            "x-frame-options": "DENY", "referrer-policy": "strict-origin",
+            "content-security-policy": "frame-ancestors 'none'", "permissions-policy": "camera=()"}
+    for path in ("/", "/metrics.json", "/badge/zapier.com.svg", "/tools/"):
+        r = urllib.request.urlopen(urllib.request.Request(
+            BASE + path + ("?cb=1" if "?" not in path else "&cb=1"),
+            headers={"User-Agent": UA["User-Agent"], "Accept": "text/html"}), timeout=30)
+        got = {k.lower(): v for k, v in r.headers.items()}
+        for h, frag in want.items():
+            assert frag in got.get(h, ""), f"{path}: {h} missing or wrong: {got.get(h)!r}"
+        assert len([k for k in r.headers.keys() if k.lower() == "content-security-policy"]) == 1, \
+            f"{path}: CSP set more than once"
+
+
+def t_no_top_level_definition_is_duplicated_in_the_app():
+    """The fourth time this bit: a second `_text_w` in badge.py silently won.
+
+    Runs on the checked-in source, so it needs the repository layout.
+    """
+    import ast as _ast, collections, glob, os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    files = glob.glob(os.path.join(root, "app", "*.py"))
+    if not files:
+        raise Skip("app/ not beside this script")
+    for f in files:
+        names = collections.Counter(n.name for n in _ast.parse(open(f).read()).body
+                                    if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)))
+        d = [n for n, c in names.items() if c > 1]
+        assert not d, f"{os.path.basename(f)} defines twice: {d}"
+
+
+def t_malformed_and_oversized_input_is_refused_not_crashed():
+    s, d = post("/search", {"query": {"text": "a" * 2001}, "federation": "none"})
+    assert s == 400 and d.get("error") == "invalid_request", (s, d)
+    req = urllib.request.Request(BASE + "/search", data=("[" * 3000 + "]" * 3000).encode(),
+                                 headers=UA, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=30)
+        raise AssertionError("deeply nested body was accepted")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, f"nested body gave {e.code}, want 400 (a 500 blames us for the caller's input)"
+    s2, d2 = post("/search", {"query": {"text": "pdf"}, "federation": "none", "pageSize": 100000})
+    assert s2 == 200 and len(d2.get("results", [])) <= 100, "pageSize is not capped at the spec maximum"
+
+
+def t_search_stays_fast_under_concurrency():
+    """The product claim, measured through the edge from here.
+
+    Ten searches at once. Each alone is tens of milliseconds at the origin;
+    if they serialise on the event loop the median climbs past a second.
+    """
+    import concurrent.futures as cf, time as _t
+    def one(q):
+        t = _t.perf_counter()
+        s_, _ = post("/search", {"query": {"text": q}, "federation": "none", "pageSize": 10}, timeout=60)
+        return s_, (_t.perf_counter() - t) * 1000
+    qs = ["send an email", "read a pdf", "query postgres", "post to slack", "scrape a site",
+          "transcribe audio", "generate an image", "deploy a container", "weather", "translate"]
+    with cf.ThreadPoolExecutor(10) as ex:
+        res = list(ex.map(one, qs))
+    assert all(r[0] == 200 for r in res), [r[0] for r in res]
+    med = sorted(r[1] for r in res)[5]
+    assert med < 1500, f"median {med:.0f}ms for 10 concurrent searches; they are serialising again"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
