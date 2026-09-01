@@ -2041,6 +2041,19 @@ def t_no_background_job_holds_the_write_lock_across_io():
                           + "\n   ".join(offences))
 
 
+def t_a_refused_submission_says_whose_fault_it_is():
+    """A publisher retrying blind cannot tell a transient error on their own
+    endpoint from a refusal by us, and that ambiguity is not academic: one
+    tried four times, got three failures, and gave up. The response carries a
+    machine-readable reason and says plainly which side it came from."""
+    code, d = post("/submit", {"endpoint": "https://example.com/definitely-not-mcp"})
+    assert code == 404 and d.get("status") == "not_an_mcp_server", (code, d)
+    assert d.get("reason", "").startswith("error:"), \
+        f"no machine-readable reason on a refusal: {d}"
+    assert "not a limit on our side" in (d.get("detail") or ""), \
+        "the refusal does not tell the publisher whose fault it is"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
