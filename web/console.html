@@ -154,6 +154,25 @@ pre b{color:var(--fg);font-weight:400}pre .u{color:var(--blue)}
 footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);font-size:12px}
 .fl{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--mono);font-size:11.5px}
 .fl a:hover{color:var(--fg2)}
+.cmp{border-top:1px solid var(--line);padding:14px 0}
+.cq{display:flex;gap:14px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
+.cq .mono{font-size:13.5px}
+.rk{font-size:12px;letter-spacing:.02em;white-space:nowrap}
+.rk.ok{color:var(--pos)}.rk.mid{color:var(--mut)}.rk.no{color:var(--neg)}
+ul.ahead{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px}
+ul.ahead li{display:grid;grid-template-columns:minmax(0,15em) 1fr;gap:14px;
+  font-size:12.5px;color:var(--mut)}
+ul.ahead .an{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:640px){ul.ahead li{grid-template-columns:1fr;gap:2px}}
+.tools3{border-top:1px solid var(--line);margin-top:54px;padding-top:8px}
+.t3{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-top:22px}
+.t3 article{min-width:0}
+.t3 h3{font-size:15px;margin:0 0 9px}
+.t3 p{font-size:13.5px;line-height:1.62;margin:0 0 11px}
+.t3 pre{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 12px;font-size:11.5px;line-height:1.55;overflow-x:auto;margin:0 0 10px;
+  white-space:pre}
+@media(max-width:900px){.t3{grid-template-columns:1fr;gap:34px}}
 </style>
 <style>
 .grade{display:flex;align-items:center;gap:20px;margin:0 0 22px}
@@ -193,8 +212,9 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
     <p class="eyebrow">ARD Console</p>
     <h1 class="display" style="font-size:clamp(2.2rem,5.1vw,3.4rem)">Can AI agents<br><em>discover you?</em></h1>
     <p class="lede">Check any domain: whether its manifest is reachable on all four discovery paths,
-    whether it satisfies the specification, and <b>which registries actually return it</b>. That
-    last one is what decides if an agent ever finds you, and nothing else measures it.</p>
+    whether it satisfies the specification, <b>which registries actually return it</b>, and
+    <b>who is returned instead of you</b> for the queries you asked to be found for. Those
+    last two decide whether an agent ever finds you, and nothing else measures them.</p>
     <form class="bigsearch" id="af" style="max-width:560px" autocomplete="off">
       <input id="dom" placeholder="example.com" aria-label="Domain to audit">
       <button class="btn btn--w" id="ab" type="submit">Audit</button>
@@ -202,12 +222,52 @@ footer{border-top:1px solid var(--line);padding:30px 0 52px;color:var(--mut);fon
     <p class="src" style="margin-top:11px">Free, no signup. Takes about fifteen seconds.</p>
   </div>
   <div id="rep"></div>
+
+  <section class="tools3" aria-labelledby="pt">
+    <div class="shead"><h2 id="pt">If the audit found something to fix</h2></div>
+    <div class="t3">
+      <article>
+        <h3>You have no manifest</h3>
+        <p>Most domains never write one by hand. If you already run an MCP server, serve an
+        OpenAPI document or publish llms.txt, we can build the manifest from what is already
+        there and host it, and you link it or copy it.</p>
+        <pre class="mono">curl -X POST https://neuronto.com/manifest/build \
+  -H 'content-type: application/json' \
+  -d '{"domain":"example.com"}'</pre>
+        <p class="src">Only resources that actually answered become entries, and each one
+        says what proved it. Nothing is guessed, because a guess would put a claim on your
+        domain that you never made.</p>
+      </article>
+      <article>
+        <h3>You want to prove the domain is yours</h3>
+        <p>Publish one TXT record. The value is derived from your domain and never changes,
+        so asking again never invalidates a record you already published.</p>
+        <pre class="mono">curl -X POST https://neuronto.com/claim \
+  -H 'content-type: application/json' \
+  -d '{"domain":"example.com"}'</pre>
+        <p class="src">We read it over DNS over HTTPS, so it verifies as soon as your zone
+        serves it. Verification is the only thing that issues a key.</p>
+      </article>
+      <article>
+        <h3>You have internal services too</h3>
+        <p>The list of services your own agents may call usually lives in a system prompt,
+        where nothing can search it and nobody can audit it. A verified domain can register
+        them here, and one query then answers across both.</p>
+        <pre class="mono">curl -X POST https://neuronto.com/search \
+  -H "authorization: Bearer $KEY" \
+  -d '{"query":{"text":"look up an employee record"}}'</pre>
+        <p class="src">Private entries are held in separate storage from the public index.
+        No public search, count or page can reach them, and every result says which of the
+        two it came from.</p>
+      </article>
+    </div>
+  </section>
 </div>
 
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
-  <div>The console is read-only. It fetches what you already publish and asks the public
-  registries whether they return you.</div>
+  <div>The audit is read-only: it fetches what you already publish and asks the public
+  registries whether they return you. Nothing is written unless you claim the domain.</div>
 </div></footer>
 
 <script>
@@ -263,6 +323,18 @@ async function audit(){
           <div>${j.conformance.findings.slice(0,14).map(f=>`<div class="find ${f.severity}">
             <div class="sev">${f.severity}${f.entry?" · "+esc(f.entry):""}</div>
             <p>${esc(f.message)}</p></div>`).join("")}</div>`:""}
+
+        ${(j.competition&&(j.competition.queries||[]).length)?`
+        <div class="shead" style="margin-top:34px"><h2>Who is returned instead of you</h2>
+          <div class="sp"><span class="src">your own representativeQueries, this index</span></div></div>
+        <div>${j.competition.queries.map(q=>`<div class="cmp">
+          <div class="cq"><span class="mono">${esc(q.query)}</span>
+            <span class="rk ${q.your_best_rank?(q.your_best_rank<=3?"ok":"mid"):"no"}">${
+              q.your_best_rank?("you rank "+q.your_best_rank):"you are not returned"}</span></div>
+          ${(q.ahead_of_you||[]).length?`<ul class="ahead">${q.ahead_of_you.map(a=>`<li>
+            <span class="an">${esc(String(a.name))}</span>
+            <span class="aw">${esc(a.has_that_you_may_not)}</span></li>`).join("")}</ul>`:""}
+        </div>`).join("")}</div>`:""}
 
         <div class="shead" style="margin-top:34px"><h2>What to do next</h2></div>
         <div>${j.recommendations.map((r,i)=>`<div class="rec"><span class="i">${i+1}</span>
