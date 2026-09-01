@@ -46,6 +46,15 @@ UPSTREAMS = [
      "https://huggingface-hf-discover.hf.space/search","https://huggingface-hf-discover.hf.space"),
     ("desvela",     "Desvela ARD Registry",
      "https://registry.desvela.dev/search",           "https://registry.desvela.dev"),
+    # Found 2026-09-01 while tracing how publishers get discovered. It bills
+    # itself as "the first public, neutral registry for the ARD specification"
+    # and does rank for submission queries, but it serves search at /api/search
+    # rather than the spec's /search and has no /agents or /explore, so a
+    # conformant client cannot find it. Federating it anyway: the point of
+    # federation is to reach indexes clients cannot, and it carries entries
+    # (largely mirrored from Ora) that no other upstream gives us.
+    ("ardregistry", "ARD Registry Hub",
+     "https://ardregistry.org/api/search",            "https://ardregistry.org"),
 ]
 
 # Liveness. An entry that does not answer is not a discovery result, it is
