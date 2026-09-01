@@ -52,12 +52,12 @@ NAV = """<nav><div class="wrap">
     <img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
     <span class="wm">neuronto</span>
   </a>
-  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/bench">Benchmark</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>"""
 
 FOOTER = """<footer><div class="wrap">
-  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/.well-known/ard.json">ard.json</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div style="max-width:70ch">An Agentic Resource Discovery registry, index and publisher.
   Relevance scores are semantic only and are never a trust, compliance or safety rating.
   A tool listed as verified was read from that server's own tools/list; verification is a

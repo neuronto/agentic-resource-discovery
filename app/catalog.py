@@ -527,8 +527,8 @@ def render_adoption(report: dict) -> str:
 def sitemap_urls(conn: sqlite3.Connection) -> list[str]:
     """Only pages that actually exist. Never advertise a URL that 404s."""
     return ([f"{B}/tools/"] + [f"{B}/tools/{s}" for s in published(conn)] +
-            [f"{B}/publishers/"] +
-            [f"{B}/publishers/{p['publisher']}" for p in publisher_list(conn)] +
+            [f"{B}/ard-publishers"] +
+            [f"{B}/ard-publishers/{p['publisher']}" for p in publisher_list(conn)] +
             [f"{B}/bench", f"{B}/adoption"])
 
 
@@ -559,23 +559,34 @@ def publisher_list(conn: sqlite3.Connection) -> list[dict]:
     to leave them off a list of who publishes ARD at all. The point of this list
     is completeness, and a curated subset is a worse artefact than the full set.
     """
+    # Membership is verification, not provenance. Previously this asked "did our
+    # own crawler find them", which both under-counted (peers know publishers we
+    # had not crawled) and mis-framed the list. The right test is the one the
+    # page's title claims: does this domain actually serve a manifest, observed
+    # by us, at a path we recorded. Of 5,491 publishers peer registries reported,
+    # exactly 28 did; the rest are publisher names derived from URNs by
+    # registries that never fetched a manifest, and listing them would have made
+    # this page a directory of assumptions.
     rows = conn.execute(
-        """SELECT publisher,
+        """SELECT e.publisher,
                   COUNT(*) n,
-                  SUM(CASE WHEN live=1 THEN 1 ELSE 0 END) live,
-                  SUM(CASE WHEN live IS NOT NULL THEN 1 ELSE 0 END) probed,
-                  SUM(COALESCE(mcp_tools,0)) tools,
-                  GROUP_CONCAT(DISTINCT type_family) fams,
-                  MIN(first_seen) first_seen,
-                  MAX(updated_at) seen
-           FROM entries
-           WHERE sources LIKE '%crawl%' AND publisher IS NOT NULL AND publisher != ''
-             AND publisher NOT LIKE '%modelcontextprotocol%'
-           GROUP BY publisher
-           ORDER BY n DESC, publisher""").fetchall()
+                  SUM(CASE WHEN e.live=1 THEN 1 ELSE 0 END) live,
+                  SUM(CASE WHEN e.live IS NOT NULL THEN 1 ELSE 0 END) probed,
+                  SUM(COALESCE(e.mcp_tools,0)) tools,
+                  GROUP_CONCAT(DISTINCT e.type_family) fams,
+                  MIN(e.first_seen) first_seen,
+                  MAX(e.updated_at) seen,
+                  cs.manifest_path
+           FROM entries e
+           JOIN crawl_seen cs ON cs.domain = lower(e.publisher)
+           WHERE cs.manifest_path IS NOT NULL
+             AND e.publisher IS NOT NULL AND e.publisher != ''
+           GROUP BY e.publisher
+           ORDER BY n DESC, e.publisher""").fetchall()
     return [{"publisher": r["publisher"], "entries": r["n"], "live": r["live"],
              "probed": r["probed"], "tools": r["tools"] or 0,
              "kinds": sorted(x for x in (r["fams"] or "").split(",") if x),
+             "path": r["manifest_path"],
              "first_seen": r["first_seen"], "seen": r["seen"]} for r in rows]
 
 
@@ -684,7 +695,7 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
             f"for, read from the domain's own /.well-known/ard.json.")
     body = f"""
 <div class="pgh">
-  <div class="crumb"><a href="/">Index</a> / <a href="/publishers/">ARD publishers</a> / {esc(host)}</div>
+  <div class="crumb"><a href="/">Index</a> / <a href="/ard-publishers">ARD publishers</a> / {esc(host)}</div>
   <h1>{esc(host)}</h1>
   <p class="lede">{esc(host)} publishes an Agentic Resource Discovery manifest at
   <code>{esc(mpath)}</code>, declaring what an AI agent can call on this domain.
@@ -721,51 +732,107 @@ def render_publisher(conn: sqlite3.Connection, host: str) -> str | None:
   sees when it reads your manifest.
 </div>
 """
-    return render.page(title, desc, body, f"{B}/publishers/{host}")
+    return render.page(title, desc, body, f"{B}/ard-publishers/{host}")
 
 
 
 def render_publishers_index(conn: sqlite3.Connection) -> str:
+    """The complete verified list.
+
+    Canonical at /ard-publishers. The slug carries the term deliberately: bare
+    "publishers" competes with an enormous unrelated corpus, and the query this
+    page exists to answer is "ARD publishers". Headings are shaped like the
+    questions people and answer engines actually ask, which our own retrieval
+    research found matters more than markup.
+    """
     pubs = publisher_list(conn)
     total_domains = conn.execute("SELECT COUNT(*) FROM crawl_seen").fetchone()[0]
-    with_manifest = conn.execute(
-        "SELECT COUNT(*) FROM crawl_seen WHERE entries > 0").fetchone()[0]
+    by_path: dict[str, int] = {}
+    for p in pubs:
+        by_path[p["path"] or "unknown"] = by_path.get(p["path"] or "unknown", 0) + 1
+    legacy = by_path.get("/.well-known/ai-catalog.json", 0)
+    current = by_path.get("/.well-known/ard.json", 0)
+    total_res = sum(p["entries"] for p in pubs)
+    total_tools = sum(p["tools"] for p in pubs)
+
     rows = "".join(
-        f'<tr><td><a href="/publishers/{esc(p["publisher"])}">{esc(p["publisher"])}</a>'
+        f'<tr><td><a href="/ard-publishers/{esc(p["publisher"])}">{esc(p["publisher"])}</a>'
         f'<div class="dsc">{esc(" · ".join(KIND_LABEL.get(k, k).lower() for k in p["kinds"][:4] if k))}</div></td>'
         f'<td class="num">{fmt(p["entries"])}</td>'
-        f'<td class="num">{fmt(p["live"]) if p["probed"] else "<span style=color:var(--dim)>not checked</span>"}</td></tr>'
-        for p in pubs)
+        f'<td class="num">{fmt(p["live"]) if p["probed"] else "<span style=color:var(--dim)>not checked</span>"}</td>'
+        f'<td><code style="font-size:11px">{esc((p["path"] or "").replace("/.well-known/",""))}</code></td>'
+        f'</tr>' for p in pubs)
+
+    ld = json.dumps({
+        "@context": "https://schema.org",
+        "@type": "Dataset",
+        "name": "ARD Publishers: verified Agentic Resource Discovery manifests",
+        "description": (f"{len(pubs)} domains verified to serve an Agentic Resource "
+                        f"Discovery (ARD) manifest, with what each declares for AI agents."),
+        "url": f"{B}/ard-publishers",
+        "creator": {"@type": "Organization", "name": "Neuronto", "url": B},
+        "license": "https://creativecommons.org/licenses/by/4.0/",
+        "isAccessibleForFree": True,
+        "variableMeasured": ["publisher domain", "declared resources",
+                             "endpoint reachability", "manifest path"],
+    }, ensure_ascii=False)
+
     body = f"""
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / ARD publishers</div>
-  <h1>Who publishes an ARD manifest</h1>
-  <p class="lede">An ARD manifest is a file at <code>/.well-known/ard.json</code> in which a
-  domain declares what an AI agent can call on it. It is machine-readable and, for almost
-  every publisher below, described nowhere else in human-readable form. These pages are that
-  description.</p>
+  <h1>ARD publishers: {fmt(len(pubs))} domains that publish an Agentic Resource Discovery manifest</h1>
+  <p class="lede">Every domain below was <b>verified by fetching its manifest</b>, not taken
+  from another registry's word. Together they declare {fmt(total_res)} agentic resources.
+  This is the complete list as far as we can measure it, and it is the only published one.</p>
   <ul class="statline">
-    <li><b>{fmt(len(pubs))}</b>publishers listed</li>
-    <li><b>{fmt(with_manifest)}</b>manifests found</li>
-    <li><b>{fmt(total_domains)}</b>domains crawled</li>
-    <li><b>{round(1000*with_manifest/max(total_domains,1), 2)}</b>manifests per 1,000 domains</li>
+    <li><b>{fmt(len(pubs))}</b>verified publishers</li>
+    <li><b>{fmt(total_res)}</b>declared resources</li>
+    <li><b>{fmt(total_tools)}</b>verified tools</li>
+    <li><b>{fmt(total_domains)}</b>domains checked</li>
   </ul>
 </div>
 
+<h2 style="margin-top:38px;font-size:20px">What is an ARD publisher?</h2>
+<p class="lede">The <a href="/what-is-ard">Agentic Resource Discovery</a> specification
+defines a publisher as whoever hosts a manifest describing one or more agentic resources,
+at a well-known path on their own domain. It is how a website tells an AI agent what it can
+call: which MCP servers, skills, agents and APIs exist here, and what each is for.</p>
+
+<h2 style="margin-top:34px;font-size:20px">Which path do they actually use?</h2>
+<p class="lede">Version 0.91 renamed the manifest to <code>/.well-known/ard.json</code>, and
+the deployed base has not followed: <b>{fmt(legacy)} of these publishers still serve the
+older <code>/.well-known/ai-catalog.json</code></b> and only {fmt(current)} serve the new
+name. Anything reading the ecosystem has to request both, and a tool that checks only
+<code>ard.json</code> will conclude, wrongly, that almost nobody has adopted the spec.</p>
+
+<h2 style="margin-top:34px;font-size:20px">The complete list</h2>
 <table class="tl">
-  <thead><tr><th>Publisher</th><th class="num">Resources</th><th class="num">Answering</th></tr></thead>
+  <thead><tr><th>Publisher</th><th class="num">Resources</th><th class="num">Answering</th>
+  <th>Manifest</th></tr></thead>
   <tbody>{rows}</tbody>
 </table>
 
+<h2 style="margin-top:38px;font-size:20px">How do I become an ARD publisher?</h2>
+<p class="lede">Serve one JSON file describing what you offer, at both well-known paths
+while the rename settles. The <a href="/publish">publishing guide</a> is the ten-minute
+version, and the <a href="/console">free console</a> shows exactly what a registry sees
+when it reads your domain. There is no application and no allowlist: publish the file and
+crawlers find it.</p>
+
 <div class="note">
-  Adoption is early: {round(100*with_manifest/max(total_domains,1), 2)}% of the domains we
-  crawled serve a manifest. That is the honest state of the specification today, and it is
-  tracked over time on the <a href="/adoption">adoption page</a>.
-  Publishing one is a few lines of JSON: see <a href="/publish">how to publish</a>.
+  <b>Method.</b> Each domain here was checked by requesting both known manifest paths and
+  requiring the response to parse as an ARD manifest. Domains that other registries name as
+  publishers but that serve no manifest are excluded: of 5,491 such names, only 28 served
+  one, so listing the rest would make this a directory of assumptions rather than a record
+  of what exists. Reachability of individual endpoints is our own probe and says nothing
+  about trust, quality or safety.
 </div>
 """
     return render.page(
-        "ARD publishers: who serves an ard.json",
-        f"{fmt(len(pubs))} domains publishing an Agentic Resource Discovery manifest, "
-        f"what each declares for AI agents, and whether the endpoints answer.",
-        body, f"{B}/publishers/")
+        f"ARD publishers: {fmt(len(pubs))} domains with an Agentic Resource Discovery manifest",
+        (f"The complete verified list of {fmt(len(pubs))} domains publishing an ARD "
+         f"(Agentic Resource Discovery) manifest, declaring {fmt(total_res)} resources for "
+         f"AI agents. Each verified by fetching the manifest, with endpoint reachability."),
+        body, f"{B}/ard-publishers",
+        jsonld=f'<script type="application/ld+json">{ld}</script>')
+
