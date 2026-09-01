@@ -790,6 +790,40 @@ async def audit_endpoint(body: dict) -> JSONResponse:
     return JSONResponse(report)
 
 
+@app.post("/e", include_in_schema=False)
+async def client_event(body: dict, request: Request) -> Response:
+    """A page reporting itself.
+
+    Pages are served from a CDN, so most views never reach this server and
+    cannot be counted here. A page that reports itself closes that gap, and it
+    also reports things no server ever sees: how long someone stayed, how far
+    they read, and what their viewport is.
+
+    Nothing here identifies anybody. There is no cookie, no client id and no
+    stored address, and the browser's own opt-out is honoured on both sides:
+    the script does not run when Do Not Track or Global Privacy Control is set,
+    and the server drops the request if either header arrives anyway.
+    """
+    h = request.headers
+    if h.get("sec-gpc") == "1" or h.get("dnt") == "1":
+        return Response(status_code=204)
+    b = body or {}
+    kind = str(b.get("t") or "")[:12]
+    if kind not in ("view", "end"):
+        return Response(status_code=204)
+    num = lambda k, cap: min(int(b.get(k) or 0), cap) if str(b.get(k) or "").lstrip("-").isdigit() else 0
+    events.emit("client_" + kind,
+                a=str(b.get("p") or "")[:200],
+                b=str(b.get("r") or "")[:200],
+                n=num("d", 86400) if kind == "end" else num("lt", 120000),
+                ok=True,
+                vw=num("vw", 20000), vh=num("vh", 20000),
+                scroll=num("s", 100),
+                tz=str(b.get("tz") or "")[:40],
+                lang=str(b.get("lang") or "")[:5])
+    return Response(status_code=204)
+
+
 @app.get("/metrics.json", include_in_schema=False)
 def metrics_json():
     """Public operating numbers, so our claims can be checked rather than taken.
