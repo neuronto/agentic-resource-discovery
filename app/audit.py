@@ -254,7 +254,7 @@ def score(disc: dict, conf: dict, cov: list[dict]) -> dict:
                           for c, p, m, d in parts]}
 
 
-def recommendations(disc: dict, conf: dict, cov: list[dict]) -> list[str]:
+def recommendations(disc: dict, conf: dict, cov: list[dict], domain: str = "") -> list[str]:
     """The next actions, most valuable first."""
     out = []
     if not disc["manifest"]:
@@ -280,11 +280,39 @@ def recommendations(disc: dict, conf: dict, cov: list[dict]) -> list[str]:
     if errs:
         out.append(f"Fix {len(errs)} conformance error(s): " +
                    "; ".join(f["message"] for f in errs[:3]))
-    not_indexed = [c["registry"] for c in cov if not c["indexed"]]
-    if not_indexed:
-        out.append("Not returned by: " + ", ".join(not_indexed) +
-                   ". Registries crawl on their own schedule; being conformant "
-                   "and reachable is what you control.")
+    # Being indexed here and being indexed elsewhere are different problems with
+    # different answers, so they are different recommendations. The single line
+    # this replaced said only that "registries crawl on their own schedule",
+    # which is true of the ones with no submission path and misleading about the
+    # rest: it told a publisher to wait when the fix was one request. This text
+    # is rendered by the console, by `ard-publish check` and by the API, so it
+    # is the one place worth getting right.
+    here = next((c for c in cov if c["registry"].lower().startswith("neuronto")), None)
+    others = [c["registry"] for c in cov if not c["indexed"] and c is not here]
+
+    if here is not None and not here["indexed"]:
+        d = domain or "<your-domain>"
+        out.append(
+            f"You are not in this index yet, and this audit already fetched and validated "
+            f"your manifest, so there is nothing left to check. One request indexes it: "
+            f"POST {{\"domain\": \"{d}\"}} to /submit, or run `ard-publish submit {d}`. "
+            f"Nothing is taken on your word: the manifest is fetched from your domain again "
+            f"at that moment.")
+    if others:
+        # Measured on 2026-09-01: WellKnown has a submission form; Desvela, the
+        # Hugging Face finder and GitHub's have none, so for those the honest
+        # advice really is that crawling is on their schedule.
+        takes_submissions = {"WellKnown"}
+        can_ask = [r for r in others if r in takes_submissions]
+        crawl_only = [r for r in others if r not in takes_submissions]
+        if can_ask:
+            out.append("Not returned by " + ", ".join(can_ask) +
+                       ", which accepts submissions: send your domain to its own submit form.")
+        if crawl_only:
+            out.append("Not returned by " + ", ".join(crawl_only) +
+                       ". These have no submission path we could find, so they will reach "
+                       "you on their own crawl schedule or not at all. What you control is "
+                       "being conformant, reachable, and served on every discovery path.")
     return out or ["Nothing outstanding. Re-run after any change to your catalogue."]
 
 
@@ -307,7 +335,7 @@ async def run(domain: str, local_hits: int = 0) -> dict:
             "discovery": disc["paths"], "manifest_url": disc["manifest_url"],
             "conformance": conf, "coverage": cov,
             "score": score(disc, conf, cov),
-            "recommendations": recommendations(disc, conf, cov),
+            "recommendations": recommendations(disc, conf, cov, dom),
             # Internal: the caller may pass this to `competition`. Stripped
             # before the report goes over the wire.
             "_manifest": disc["manifest"]}

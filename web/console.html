@@ -590,12 +590,43 @@ async function audit(){
             <span class="aw">${esc(a.has_that_you_may_not)}</span></li>`).join("")}</ul>`:""}
         </div>`).join("")}</div>`:""}
 
+        ${j.indexable && j.indexable.ready ? `
+        <div class="shead" style="margin-top:34px"><h2>You are not in this index yet</h2></div>
+        <div class="note" style="max-width:66ch">
+          <p style="margin:0 0 12px">This audit already fetched your manifest and it parsed:
+          <b>${j.indexable.entries}</b> ${j.indexable.entries===1?'entry':'entries'}. Indexing it
+          needs nothing further from you. Your manifest is fetched from your domain again at that
+          moment, so nothing is taken on this audit's word.</p>
+          <button class="btn btn--w" id="ixbtn" onclick="indexNow('${esc(j.domain)}')">Index ${esc(j.domain)}</button>
+          <pre id="ixout" style="margin-top:12px;display:none;white-space:pre-wrap"></pre>
+          <p class="src" style="margin-top:12px">Or from a terminal:
+          <code>${esc(j.indexable.how.cli)}</code></p>
+        </div>` : ""}
+
         <div class="shead" style="margin-top:34px"><h2>What to do next</h2></div>
         <div>${j.recommendations.map((r,i)=>`<div class="rec"><span class="i">${i+1}</span>
           <span>${esc(r)}</span></div>`).join("")}</div>
       </section>`;
   }catch(e){$("#rep").innerHTML='<div class="empty">Audit failed. Try again.</div>'}
   finally{busy=false;$("#ab").disabled=false}
+}
+async function indexNow(domain){
+  const b=$("#ixbtn"), o=$("#ixout");
+  b.disabled=true; b.textContent="Indexing "+domain+" ...";
+  o.style.display="block"; o.textContent="";
+  try{
+    const r=await fetch("/submit",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({domain})});
+    const j=await r.json();
+    if(j.status==="indexed"){
+      b.textContent="Indexed";
+      o.textContent=(j.entries!=null?j.entries+" entr"+(j.entries===1?"y":"ies")+" indexed. ":"")
+        +(j.page?"Your page: "+j.page:"")+"\nRe-run the audit above to see it reflected.";
+    }else{
+      b.disabled=false; b.textContent="Index "+domain;
+      o.textContent=(j.detail||j.status||"Not indexed")+"";
+    }
+  }catch(err){ b.disabled=false; b.textContent="Index "+domain; o.textContent=String(err); }
 }
 $("#af").addEventListener("submit",e=>{e.preventDefault();audit()});
 const q=new URLSearchParams(location.search).get("domain");

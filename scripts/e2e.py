@@ -1856,6 +1856,42 @@ def t_search_stays_fast_under_concurrency():
     assert med < 1500, f"median {med:.0f}ms for 10 concurrent searches; they are serialising again"
 
 
+def t_audit_names_the_action_when_a_domain_is_not_indexed():
+    """The guide's own step 4 says publishing is not being indexed. The audit
+    used to confirm that and then advise patience, which was the funnel's dead
+    end: it told a publisher to wait when the fix was one request."""
+    # A domain that serves a manifest. If it is already indexed here the branch
+    # under test cannot fire, so index state decides which assertion applies.
+    s_, d = post("/audit", {"domain": "vercel.com"}, timeout=120)
+    assert s_ == 200, s_
+    here = [c for c in d["coverage"] if c["registry"].lower().startswith("neuronto")]
+    assert here, "the audit does not report this index in its coverage"
+    recs = " ".join(d.get("recommendations") or [])
+    if here[0]["indexed"]:
+        assert "indexable" not in d, "offers to index a domain it already holds"
+    else:
+        ix = d.get("indexable")
+        assert ix and ix.get("ready"), "a fetchable manifest is not reported as indexable"
+        assert ix["how"]["cli"].endswith(d["domain"]), ix["how"]
+        assert d["domain"] in recs and "/submit" in recs, \
+            "the recommendation does not name the action or the domain"
+    # Never advise patience about a registry that does take submissions.
+    assert "crawl on their own schedule" not in recs, \
+        "the old passive wording is back"
+
+
+def t_publish_guide_ends_with_the_step_that_gets_you_indexed():
+    s_, h = _html("/publish")
+    assert s_ == 200, s_
+    import re as _re
+    steps = [_re.sub(r"<[^>]+>", "", m).strip() for m in _re.findall(r"<h2[^>]*>(.*?)</h2>", h, _re.S)]
+    assert any("tell the registries" in x.lower() for x in steps), \
+        f"the guide never tells the reader to submit: {steps}"
+    assert 'id="pf"' in h and "/submit" in h, "the step has no action on the page"
+    # and it must stay honest about the registries that have no submission path
+    assert "no submission path found" in h, "the comparison flatters us by omission"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

@@ -497,6 +497,51 @@ asks every public registry whether they actually return you.</p>
 python -m ard_publish validate .well-known/ard.json
 python -m ard_publish check example.com</pre>
 
+<h2 id="step-5">Step 5: tell the registries</h2>
+<p>Everything above is on your domain. Nothing so far has told anyone it is there, and this
+is the step people skip: a manifest that no registry has fetched is a manifest no agent can
+find. Step 4 tells you whether that has happened yet; this is how you make it happen.</p>
+<p>Crawling is not a plan you control. Registries crawl domain lists they chose: one public
+registry crawls a top-100,000 list, so a domain outside it is invisible to that registry
+indefinitely. Our own crawl of 375,958 domains found exactly one new publisher in its last
+63,000. If you wait to be discovered, you may wait forever.</p>
+<p>What each public ARD registry accepts, checked on 1 September 2026:</p>
+<div class="scroll"><table class="tbl">
+<thead><tr><th>Registry</th><th>How to get listed</th><th>Verified before listing</th></tr></thead>
+<tbody>
+<tr><td class="nm">Neuronto</td><td>one request, below, or <code>ard-publish submit</code>, or the MCP tool <code>publish_resource</code></td><td>yes: your manifest is fetched from your domain, or your MCP endpoint answers a handshake</td></tr>
+<tr><td class="nm">WellKnown</td><td>a submission form on its own site</td><td>not stated</td></tr>
+<tr><td class="nm">GitHub Agent Finder</td><td>no submission path found</td><td>n/a</td></tr>
+<tr><td class="nm">Hugging Face Discover</td><td>no submission path found; indexes Hugging Face content</td><td>n/a</td></tr>
+<tr><td class="nm">Desvela</td><td>no submission path found; crawls a top-100,000 list</td><td>n/a</td></tr>
+<tr><td class="nm">ARD Registry Hub</td><td>no submission path found</td><td>n/a</td></tr>
+</tbody></table></div>
+<p>Registries federate, so this is worth more than one listing: a domain indexed here is
+returned to clients of any registry that queries Neuronto, and every federated search here
+queries the others.</p>
+
+<div class="note" style="max-width:64ch">
+  <form id="pf" onsubmit="return pgo(event)" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="pd" placeholder="example.com" aria-label="Your domain" autocomplete="off"
+      spellcheck="false" style="flex:1 1 240px;min-width:0;background:var(--panel2);
+      border:1px solid var(--line2);border-radius:var(--r);color:var(--fg);padding:10px 12px;
+      font-family:var(--mono);font-size:14px">
+    <button class="btn btn--w" type="submit">Index my domain</button>
+  </form>
+  <pre id="po" style="margin-top:12px;display:none;white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+  <p class="src" style="margin-top:10px">Free, no account. We fetch both well-known paths from
+  your domain and index whatever parses, so a submission cannot list anything you do not
+  actually publish. If nothing is found you are told which paths were tried.</p>
+</div>
+
+<p>From a terminal instead:</p>
+<pre><code>curl -X POST https://neuronto.com/submit \
+  -H 'content-type: application/json' \
+  -d '{"domain":"example.com"}'</code></pre>
+<p>Or, if you have an MCP server and never wrote a manifest at all, skip every step above:
+<code>ard-publish submit https://example.com/mcp</code> handshakes with the server and indexes
+what it reports about itself.</p>
+
 <h2>The mistakes that cost you silently</h2>
 <ul>
 <li><b>No representativeQueries.</b> Validates fine, never returned.</li>
@@ -581,5 +626,25 @@ matching a task.</li>
    if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
  });
 })();
+</script>
+<script>
+async function pgo(e){
+  e.preventDefault();
+  const el=document.getElementById('pd'), o=document.getElementById('po');
+  const d=el.value.trim().replace(/^https?:[/][/]/,'').split('/')[0];
+  if(!d) return false;
+  o.style.display='block'; o.textContent='fetching '+d+' ...';
+  try{
+    const r=await fetch('/submit',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({domain:d})});
+    const j=await r.json();
+    o.textContent = j.status==='indexed'
+      ? (j.entries!=null? j.entries+' entr'+(j.entries===1?'y':'ies')+' indexed.\n':'Indexed.\n')
+        + (j.page? 'Your page: '+j.page+'\n':'')
+        + 'Run the audit to see which other registries return you: /console?domain='+encodeURIComponent(d)
+      : (j.detail || j.status || JSON.stringify(j,null,2));
+  }catch(err){ o.textContent=String(err); }
+  return false;
+}
 </script>
 </body></html>

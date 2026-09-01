@@ -820,6 +820,23 @@ async def audit_endpoint(body: dict) -> JSONResponse:
                 "corrects itself, and displaying it changes nothing about your indexing.")
     except Exception:
         pass
+    # The audit fetched and validated the manifest, which is everything a
+    # submission does. Say so in a form a client can act on, rather than making
+    # the reader re-derive it from prose. Never indexes as a side effect: being
+    # audited is not consent to be listed.
+    man = report.get("_manifest")
+    if man and not hits:
+        report["indexable"] = {
+            "ready": True,
+            "entries": len(man.get("entries") or []),
+            "how": {"http": f"POST {config.PUBLIC_BASE}/submit "
+                            f'{{"domain": "{report["domain"]}"}}',
+                    "cli": f"ard-publish submit {report['domain']}",
+                    "mcp": "publish_resource"},
+            "note": ("your manifest parsed here, so indexing it needs no further work "
+                     "from you. It is fetched from your domain again at that moment, so "
+                     "nothing is taken on this audit's word."),
+        }
     report.pop("_manifest", None)
     events.emit("audit", a=report.get("domain"), n=(report.get("score") or {}).get("total"))
     return JSONResponse(report)
