@@ -81,7 +81,13 @@ async def search_endpoint(body: dict) -> JSONResponse:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request",
             "detail": "query.text is required for Search (spec 5.3.2)."})
+    # The spec nests filter inside query (5.3.2). A caller who puts it at the top
+    # level previously got unfiltered results and no indication anything was
+    # wrong, which is worse than either honouring it or rejecting it. We honour
+    # it, the same courtesy already extended to /explore's facet shorthand.
     flt = q.get("filter") if isinstance(q.get("filter"), dict) else None
+    if flt is None and isinstance(body.get("filter"), dict):
+        flt = body["filter"]
     page_size = body.get("pageSize") or config.PAGE_SIZE_DEFAULT
     try:
         page_size = max(1, min(int(page_size), config.PAGE_SIZE_MAX))
@@ -501,6 +507,11 @@ def _render_home() -> str:
         "openapi":    "REST APIs described by an OpenAPI document",
         "registry":   "Other ARD registries, which is how federation is discovered",
         "catalog":    "Nested catalogues pointing at further entries",
+        "agent":      "Agent descriptors that are not A2A cards: ACP, OASF, AgentFacts",
+        "webmcp":     "Tools a web page exposes to a browser agent, W3C WebMCP",
+        "plugin":     "Plugin manifests, including the OpenAI-era ai-plugin.json",
+        "graphql":    "GraphQL APIs",
+        "dataset":    "Published datasets",
         "doc":        "Machine-readable documentation such as llms.txt",
         "package":    "Published packages",
         "other":      "Resources whose type is outside the named set",
