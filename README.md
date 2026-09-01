@@ -153,6 +153,33 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `GET /.well-known/ard.json` | Our own publisher manifest. |
 | `GET /openapi.json` | OpenAPI 3.1 for everything above. |
 
+### Knowing when the answer is weak
+
+Every top result scores near 100. That is deliberate: the score is relative to the best hit
+in its own result set, because BM25 magnitudes are corpus and query dependent, so an
+absolute scale would mean nothing. It ranks well and, on its own, it misleads. The query
+`zzzz nonexistent capability qqqq` scores 100, because something always comes first.
+
+So every search response carries one absolute number beside the relative ones:
+
+```json
+"queryMatch": {
+  "coverage": 0.0,
+  "confidence": "none",
+  "matchedTerms": [],
+  "queryTerms": ["zzzz", "nonexistent", "capability", "qqqq"],
+  "note": "each result's `score` is relative to the best hit in this response ..."
+}
+```
+
+`coverage` is the fraction of the query's content words that the top result's own text
+accounts for. It is corpus independent, which is the property the score cannot have, so it
+separates "the best of several good answers" from "the best of nothing".
+
+**It measures overlap, not correctness.** A query whose every word appears in an entry that
+does the opposite thing still scores 1.0. Treat it as a floor on confidence, never as a
+verdict, and never as a trust or safety rating.
+
 No key and no signup for anything that reads the public index. A key exists only to admit a
 verified domain's own private entries, and is issued only against a DNS proof of ownership.
 
