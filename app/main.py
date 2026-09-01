@@ -267,13 +267,23 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner)
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
-    store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
-                     entries=out["results"], authenticated=bool(owner))
+    # The homepage asks twice for one search: this index first, because it
+    # answers in about 200ms and gives the reader something to look at, then
+    # every registry, which is bounded by the slowest of them. The first call
+    # is a preview of the second, not a second search, so it is not counted and
+    # records no impressions. A header rather than a body field: the request
+    # schema is the spec's, and a client hint has no business in it. Suppressing
+    # it only affects our own numbers, so there is nothing to abuse here.
+    preview = request.headers.get("x-neuronto-preview") == "1"
+    if not preview:
+        store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
+                         entries=out["results"], authenticated=bool(owner))
     cleaned = search.clean(out["results"])
     payload: dict[str, Any] = {"results": cleaned,
                                "queryMatch": search.query_match(text, cleaned)}
-    events.emit("search", a=mode, b=payload["queryMatch"]["confidence"],
-                n=len(cleaned), ok=bool(cleaned))
+    if not preview:
+        events.emit("search", a=mode, b=payload["queryMatch"]["confidence"],
+                    n=len(cleaned), ok=bool(cleaned))
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
     fed = out.get("_federated") or []
