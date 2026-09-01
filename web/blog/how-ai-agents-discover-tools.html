@@ -290,4 +290,28 @@ But the mechanism exists, it is specified, and it costs one JSON file to join.</
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/badge">Badge</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>
 </div></footer>
+<script>
+(function(){try{
+ if(navigator.doNotTrack==="1"||navigator.msDoNotTrack==="1"||navigator.globalPrivacyControl)return;
+ var t0=Date.now(),mx=0,done=false;
+ function depth(){var h=document.documentElement.scrollHeight-innerHeight;
+   return h>0?Math.min(100,Math.round(scrollY/h*100)):100;}
+ addEventListener("scroll",function(){var d=depth();if(d>mx)mx=d;},{passive:true});
+ function send(t,x){
+   if(t==="end"){if(done)return;done=true;}
+   var o={t:t,p:location.pathname,r:document.referrer||"",vw:innerWidth,vh:innerHeight,
+          tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),
+          lang:(navigator.language||"").slice(0,5)};
+   for(var k in x)o[k]=x[k];
+   var s=JSON.stringify(o);
+   if(navigator.sendBeacon){navigator.sendBeacon("/e",new Blob([s],{type:"application/json"}));}
+   else{fetch("/e",{method:"POST",body:s,keepalive:true,headers:{"content-type":"application/json"}});}
+ }
+ addEventListener("load",function(){send("view",{lt:Math.round(performance.now())});});
+ function bye(){send("end",{d:Math.round((Date.now()-t0)/1000),s:mx});}
+ addEventListener("pagehide",bye);
+ document.addEventListener("visibilitychange",function(){
+   if(document.visibilityState==="hidden")bye();});
+}catch(e){}})();
+</script>
 </body></html>

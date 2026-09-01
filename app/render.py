@@ -12,6 +12,7 @@ copy to drift.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import re
@@ -104,6 +105,36 @@ table.tl td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 """
 
 
+# A page reports its own view, because most pages are served from a CDN and
+# never reach the server. It also reports what a server cannot see: dwell time
+# and how far the reader got. No cookie, no identifier, and it does not run at
+# all for a reader who has set Do Not Track or Global Privacy Control.
+BEACON = """<script>
+(function(){try{
+ if(navigator.doNotTrack==="1"||navigator.msDoNotTrack==="1"||navigator.globalPrivacyControl)return;
+ var t0=Date.now(),mx=0,done=false;
+ function depth(){var h=document.documentElement.scrollHeight-innerHeight;
+   return h>0?Math.min(100,Math.round(scrollY/h*100)):100;}
+ addEventListener("scroll",function(){var d=depth();if(d>mx)mx=d;},{passive:true});
+ function send(t,x){
+   if(t==="end"){if(done)return;done=true;}
+   var o={t:t,p:location.pathname,r:document.referrer||"",vw:innerWidth,vh:innerHeight,
+          tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),
+          lang:(navigator.language||"").slice(0,5)};
+   for(var k in x)o[k]=x[k];
+   var s=JSON.stringify(o);
+   if(navigator.sendBeacon){navigator.sendBeacon("/e",new Blob([s],{type:"application/json"}));}
+   else{fetch("/e",{method:"POST",body:s,keepalive:true,headers:{"content-type":"application/json"}});}
+ }
+ addEventListener("load",function(){send("view",{lt:Math.round(performance.now())});});
+ function bye(){send("end",{d:Math.round((Date.now()-t0)/1000),s:mx});}
+ addEventListener("pagehide",bye);
+ document.addEventListener("visibilitychange",function(){
+   if(document.visibilityState==="hidden")bye();});
+}catch(e){}})();
+</script>"""
+
+
 def page(title: str, description: str, body: str, canonical: str,
          jsonld: str = "") -> str:
     """One complete document.
@@ -143,6 +174,7 @@ def page(title: str, description: str, body: str, canonical: str,
 {body}
 </div>
 {FOOTER}
+{BEACON}
 </body></html>"""
 
 
@@ -165,6 +197,26 @@ def page(title: str, description: str, body: str, canonical: str,
 _CACHE_DB = Path(os.getenv("NEURONTO_PAGECACHE_DB",
                            str(Path(os.getenv("NEURONTO_DB", "./data/neuronto.db")).parent
                                / "pagecache.db")))
+# A durable page cache means a template change does not reach anybody until the
+# cache is cleared, and forgetting is silent: the site keeps serving correct
+# looking HTML built by the previous deploy. The beacon shipped and appeared on
+# no cached page for exactly this reason. So the key carries a stamp derived
+# from the code that renders the page; when that changes, every entry is a miss
+# and rebuilds itself. No deploy step to remember.
+def _build_stamp() -> str:
+    h = hashlib.sha1()
+    here = Path(__file__).resolve().parent
+    for name in sorted(("render.py", "catalog.py", "badge.py")):
+        f = here / name
+        try:
+            h.update(str(f.stat().st_mtime_ns).encode())
+            h.update(str(f.stat().st_size).encode())
+        except OSError:
+            pass
+    return h.hexdigest()[:8]
+
+
+STAMP = _build_stamp()
 _local = threading.local()
 _building: set[str] = set()
 _build_lock = threading.Lock()
@@ -191,7 +243,13 @@ def _cdb() -> sqlite3.Connection | None:
         return None
 
 
+def _k(key: str) -> str:
+    """The stored key, tied to the rendering code that produced it."""
+    return f"{STAMP}:{key}"
+
+
 def _read(key: str):
+    key = _k(key)
     c = _cdb()
     if c is None:
         return _cache.get(key)
@@ -203,6 +261,7 @@ def _read(key: str):
 
 
 def _write(key: str, html_: str) -> None:
+    key = _k(key)
     _cache[key] = (time.time(), html_)          # in-process copy, avoids a read per hit
     c = _cdb()
     if c is None:
@@ -211,6 +270,10 @@ def _write(key: str, html_: str) -> None:
         c.execute("INSERT INTO pages(key,built,html) VALUES(?,?,?) "
                   "ON CONFLICT(key) DO UPDATE SET built=excluded.built, html=excluded.html",
                   (key, time.time(), html_))
+        # Entries from an earlier build of the rendering code can never be read
+        # again, so they are dropped rather than left to grow the file forever.
+        c.execute("DELETE FROM pages WHERE key NOT LIKE ? AND key != '__warmlock__'",
+                  (STAMP + ":%",))
         c.commit()
     except Exception:
         pass
@@ -234,7 +297,7 @@ def cached(key: str, ttl: int, build) -> str:
     a day, and rebuilding one *during* a request is how a fast page becomes a
     gateway timeout.
     """
-    got = _cache.get(key) or _read(key)
+    got = _cache.get(_k(key)) or _read(key)
     if got:
         if time.time() - got[0] >= ttl:
             # Stale: hand back what we have and refresh out of the way. One

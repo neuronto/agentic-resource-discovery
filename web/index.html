@@ -440,4 +440,28 @@ async function run(){
 $("#f").addEventListener("submit",e=>{e.preventDefault();run()});
 if(p) run();
 </script>
+<script>
+(function(){try{
+ if(navigator.doNotTrack==="1"||navigator.msDoNotTrack==="1"||navigator.globalPrivacyControl)return;
+ var t0=Date.now(),mx=0,done=false;
+ function depth(){var h=document.documentElement.scrollHeight-innerHeight;
+   return h>0?Math.min(100,Math.round(scrollY/h*100)):100;}
+ addEventListener("scroll",function(){var d=depth();if(d>mx)mx=d;},{passive:true});
+ function send(t,x){
+   if(t==="end"){if(done)return;done=true;}
+   var o={t:t,p:location.pathname,r:document.referrer||"",vw:innerWidth,vh:innerHeight,
+          tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),
+          lang:(navigator.language||"").slice(0,5)};
+   for(var k in x)o[k]=x[k];
+   var s=JSON.stringify(o);
+   if(navigator.sendBeacon){navigator.sendBeacon("/e",new Blob([s],{type:"application/json"}));}
+   else{fetch("/e",{method:"POST",body:s,keepalive:true,headers:{"content-type":"application/json"}});}
+ }
+ addEventListener("load",function(){send("view",{lt:Math.round(performance.now())});});
+ function bye(){send("end",{d:Math.round((Date.now()-t0)/1000),s:mx});}
+ addEventListener("pagehide",bye);
+ document.addEventListener("visibilitychange",function(){
+   if(document.visibilityState==="hidden")bye();});
+}catch(e){}})();
+</script>
 </body></html>
