@@ -500,23 +500,8 @@ def mark_introspection(conn: sqlite3.Connection, key: str, status: str,
                      (key, now, n_tools, 1 if auth else 0, status))
 
 
-def tools_for(conn: sqlite3.Connection, entry_key: str) -> list[dict]:
-    rows = conn.execute("""SELECT name,title,description,input_schema
-                           FROM tools WHERE entry_key=? ORDER BY name""",
-                        (entry_key,)).fetchall()
-    out = []
-    for r in rows:
-        d = {"name": r["name"]}
-        if r["title"]: d["title"] = r["title"]
-        if r["description"]: d["description"] = r["description"]
-        if r["input_schema"]:
-            try: d["inputSchema"] = json.loads(r["input_schema"])
-            except Exception: pass
-        out.append(d)
-    return out
-
-
-def demand_for(conn: sqlite3.Connection, host: str, days: int = 30) -> dict:
+def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
+               limit: int = 25) -> dict:
     """What agents asked that returned this publisher's resources.
 
     The question a publisher actually has is not "am I listed" but "did anyone
@@ -529,6 +514,22 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30) -> dict:
     host = host.lower().strip()
     keys = [r["key"] for r in conn.execute(
         "SELECT key FROM entries WHERE lower(publisher)=?", (host,))]
+    # A publisher looks themselves up by domain, but the publisher string is
+    # often something else: the MCP Registry namespaces are reverse-DNS
+    # (`ai.filegraph` for filegraph.ai), and a resource on api.example.com is
+    # attributed to example.com. Asking for your own domain and being told
+    # "no report" was the first thing a real publisher would have hit. So the
+    # lookup also accepts the reversed two-label form and any entry whose
+    # endpoint lives on that host, which is the same matching /audit uses.
+    parts = host.split(".")
+    if len(parts) == 2:
+        keys += [r["key"] for r in conn.execute(
+            "SELECT key FROM entries WHERE lower(publisher)=?",
+            (".".join(reversed(parts)),))]
+    keys += [r["key"] for r in conn.execute(
+        "SELECT key FROM entries WHERE url LIKE ? OR url LIKE ?",
+        (f"%//{host}/%", f"%//{host}"))]
+    keys = list(dict.fromkeys(keys))
     if not keys:
         return {"domain": host, "indexed": 0, "impressions": 0, "queries": [],
                 "resources": [], "days": days}
@@ -542,8 +543,8 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30) -> dict:
         f"""SELECT s.q, COUNT(*) n, MIN(i.rank) best, AVG(i.rank) avg_r
             FROM impressions i JOIN searches s ON s.id = i.search_id
             WHERE i.ts>=? AND i.entry_key IN ({marks})
-            GROUP BY s.q ORDER BY n DESC, best ASC LIMIT 25""",
-        [since] + keys)]
+            GROUP BY s.q ORDER BY n DESC, best ASC LIMIT ?""",
+        [since] + keys + [limit])]
     resources = [{"name": r["display_name"] or r["identifier"],
                   "identifier": r["identifier"], "impressions": r["n"],
                   "best_rank": r["best"]}
@@ -551,7 +552,7 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30) -> dict:
         f"""SELECT e.display_name, e.identifier, COUNT(*) n, MIN(i.rank) best
             FROM impressions i JOIN entries e ON e.key = i.entry_key
             WHERE i.ts>=? AND i.entry_key IN ({marks})
-            GROUP BY e.key ORDER BY n DESC LIMIT 25""", [since] + keys)]
+            GROUP BY e.key ORDER BY n DESC LIMIT ?""", [since] + keys + [limit])]
     return {"domain": host, "indexed": len(keys), "impressions": total,
             "distinct_queries": len(queries), "queries": queries,
             "resources": resources, "days": days}
@@ -651,26 +652,46 @@ def row_to_entry(r: sqlite3.Row) -> dict:
     return {k: v for k, v in out.items() if v is not None}
 
 
+PRIVATE_QUERY_PLACEHOLDER = "(authenticated search, text not recorded)"
+
+
 def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
-               ms: int, federated: int, entries: list[dict] | None = None) -> None:
+               ms: int, federated: int, entries: list[dict] | None = None,
+               authenticated: bool = False) -> None:
     """Record a query and what it returned. Never let bookkeeping fail a search.
 
     The impressions half is what turns a query log into a report a publisher
     would pay attention to: not "somebody searched for pdf" but "your resource
     was returned for these queries, at these positions".
+
+    **An authenticated search is not recorded.** A caller presenting a domain
+    key is searching their own private registry as well as the public index, and
+    what an organisation looks for internally is their business, not a product
+    signal. This was found the hard way: the query text of a private-registry
+    search reached the public `/stats` feed verbatim, because logging happened
+    before anyone asked whether this particular query should be logged at all.
+    The count and the latency are still recorded, so operational numbers stay
+    honest, and the text and the impressions are dropped.
+
+    Impressions are also never written for a private entry. Nothing reads them
+    for one today, because every reader joins through `entries` and private rows
+    are not there, but "no current reader" is not a boundary. The row simply
+    should not exist.
     """
     try:
         now = int(time.time())
         cur = conn.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
                               VALUES(?,?,?,?,?,?)""",
-                           (q[:200], mode, results, ms, federated, now))
+                           (PRIVATE_QUERY_PLACEHOLDER if authenticated else q[:200],
+                            mode, results, ms, federated, now))
         sid = cur.lastrowid
-        if entries:
+        if entries and not authenticated:
             conn.executemany(
                 """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
                    VALUES(?,?,?,?,?)""",
                 [(sid, e.get("_key"), i, e.get("score"), now)
-                 for i, e in enumerate(entries[:10], start=1) if e.get("_key")])
+                 for i, e in enumerate(entries[:10], start=1)
+                 if e.get("_key") and e.get("visibility") != "private"])
         conn.commit()
     except Exception:
         pass
@@ -714,7 +735,17 @@ def top_publishers(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
 
 
 def recent_searches(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    rows = conn.execute("""SELECT q, results, ms, ts FROM searches
+    """Recent activity, without the words anyone typed.
+
+    This used to return `q` verbatim on the public `/stats` endpoint, which
+    published every visitor's query to anyone who asked, including the query
+    text of an authenticated search against a private registry. The demand
+    signal that has actual product value is the scoped one, `/demand?domain=`,
+    where a publisher sees the queries that returned *their* resources. A raw
+    global feed of what strangers typed added nothing to that and carried the
+    whole risk, so it is gone: shape only, no text.
+    """
+    rows = conn.execute("""SELECT results, ms, ts, mode FROM searches
                            ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
     return [dict(r) for r in rows]
 
@@ -791,3 +822,48 @@ def private_row_to_entry(r: sqlite3.Row) -> dict:
         "visibility": "private",
     }
     return {k: v for k, v in out.items() if v is not None}
+
+
+def ard_publisher_counts(conn: sqlite3.Connection) -> dict:
+    """The ARD publisher numbers, defined once so surfaces cannot disagree.
+
+    Three surfaces were each computing their own and reporting three different
+    figures for what looked like the same thing: `/metrics.json` said 240, the
+    `/ard-publishers` page said 201, and the docs said 199. None was wrong. They
+    were answering different questions under the same word.
+
+      * `manifest_hosts` counts hosts where we fetched a manifest. That is the
+        adoption measurement: how many places on the web serve one.
+      * `publishers_indexed` counts publishers we hold entries for whose
+        manifest we verified. That is the index measurement, and it is smaller
+        because a manifest often lives on one host while the resources it
+        declares belong to another: connectors-skills.zapier.com serves a
+        manifest whose entries are, correctly, attributed to zapier.com.
+
+    Both are true. Reporting either as "publishers" without saying which is not,
+    so callers get both and the names say what they mean.
+    """
+    hosts = conn.execute(
+        "SELECT COUNT(*) FROM crawl_seen WHERE manifest_path IS NOT NULL").fetchone()[0]
+    indexed = conn.execute(
+        """SELECT COUNT(DISTINCT e.publisher) FROM entries e
+           JOIN crawl_seen cs ON cs.domain = lower(e.publisher)
+           WHERE cs.manifest_path IS NOT NULL
+             AND e.publisher IS NOT NULL AND e.publisher != ''""").fetchone()[0]
+    by_path = {r[0]: r[1] for r in conn.execute(
+        "SELECT manifest_path, COUNT(*) FROM crawl_seen "
+        "WHERE manifest_path IS NOT NULL GROUP BY 1")}
+    return {
+        "manifest_hosts": hosts,
+        "publishers_indexed": indexed,
+        "hosts_serving_no_indexed_resource": hosts - indexed,
+        "by_path": by_path,
+        "domains_crawled": conn.execute("SELECT COUNT(*) FROM crawl_seen").fetchone()[0],
+        "definitions": {
+            "manifest_hosts": "hosts where we fetched a manifest that parsed",
+            "publishers_indexed": ("publishers we hold entries for whose manifest we "
+                                   "verified; smaller than manifest_hosts because a "
+                                   "manifest may be served on a different host from the "
+                                   "resources it declares"),
+        },
+    }

@@ -25,7 +25,7 @@ import sqlite3
 import time
 from typing import Any
 
-from . import config, render
+from . import config, render, store
 from .render import esc, fmt
 
 # slug -> (title, one-line intent, match terms)
@@ -529,14 +529,6 @@ def render_adoption(report: dict) -> str:
         body, f"{B}/adoption")
 
 
-def sitemap_urls(conn: sqlite3.Connection) -> list[str]:
-    """Only pages that actually exist. Never advertise a URL that 404s."""
-    return ([f"{B}/tools/"] + [f"{B}/tools/{s}" for s in published(conn)] +
-            [f"{B}/ard-publishers"] +
-            [f"{B}/ard-publishers/{p['publisher']}" for p in publisher_list(conn)] +
-            [f"{B}/bench", f"{B}/adoption", f"{B}/published"])
-
-
 # ---------------------------------------------------------------------------
 # ARD publisher pages.
 #
@@ -758,7 +750,11 @@ def render_publishers_index(conn: sqlite3.Connection) -> str:
     research found matters more than markup.
     """
     pubs = publisher_list(conn)
-    total_domains = conn.execute("SELECT COUNT(*) FROM crawl_seen").fetchone()[0]
+    # The single definition, so this page and /metrics.json cannot diverge again.
+    counts = store.ard_publisher_counts(conn)
+    total_domains = counts["domains_crawled"]
+    hosts = counts["manifest_hosts"]
+    elsewhere = counts["hosts_serving_no_indexed_resource"]
     by_path: dict[str, int] = {}
     for p in pubs:
         by_path[p["path"] or "unknown"] = by_path.get(p["path"] or "unknown", 0) + 1
@@ -779,8 +775,9 @@ def render_publishers_index(conn: sqlite3.Connection) -> str:
         "@context": "https://schema.org",
         "@type": "Dataset",
         "name": "ARD Publishers: verified Agentic Resource Discovery manifests",
-        "description": (f"{len(pubs)} domains verified to serve an Agentic Resource "
-                        f"Discovery (ARD) manifest, with what each declares for AI agents."),
+        "description": (f"{hosts} domains verified to serve an Agentic Resource "
+                        f"Discovery (ARD) manifest, of which {len(pubs)} are listed here "
+                        f"with the resources they declare for AI agents."),
         "url": f"{B}/ard-publishers",
         "creator": {"@type": "Organization", "name": "Neuronto", "url": B},
         "license": "https://creativecommons.org/licenses/by/4.0/",
@@ -792,12 +789,17 @@ def render_publishers_index(conn: sqlite3.Connection) -> str:
     body = f"""
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / ARD publishers</div>
-  <h1>ARD publishers: {fmt(len(pubs))} domains that publish an Agentic Resource Discovery manifest</h1>
-  <p class="lede">Every domain below was <b>verified by fetching its manifest</b>, not taken
-  from another registry's word. Together they declare {fmt(total_res)} agentic resources.
-  This is the complete list as far as we can measure it, and it is the only published one.</p>
+  <h1>ARD publishers: {fmt(hosts)} domains serve an Agentic Resource Discovery manifest</h1>
+  <p class="lede">Every one was <b>verified by fetching the manifest</b>, not taken from
+  another registry's word, out of {fmt(total_domains)} domains checked. The
+  {fmt(len(pubs))} listed below are those whose declared resources we also index, together
+  declaring {fmt(total_res)} of them. The remaining {fmt(elsewhere)} serve a manifest on one
+  host while the resources it declares belong to another, the way
+  <code>connectors-skills.zapier.com</code> publishes for <code>zapier.com</code>, so they
+  appear here under the domain that owns the resources.</p>
   <ul class="statline">
-    <li><b>{fmt(len(pubs))}</b>verified publishers</li>
+    <li><b>{fmt(hosts)}</b>manifests verified</li>
+    <li><b>{fmt(len(pubs))}</b>publishers listed</li>
     <li><b>{fmt(total_res)}</b>declared resources</li>
     <li><b>{fmt(total_tools)}</b>verified tools</li>
     <li><b>{fmt(total_domains)}</b>domains checked</li>
@@ -841,7 +843,7 @@ crawlers find it.</p>
 </div>
 """
     return render.page(
-        f"ARD publishers: {fmt(len(pubs))} domains with an Agentic Resource Discovery manifest",
+        f"ARD publishers: {fmt(hosts)} domains with an Agentic Resource Discovery manifest",
         (f"The complete verified list of {fmt(len(pubs))} domains publishing an ARD "
          f"(Agentic Resource Discovery) manifest, declaring {fmt(total_res)} resources for "
          f"AI agents. Each verified by fetching the manifest, with endpoint reachability."),

@@ -56,11 +56,21 @@ async def _get(client: httpx.AsyncClient, url: str) -> tuple[int | None, str]:
 
 
 async def discovery(client: httpx.AsyncClient, base: str) -> dict:
-    """Which of the four advertisement paths actually resolve."""
-    out: dict[str, Any] = {"paths": {}, "manifest": None, "manifest_url": None}
+    """Which of the four advertisement paths actually resolve.
 
-    for label, path in (("well_known", WELL_KNOWN), ("legacy", LEGACY)):
-        st, body = await _get(client, base + path)
+    The four fetches run concurrently. They used to run one after another, so
+    a domain that let each hang to the timeout cost four timeouts in a row, and
+    with the coverage probe behind it an audit could take longer than the
+    reverse proxy in front of this service will wait. The caller then got a
+    gateway error while the audit finished for nobody. Concurrent, the worst
+    case is one timeout, whatever the domain does.
+    """
+    out: dict[str, Any] = {"paths": {}, "manifest": None, "manifest_url": None}
+    (wk, lg, rb, hp) = await asyncio.gather(
+        _get(client, base + WELL_KNOWN), _get(client, base + LEGACY),
+        _get(client, base + "/robots.txt"), _get(client, base + "/"))
+
+    for label, path, (st, body) in (("well_known", WELL_KNOWN, wk), ("legacy", LEGACY, lg)):
         ok = st == 200 and body.strip().startswith("{")
         out["paths"][label] = {"found": ok, "status": st}
         if ok and out["manifest"] is None:
@@ -70,10 +80,10 @@ async def discovery(client: httpx.AsyncClient, base: str) -> dict:
             except Exception:
                 out["paths"][label]["found"] = False
 
-    st, body = await _get(client, base + "/robots.txt")
+    st, body = rb
     out["paths"]["agentmap"] = {"found": bool(st == 200 and re.search(r"(?im)^\s*Agentmap:", body)),
                                 "status": st}
-    st, body = await _get(client, base + "/")
+    st, body = hp
     out["paths"]["link_tag"] = {
         "found": bool(st == 200 and re.search(r'rel=["\'](ard|ai-catalog)["\']', body or "", re.I)),
         "status": st}
@@ -175,18 +185,22 @@ async def coverage(client: httpx.AsyncClient, domain: str, manifest: dict | None
         queries = [domain.split(".")[0]]
     queries = queries[:5]
 
+    async def ask(url, q):
+        try:
+            r = await client.post(url, json={"query": {"text": q}},
+                                  headers={**HEADERS, "content-type": "application/json"},
+                                  timeout=8)
+            return True, (r.status_code == 200 and domain.lower() in r.text.lower())
+        except Exception:
+            return False, False
+
     async def probe(uid, name, url, source):
-        hits, asked = 0, 0
-        for q in queries:
-            try:
-                r = await client.post(url, json={"query": {"text": q}},
-                                      headers={**HEADERS, "content-type": "application/json"},
-                                      timeout=8)
-                asked += 1
-                if r.status_code == 200 and domain.lower() in r.text.lower():
-                    hits += 1
-            except Exception:
-                continue
+        # All of one registry's queries at once. Sequential, five queries at an
+        # eight second timeout was forty seconds against a registry that had
+        # gone quiet, which alone exceeds what the proxy in front of us waits.
+        res = await asyncio.gather(*(ask(url, q) for q in queries))
+        asked = sum(1 for ok, _ in res if ok)
+        hits = sum(1 for _, hit in res if hit)
         return {"registry": name, "source": source, "queries": asked,
                 "returned_for": hits,
                 "indexed": hits > 0}
@@ -282,7 +296,9 @@ async def run(domain: str, local_hits: int = 0) -> dict:
                 "detail": "Pass a hostname, for example example.com"}
     base = "https://" + dom
     t0 = time.perf_counter()
-    async with httpx.AsyncClient(headers=HEADERS, timeout=12, follow_redirects=True) as client:
+    # 10s per fetch, all fetches within a phase concurrent, two phases: the
+    # worst case is about 20s, inside the 30s the reverse proxy allows.
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
         disc = await discovery(client, base)
         conf = conformance(disc["manifest"])
         cov = await coverage(client, dom, disc["manifest"], local_hits)
