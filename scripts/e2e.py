@@ -1734,6 +1734,44 @@ def t_beacon_endpoint_is_never_cached():
         f"the beacon endpoint is being cached: {r.headers.get('cf-cache-status')}"
 
 
+def t_header_and_footer_are_grouped_and_fit():
+    """Nine flat links plus a search field stopped fitting and the first one
+    wrapped onto three lines. Four groups is the shape the pages have."""
+    import re as _re
+    for path in ("/", "/what-is-ard", "/tools/", "/console", "/ard-registries"):
+        s_, h = _html(path)
+        assert s_ == 200, f"{path}: {s_}"
+        assert h.count('class="ng"') == 4, f"{path}: {h.count(chr(34)+'ng'+chr(34))} nav groups, want 4"
+        assert h.count('class="ni"') >= 14, f"{path}: too few grouped items"
+        assert h.count('class="fg"') == 5, f"{path}: footer is not 5 columns"
+        # the flat row and the retired link must not come back
+        assert 'class="fl"' not in h, f"{path}: the old flat footer row is back"
+        assert 'href="/registries"' not in h, f"{path}: links the retired /registries"
+        # search must exist and work without JavaScript
+        assert 'class="navsearch"' in h and 'action="/tools"' in h, f"{path}: no header search"
+        # and the phone keeps the three primary actions visible
+        assert 'class="navquick"' in h, f"{path}: no mobile quick links"
+
+
+def t_contact_address_is_an_image_only():
+    """Published deliberately, and never as text a scraper can lift."""
+    s_, h = _html("/")
+    assert "/img/contact.png" in h, "no contact image in the footer"
+    for form in ("hello@neuronto", "mailto:", "hello&#64;", "hello [at]"):
+        assert form.lower() not in h.lower(), f"the address appears as text: {form}"
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/img/contact.png", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+    assert r.status == 200 and r.headers.get("content-type") == "image/png"
+    # never in structured data or the machine-readable documents either
+    for path in ("/.well-known/ard.json", "/llms.txt", "/openapi.json"):
+        try:
+            rr = urllib.request.urlopen(urllib.request.Request(
+                BASE + path, headers={"User-Agent": UA["User-Agent"]}), timeout=30)
+            assert b"hello@neuronto" not in rr.read().lower(), f"{path} carries the address"
+        except urllib.error.HTTPError:
+            pass
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
