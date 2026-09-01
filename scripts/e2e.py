@@ -756,6 +756,24 @@ def t_published_links_all_resolve():
     assert not dead, f"dead links on /published: {dead}"
 
 
+def t_navigation_is_consistent_sitewide():
+    """Every page must link every section, static and generated alike.
+
+    The homepage carries its own hardcoded nav, separate from the one generated
+    pages share, so it silently fell behind: it linked none of /tools/,
+    /ard-publishers, /bench, /adoption, /submit or /published. The most crawled
+    page on the site was the one not linking its best content.
+    """
+    SECTIONS = ("/tools/", "/ard-publishers", "/bench", "/adoption",
+                "/submit", "/published", "/publish", "/console", "/blog")
+    for path in ("/", "/what-is-ard", "/blog", "/console", "/publish",
+                 "/tools/", "/ard-publishers", "/bench"):
+        s, h = _html(path)
+        assert s == 200, f"{path} -> {s}"
+        missing = [x for x in SECTIONS if f'href="{x}"' not in h]
+        assert not missing, f"{path} does not link: {missing}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
