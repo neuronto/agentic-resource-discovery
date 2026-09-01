@@ -20,6 +20,9 @@ from typing import Any
 from . import config
 from .normalize import dedupe_key, media_family, normalize_identifier, publisher_of
 
+# Stored input schemas are capped so one giant tool cannot bloat the index.
+_SCHEMA_MAX = 8000
+
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -508,7 +511,7 @@ def replace_tools(conn: sqlite3.Connection, entry_key: str,
                VALUES(?,?,?,?,?,?)""",
             (entry_key, name[:200], _s(t.get("title")),
              _s(t.get("description")),
-             json.dumps(schema, ensure_ascii=False)[:8000] if schema else None, now))
+             json.dumps(schema, ensure_ascii=False)[:_SCHEMA_MAX] if schema else None, now))
         if cur.rowcount:
             conn.execute("""INSERT INTO tools_fts(tool_id,entry_key,name,title,description)
                             VALUES(?,?,?,?,?)""",

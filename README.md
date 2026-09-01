@@ -143,7 +143,8 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `GET /agents` | Deterministic paginated listing, for browsing rather than ranking. |
 | `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. |
 | `POST /tools`, `GET /tools?q=` | Tool level search over verified tools rather than servers. |
-| `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. |
+| `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. `200` indexed, `202` kept and retried. |
+| `GET /submit/status/{id}` | Where a submission stands, with the last answer its endpoint gave. |
 | `POST /audit` | Publishing report: discovery, conformance, coverage, competition. |
 | `POST /manifest/build` | Generate a manifest for a domain from resources fetched there. |
 | `GET /m/{host}.json` | That generated manifest, hosted. |
@@ -272,6 +273,17 @@ listed from inside a conversation without leaving it.
 
 It verifies rather than trusts, exactly as the HTTP route does, and calls that route rather
 than reimplementing it so the two cannot drift apart.
+
+**A submission is never lost.** If the endpoint does not verify at that moment, for any
+reason, the answer is `202` with `"status": "pending"`, a submission id, and `evidence`:
+the HTTP status, content type and first bytes of what the endpoint actually returned, or
+the JSON-RPC error it sent. The registry keeps the submission and retries it on a fixed
+schedule (1 min, 5 min, 15 min, 1 h, 4 h, 12 h, 24 h, 24 h) until it verifies or the
+attempts run out, and `GET /submit/status/{id}` shows where it stands. A refusal caused by
+the registry itself, such as the index being busy, costs none of those attempts. So a
+server that was mid-deploy, a DNS record that had not propagated, or a client that gave up
+after one call still ends up indexed with no second submission from anyone. The queue is
+counted publicly at `/metrics.json` under `submissions`.
 
 **You have no manifest and do not want to write one.** Ask for one to be generated from
 what your domain already exposes, and either copy it or link it.

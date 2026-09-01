@@ -6,8 +6,14 @@ also say what the thing is. This is flat colour and text, so PNG keeps it exact
 at any scale with no compression artefacts, and the numbers are read from the
 live index rather than typed, so the card cannot drift from the truth.
 """
-import math, sqlite3, sys
+import math, os, sqlite3, sys
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app import config  # noqa: E402
+
+OUT = Path(__file__).resolve().parents[1] / "web" / "img" / "og-v1.png"
 
 W, H, S = 1200, 630, 3          # supersample for crisp text and curves
 BG, FG, MUT, DIM, LINE = "#09090A", "#FAFAFA", "#A5A5AB", "#45454C", "#26262A"
@@ -15,7 +21,7 @@ SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
-c = sqlite3.connect("file:***REMOVED***/neuronto.db?mode=ro", uri=True)
+c = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
 q = lambda s: c.execute(s).fetchone()[0]
 tools = q("SELECT COUNT(*) FROM tools")
 pubs = q("SELECT COUNT(*) FROM crawl_seen WHERE manifest_path IS NOT NULL")
@@ -55,6 +61,6 @@ for val, lab in stats:
              d.textlength(lab, font=f(SANS,20))) + 58*S
 
 out = img.resize((W, H), Image.LANCZOS)
-out.save("***REMOVED***/web/img/og-v1.png", "PNG", optimize=True)
+out.save(OUT, "PNG", optimize=True)
 print(f"  wrote og.png {out.size}  tools={tools:,} pubs={pubs} entries={entries:,}")
-import os; print("  bytes:", os.path.getsize("***REMOVED***/web/img/og-v1.png"))
+print("  bytes:", os.path.getsize(OUT))

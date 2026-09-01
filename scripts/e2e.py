@@ -376,7 +376,7 @@ def t_openapi_documents_new_endpoints():
     s, d = get("/openapi.json")
     assert s == 200, s
     paths = set(d["paths"])
-    for p in ("/tools", "/bench", "/adoption"):
+    for p in ("/tools", "/bench", "/adoption", "/submit/status/{sid}", "/submit/status"):
         assert p in paths, f"{p} missing from openapi.json"
 
 
@@ -804,10 +804,14 @@ def t_submit_indexes_a_real_publisher():
 
 
 def t_submit_rejects_a_domain_without_a_manifest():
+    """Not indexed, and it says why. Since 2026-09-01 it is also kept and
+    retried, so the answer is 202 pending rather than a 404 that forgets."""
     s, d = not_rate_limited(*post("/submit", {"domain": "example.com"}, timeout=60))
-    assert s == 404, f"{s} {d}"
-    assert d["status"] == "no_manifest"
+    assert s == 202, f"{s} {d}"
+    assert d["status"] == "pending" and d["refusal"] == "no_manifest", d
+    assert d["indexed"] is False
     assert len(d.get("checked") or []) >= 2, "does not say which paths were tried"
+    assert d["submission"]["status_url"].endswith("/submit/status/" + d["submission"]["id"])
 
 
 def t_submit_validates_input():
@@ -889,9 +893,12 @@ def t_submit_accepts_a_bare_mcp_endpoint():
 
 def t_submit_rejects_a_url_that_is_not_mcp():
     s, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/"}, timeout=60))
-    assert s == 404, f"{s} {d}"
-    assert d["status"] == "not_an_mcp_server"
+    assert s == 202, f"{s} {d}"
+    assert d["status"] == "pending" and d["refusal"] == "not_an_mcp_server", d
     assert "handshake" in d["detail"].lower()
+    ev = d.get("evidence") or {}
+    assert ev.get("http") and ev.get("content_type"), \
+        f"the refusal does not carry what the endpoint returned: {ev}"
 
 
 def t_submitted_server_becomes_searchable():
@@ -1220,7 +1227,12 @@ def t_publish_resource_verifies_before_indexing():
     err, _ = call({})
     assert err, "accepted a submission with no endpoint and no domain"
     err, body = call({"endpoint": "https://example.com/definitely-not-mcp"})
-    assert err, f"indexed a URL that is not an MCP server: {body}"
+    # Not indexed, and not an error either: the submission is accepted into
+    # the retry queue, and the agent is told so instead of being sent away
+    # to try again by itself.
+    assert body.get("status") == "pending" and body.get("indexed") is False, \
+        f"a non-MCP URL was neither indexed-false nor pending: {body}"
+    assert not err and body.get("next_step"), f"a queued submission should not be an error: {body}"
     err, body = call({"endpoint": "https://mcp.deepwiki.com/mcp"})
     if err and "timeout" in json.dumps(body).lower():
         # The negative assertions above are the ones that protect us. The
@@ -2068,11 +2080,79 @@ def t_a_refused_submission_says_whose_fault_it_is():
     tried four times, got three failures, and gave up. The response carries a
     machine-readable reason and says plainly which side it came from."""
     code, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/definitely-not-mcp"}))
-    assert code == 404 and d.get("status") == "not_an_mcp_server", (code, d)
+    assert code == 202 and d.get("refusal") == "not_an_mcp_server", (code, d)
     assert d.get("reason", "").startswith("error:"), \
         f"no machine-readable reason on a refusal: {d}"
-    assert "not a limit on our side" in (d.get("detail") or ""), \
+    assert "what your endpoint returned" in (d.get("detail") or ""), \
         "the refusal does not tell the publisher whose fault it is"
+    ev = d.get("evidence") or {}
+    assert 400 <= int(ev.get("http") or 0) < 500 and "html" in (ev.get("content_type") or ""), \
+        f"evidence should show example.com's own HTML refusal of that POST: {ev}"
+
+
+def t_a_submission_is_never_lost():
+    """The 2026-09-01 failure, structurally closed: an endpoint that does not
+    answer at submit time is queued with the evidence and retried on a
+    schedule, and the publisher gets an id to watch. The in-process proof that
+    the retrier then indexes it is scripts/submit_resilience.py."""
+    import secrets as _s
+    url = f"https://nonexistent-{_s.token_hex(4)}.neuronto.com/mcp"
+    code, d = not_rate_limited(*post("/submit", {"endpoint": url}, timeout=60))
+    assert code == 202 and d["status"] == "pending", (code, d)
+    sub = d["submission"]
+    assert sub["attempts"] == 1 and sub["attempts_left"] >= 6, sub
+    assert 0 < sub["next_attempt_in_s"] <= 60, "first retry should be due within a minute"
+    assert "exception" in (d.get("evidence") or {}), f"no evidence of what failed: {d.get('evidence')}"
+    assert d["retry"]["status_url"] == sub["status_url"]
+    # the status url is public and consistent with the answer
+    code, st = get("/submit/status/" + sub["id"])
+    assert code == 200 and st["id"] == sub["id"] and st["status"] == "pending", st
+    assert st["target"] == url and st["attempts"] == 1, st
+    # a second submission of the same target joins the same row
+    code, d2 = not_rate_limited(*post("/submit", {"endpoint": url}, timeout=60))
+    assert d2["submission"]["id"] == sub["id"] and d2["submission"]["attempts"] == 2, d2["submission"]
+    # and the target lookup finds it without the id
+    code, st2 = get("/submit/status?endpoint=" + urllib.parse.quote(url, safe=""))
+    assert code == 200 and st2["id"] == sub["id"], st2
+
+
+def t_submit_status_unknown_is_404_and_garbage_is_400():
+    try:
+        code, _ = get("/submit/status/0123456789ab")
+    except urllib.error.HTTPError as e:
+        code = e.code
+    assert code == 404, code
+    try:
+        code, _ = get("/submit/status/not-an-id")
+    except urllib.error.HTTPError as e:
+        code = e.code
+    assert code == 400, code
+
+
+def t_metrics_publish_the_submission_queue():
+    _, m = get("/metrics.json")
+    s = m.get("submissions") or {}
+    for k in ("pending", "indexed", "indexed_on_retry", "gave_up", "retry_schedule_s"):
+        assert k in s, f"metrics lack submissions.{k}: {s}"
+    assert s["retry_schedule_s"][0] <= 60 and sum(s["retry_schedule_s"]) >= 2 * 86400, \
+        "retry schedule should start within a minute and span at least two days"
+
+
+def t_about_and_registry_render():
+    """Both returned 500 for a day on 2026-09-01 (a sync handler awaited)."""
+    for p in ("/about", "/registry"):
+        r = urllib.request.urlopen(urllib.request.Request(BASE + p, headers={"User-Agent": "e2e"}), timeout=30)
+        assert r.status == 200 and b"<html" in r.read()[:400].lower(), p
+
+
+def t_an_indexed_submission_carries_its_receipt():
+    s, d = not_rate_limited(*post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=90))
+    if s != 200:
+        raise Skip("the reference MCP server did not answer in time")
+    sub = d.get("submission") or {}
+    assert sub.get("status") == "indexed" and sub.get("id"), f"no receipt on success: {d}"
+    code, st = get("/submit/status/" + sub["id"])
+    assert code == 200 and st["status"] == "indexed" and st.get("entry_key"), st
 
 
 def main():

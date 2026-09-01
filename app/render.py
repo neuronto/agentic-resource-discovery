@@ -521,7 +521,9 @@ _CACHE_DB = Path(os.getenv("NEURONTO_PAGECACHE_DB",
 def _build_stamp() -> str:
     h = hashlib.sha1()
     here = Path(__file__).resolve().parent
-    files = [here / n for n in ("render.py", "catalog.py", "badge.py")]
+    # main.py builds several pages inline (/submit, /llms.txt, ...), so it is
+    # a page change as much as a template is.
+    files = [here / n for n in ("render.py", "catalog.py", "badge.py", "main.py")]
     # The templates count as much as the code: a rewritten hero in web/*.html
     # is a page change even though no Python moved, and leaving them out meant
     # an edited template deployed cleanly, passed health, and reached nobody.

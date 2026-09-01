@@ -457,6 +457,15 @@ describes discovery as web-native.</p>
 <p>The practical catch is crawl coverage. Registries choose their own frontier, and most only reach
 large domains, so a small publisher can be perfectly conformant and still be indexed nowhere.</p>
 
+<h2>If the handshake fails</h2>
+<p>The submission is kept, not refused. You get <code>202</code> with <code>"status":
+"pending"</code>, a submission id and <code>evidence</code>: the HTTP status, content type
+and first bytes your server actually returned, or the JSON-RPC error it sent. The registry
+then retries on its own schedule for about two and a half days (1 minute, 5, 15, 1 hour, 4,
+12, 24, 24) and <code>GET /submit/status/&lt;id&gt;</code> shows where it stands. A server
+that was mid-deploy when you submitted is indexed on a later attempt without a second call
+from you.</p>
+
 <h2>What about GitHub's Agent Finder?</h2>
 <p>It is curated. An open issue asking how independent publishers get into its catalogue has been
 unanswered since July 2026. If you are not already inside one of its source sets, there is currently

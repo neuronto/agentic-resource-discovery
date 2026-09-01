@@ -1,4 +1,4 @@
-"""ard-publish — make your API discoverable by AI agents.
+"""ard-publish: make your API discoverable by AI agents.
 
 Publishing an ARD manifest is a small job that is easy to get subtly wrong, and
 the failures are silent: a catalogue with a malformed URN, or entries with no
@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 __all__ = ["Entry", "Manifest", "validate", "ValidationError"]
 
 _URN = re.compile(r"^urn:air:[a-zA-Z0-9.-]+(:[a-zA-Z0-9._-]+)+$")

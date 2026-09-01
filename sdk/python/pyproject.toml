@@ -1,6 +1,6 @@
 [project]
 name = "ard-publish"
-version = "1.0.1"
+version = "1.2.0"
 description = "Make your API, MCP server or AI agent discoverable by AI agents: build, validate and verify an Agentic Resource Discovery (ARD) manifest."
 readme = "README.md"
 requires-python = ">=3.9"
