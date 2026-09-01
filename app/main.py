@@ -31,14 +31,53 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
 from . import (adoption, audit, badge, bench, catalog, config, embed,
-               federation, ingest, liveness, publisher, render, search,
+               federation, ingest, liveness, limits, publisher, render, search,
                store, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
               docs_url="/api-docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
-                   allow_headers=["*"], expose_headers=["X-Response-Time-Ms"])
+                   allow_headers=["*"],
+                   expose_headers=["X-Response-Time-Ms", "X-RateLimit-Limit",
+                                   "X-RateLimit-Remaining", "X-RateLimit-Reset",
+                                   "Retry-After"])
+
+
+# Which routes spend something on a caller's behalf. Everything absent from this
+# map is a local read and is not limited, which is most of the API.
+#
+# Done as middleware rather than per route so that a route added later is not
+# silently unlimited because somebody forgot a decorator. Two rules cannot be
+# decided from the path alone, `/search` (only the federated mode goes outbound)
+# and `/mcp` (only one of its four tools writes), so those are applied at their
+# call sites where the body is already parsed.
+_LIMITED: dict[tuple[str, str], str] = {
+    ("POST", "/audit"):           "audit",
+    ("POST", "/manifest/build"):  "manifest_build",
+    ("POST", "/submit"):          "submit",
+    ("POST", "/claim"):           "claim",
+    ("POST", "/claim/verify"):    "claim_verify",
+    ("POST", "/private/entries"): "private_write",
+    ("DELETE", "/private/entries"): "private_write",
+}
+
+
+@app.middleware("http")
+async def _rate_limit(request: Request, call_next):
+    rule = _LIMITED.get((request.method, request.url.path.rstrip("/") or "/"))
+    if not rule:
+        return await call_next(request)
+    ok, retry, headers = limits.check(rule, request)
+    if not ok:
+        _, verified = limits.caller(request)
+        return JSONResponse(status_code=429,
+                            content=limits.too_many(rule, retry, headers, verified),
+                            headers={**headers, "retry-after": str(retry)})
+    resp = await call_next(request)
+    for k, v in headers.items():
+        resp.headers[k] = v
+    return resp
 
 _conn: sqlite3.Connection | None = None
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -95,6 +134,17 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     except (TypeError, ValueError):
         page_size = config.PAGE_SIZE_DEFAULT
     mode = str(body.get("federation") or "auto")
+    # Only the federated modes go outbound, so only they are limited. Local
+    # search is the product and stays unmetered.
+    if mode in ("auto", "referrals"):
+        ok, retry, hdrs = limits.check("search_fed", request)
+        if not ok:
+            _, verified = limits.caller(request)
+            body_out = limits.too_many("search_fed", retry, hdrs, verified)
+            body_out["detail"] += (" Set \"federation\": \"none\" to search this index "
+                                   "only, which is not limited.")
+            return JSONResponse(status_code=429, content=body_out,
+                                headers={**hdrs, "retry-after": str(retry)})
 
     t0 = time.perf_counter()
     conn = db()
@@ -107,7 +157,7 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
     store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
-                     entries=out["results"])
+                     entries=out["results"], authenticated=bool(owner))
     cleaned = search.clean(out["results"])
     payload: dict[str, Any] = {"results": cleaned,
                                "queryMatch": search.query_match(text, cleaned)}
@@ -558,8 +608,24 @@ async def _pages(): return await home()
 # ─────────────────────────── MCP wrapper (§5.3.5) ───────────────────────────
 
 @app.post("/mcp", include_in_schema=False)
-async def mcp_endpoint(body: dict) -> Response:
+async def mcp_endpoint(body: dict, request: Request) -> Response:
     from .mcp import handle
+    # Three of the four tools are local reads. `publish_resource` makes an
+    # outbound call, so it carries the same allowance as the HTTP submit route
+    # it delegates to; limiting the whole endpoint would throttle search for no
+    # reason. Checked here because the tool name is only known from the body.
+    if (body or {}).get("method") == "tools/call" and \
+            ((body.get("params") or {}).get("name")) == "publish_resource":
+        ok, retry, hdrs = limits.check("submit", request)
+        if not ok:
+            _, verified = limits.caller(request)
+            note = limits.too_many("submit", retry, hdrs, verified)
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": (body or {}).get("id"),
+                 "result": {"content": [{"type": "text",
+                                         "text": json.dumps(note, indent=2)}],
+                            "isError": True}},
+                status_code=200, headers={**hdrs, "retry-after": str(retry)})
     status, payload = await handle(db(), body)
     if payload is None:
         return Response(status_code=status)
@@ -606,7 +672,8 @@ async def audit_endpoint(body: dict) -> JSONResponse:
         hits = conn.execute(
             "SELECT COUNT(*) FROM entries WHERE publisher=? OR url LIKE ?",
             (host, f"%//{host}%")).fetchone()[0]
-    report = await audit.run(dom, local_hits=1 if hits else 0)
+    async with limits.outbound():
+        report = await audit.run(dom, local_hits=1 if hits else 0)
     if "error" in report:
         return JSONResponse(status_code=400, content=report)
     report["indexed_here"] = hits
@@ -637,8 +704,15 @@ async def metrics_json():
     t = store.tool_counts(conn)
     h = store.history_counts(conn)
     q = lambda s: conn.execute(s).fetchone()[0]
+    _ardp = store.ard_publisher_counts(conn)
+    # `verified_manifests` was the ambiguous name that let three surfaces
+    # diverge. Kept as an alias so an existing consumer does not break.
+    _ardp["verified_manifests"] = _ardp["manifest_hosts"]
     return JSONResponse({
         "generated": int(time.time()),
+        # Published rather than kept private, because a limit a caller cannot
+        # read is one they can only discover by hitting it.
+        "limits": limits.stats(),
         "index": {"entries": c["entries"], "publishers": c["publishers"],
                   "by_kind": c["families"], "sources": c["sources"]},
         "verified": {"tools": t["tools"], "servers_introspected": t["introspected"],
@@ -646,13 +720,9 @@ async def metrics_json():
                      "servers_requiring_auth": t["auth_required"]},
         "liveness": {"answering": c["live"], "not_answering": c["dead"],
                      "unprobed": c["unprobed"]},
-        "ard_publishers": {
-            "verified_manifests": q("SELECT COUNT(*) FROM crawl_seen WHERE manifest_path IS NOT NULL"),
-            "domains_crawled": q("SELECT COUNT(*) FROM crawl_seen"),
-            "by_path": {r[0]: r[1] for r in conn.execute(
-                "SELECT manifest_path, COUNT(*) FROM crawl_seen "
-                "WHERE manifest_path IS NOT NULL GROUP BY 1")},
-        },
+        # One definition, in store.ard_publisher_counts. Three surfaces used to
+        # compute this separately and reported three different numbers.
+        "ard_publishers": _ardp,
         "history": h,
         "federation": {"upstreams": [u[1] for u in config.UPSTREAMS],
                        "budget_ms": config.FEDERATION_BUDGET_MS},
@@ -665,7 +735,8 @@ async def metrics_json():
 
 @app.get("/demand")
 async def demand_endpoint(domain: str = Query(..., min_length=3),
-                          days: int = Query(30, ge=1, le=365)) -> JSONResponse:
+                          days: int = Query(30, ge=1, le=365),
+                          limit: int = Query(25, ge=1, le=200)) -> JSONResponse:
     """Did anyone come looking, and what did they ask?
 
     Being listed is not the question a publisher has; this is. Every search
@@ -678,7 +749,7 @@ async def demand_endpoint(domain: str = Query(..., min_length=3),
     if not host or "." not in host or len(host) > 253:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "domain is required"})
-    d = store.demand_for(db(), host, days)
+    d = store.demand_for(db(), host, days, limit)
     if not d["indexed"]:
         return JSONResponse(status_code=404, content={
             "domain": host, "status": "not_indexed",
@@ -723,7 +794,8 @@ async def manifest_build(body: dict) -> JSONResponse:
     if not host:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "a hostname is required"})
-    found = await publisher.infer_resources(host)
+    async with limits.outbound():
+        found = await publisher.infer_resources(host)
     if not found:
         return JSONResponse(status_code=404, content={
             "domain": host, "status": "nothing_found",
@@ -1202,7 +1274,8 @@ async def submit_endpoint(body: dict) -> JSONResponse:
         import httpx as _httpx
         try:
             async with _httpx.AsyncClient(follow_redirects=True) as c:
-                res = await tools_index.introspect_one(c, endpoint)
+                async with limits.outbound():
+                    res = await tools_index.introspect_one(c, endpoint)
         except Exception:
             res = {"status": "error:unreachable", "tools": [], "auth": False,
                    "server_name": None}

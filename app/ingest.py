@@ -169,10 +169,14 @@ def _flush(conn, pending: list[tuple], tries: int = 6) -> bool:
     delay = 0.5
     for _ in range(tries):
         try:
-            conn.executemany("""INSERT INTO crawl_seen(domain,last_crawl,status,entries)
-                VALUES(?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
+            conn.executemany("""INSERT INTO crawl_seen(domain,last_crawl,status,entries,manifest_path)
+                VALUES(?,?,?,?,?) ON CONFLICT(domain) DO UPDATE SET
                 last_crawl=excluded.last_crawl, status=excluded.status,
-                entries=excluded.entries""", pending)
+                entries=excluded.entries,
+                -- Never overwrite an observed path with NULL: a later crawl
+                -- that times out must not erase what an earlier one saw.
+                manifest_path=COALESCE(excluded.manifest_path, crawl_seen.manifest_path)""",
+                pending)
             conn.commit()
             pending.clear()
             return True
@@ -219,7 +223,7 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
     async def one(dom: str, client: httpx.AsyncClient):
         nonlocal found, entries, checked
         base = dom if dom.startswith("http") else f"https://{dom}"
-        got, data = 0, None
+        got, data, hit_path = 0, None, None
         async with sem:
             for path in PATHS:
                 try:
@@ -228,6 +232,7 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
                         d = r.json()
                         if isinstance(d, dict) and isinstance(d.get("entries"), list):
                             data = d
+                            hit_path = path
                             break
                 except Exception:
                     continue
@@ -254,7 +259,12 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
                     continue
             if got:
                 found += 1; entries += got
-        pending.append((dom, int(time.time()), "found" if got else "none", got))
+        # Record WHICH path answered. This used to be dropped here, so every
+        # publisher the crawler found had a manifest and no record of where,
+        # and `verified_manifests` (which counts a non-null path) undercounted
+        # by every domain crawled since the column was added. The value was
+        # known three lines up the whole time.
+        pending.append((dom, int(time.time()), "found" if got else "none", got, hit_path))
         if len(pending) >= 400:
             _flush(conn, pending)
 
