@@ -534,16 +534,51 @@ def t_every_ard_publisher_is_listed():
 def t_publisher_page_never_claims_an_unmade_check():
     """A publisher we have not probed must not render as zero answering.
 
-    Saying '0 answering' about a real business we never tested is a false
-    statement about somebody else's service, which is worse than saying nothing.
+    Saying "0 answering" about a real business we never tested is a false
+    statement about somebody else's service. The subject is discovered from the
+    live index rather than hardcoded: the first version named one publisher,
+    and the assertion silently went stale the moment that publisher got probed.
     """
-    s, h = _html("/ard-publishers/gstcranes.com")
+    s, idx = _html("/ard-publishers")
     assert s == 200, s
-    assert "not yet checked" in h.lower(), \
-        "unprobed publisher does not say the check was not made"
     import re as _re
-    assert not _re.search(r"<b>0</b>answering", h), \
-        "renders 0 answering for a publisher that was never probed"
+    # Scope to one table row. A DOTALL wildcard between the link and the phrase
+    # spans rows, so it matched any publisher followed later in the document by
+    # some other row's "not checked", which is how this first reported a false
+    # positive against a fully probed publisher.
+    unprobed = []
+    for row in _re.findall(r"<tr>.*?</tr>", idx, _re.S):
+        if "not checked" not in row:
+            continue
+        m = _re.search(r'href="/ard-publishers/([^"]+)"', row)
+        if m:
+            unprobed.append(m.group(1))
+    if not unprobed:
+        # Everything has been probed. The invariant cannot be violated, but the
+        # structural check below still must hold on a real page.
+        s2, h2 = _html("/ard-publishers/clickhouse.com")
+        assert "answering of" in h2 or "not yet" in h2.lower(), \
+            "page states an answering count with no indication of what was checked"
+        return
+    host = unprobed[0]
+    s3, h3 = _html(f"/ard-publishers/{host}")
+    assert s3 == 200, s3
+    assert "not yet checked" in h3.lower(), \
+        f"{host} was never probed but its page does not say so"
+    assert not _re.search(r"<b>0</b>answering", h3), \
+        f"{host} renders 0 answering despite never being probed"
+
+
+def t_answering_counts_always_state_the_denominator():
+    """Any answering figure must say how many were checked, on every page."""
+    import re as _re
+    for host in ("clickhouse.com", "zapier.com", "apify.com"):
+        s, h = _html(f"/ard-publishers/{host}")
+        if s != 200:
+            continue
+        m = _re.search(r"<b>([\d,]+)</b>answering of ([\d,]+) checked", h)
+        assert m or "not yet" in h.lower(), \
+            f"{host} reports answering without a denominator"
 
 
 def t_unknown_publisher_404s():
