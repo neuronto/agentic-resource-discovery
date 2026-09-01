@@ -13,11 +13,12 @@ return what we have, and say in the response which registries answered.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 import httpx
 
-from . import config
+from . import config, fedcache
 from .normalize import dedupe_key, media_family, normalize_identifier
 
 _HEADERS = {"content-type": "application/json", "user-agent": config.USER_AGENT}
@@ -77,24 +78,91 @@ async def fan_out(text: str, page_size: int = 20,
     budget = (budget_ms or config.FEDERATION_BUDGET_MS) / 1000.0
     limits = httpx.Limits(max_connections=len(config.UPSTREAMS) + 2,
                           max_keepalive_connections=len(config.UPSTREAMS) + 2)
-    async with httpx.AsyncClient(limits=limits, follow_redirects=True) as client:
-        tasks = [asyncio.create_task(_one(client, up, text, page_size))
-                 for up in config.UPSTREAMS]
-        done, pending = await asyncio.wait(tasks, timeout=budget)
+    # Not `async with`: stragglers keep running after the budget, so the client
+    # has to outlive this function and is closed by whoever finishes last.
+    client = httpx.AsyncClient(limits=limits, follow_redirects=True)
+    tasks = [asyncio.create_task(_one(client, up, text, page_size))
+             for up in config.UPSTREAMS]
+    done, pending = await asyncio.wait(tasks, timeout=budget)
+
+    out = []
+    for d in done:
+        try:
+            r = d.result()
+            out.append(r)
+            if r.get("ok") and r.get("results"):
+                fedcache.put(r["id"], text, r["results"])
+        except Exception:
+            pass
+
+    for up in config.UPSTREAMS:
+        if any(o["id"] == up[0] for o in out):
+            continue
+        # An upstream that missed the budget may have answered this same query
+        # recently. Serving that is far better than dropping a whole registry,
+        # but it is labelled: `cached` with the age, never dressed up as a live
+        # reply. Claiming to have queried a registry we did not would make the
+        # federation claim untrue, which costs more than the coverage is worth.
+        hit = fedcache.get(up[0], text)
+        if hit is not None:
+            results, age = hit
+            out.append({"id": up[0], "name": up[1], "source": up[3], "ok": True,
+                        "ms": int(budget * 1000), "cached": True, "age_s": age,
+                        "results": results})
+        else:
+            out.append({"id": up[0], "name": up[1], "source": up[3], "ok": False,
+                        "ms": int(budget * 1000), "error": "budget exceeded",
+                        "results": []})
+
+    if pending and len(_running) < _MAX_FINISHERS:
+        # The task object itself is held, not a token: asyncio keeps only a
+        # weak reference to a running task, so one whose only reference is the
+        # create_task return value can be garbage collected mid-flight. That is
+        # exactly what happened first time here, and the symptom was a cache
+        # that quietly never filled for the one upstream it exists for.
+        t = asyncio.create_task(_finish(client, pending, text))
+        _running.add(t)
+        t.add_done_callback(_running.discard)
+    else:
         for p in pending:
             p.cancel()
-        out = []
+        await client.aclose()
+    return out
+
+
+# Background completion of upstreams that missed the budget. Bounded, because
+# an unbounded number of detached tasks under load is how a small box dies.
+_MAX_FINISHERS = int(os.getenv("NEURONTO_FED_FINISHERS", "8"))
+_running: set = set()
+
+
+async def _finish(client: httpx.AsyncClient, pending: set, text: str) -> None:
+    """Let the slow ones land, keep what they said, then close the client.
+
+    Nothing here can affect the response that has already been returned. Its
+    only job is to make the next caller's answer more complete.
+    """
+    try:
+        done, still = await asyncio.wait(pending, timeout=_FINISH_GRACE_S)
         for d in done:
             try:
-                out.append(d.result())
+                r = d.result()
             except Exception:
-                pass
-        for up in config.UPSTREAMS:
-            if not any(o["id"] == up[0] for o in out):
-                out.append({"id": up[0], "name": up[1], "source": up[3],
-                            "ok": False, "ms": int(budget * 1000),
-                            "error": "budget exceeded", "results": []})
-        return out
+                continue
+            if r.get("ok") and r.get("results"):
+                fedcache.put(r["id"], text, r["results"])
+        for p in still:
+            p.cancel()
+    except Exception:
+        pass
+    finally:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+
+_FINISH_GRACE_S = float(os.getenv("NEURONTO_FED_FINISH_GRACE", "8"))
 
 
 def referral_entries() -> list[dict]:

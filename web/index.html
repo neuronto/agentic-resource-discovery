@@ -889,7 +889,12 @@ function paint(d, ms, pending){
     const n=((STATS&&STATS.federation&&STATS.federation.upstreams)||[]).length;
     head+=`<span class="tick"><span class="dots">${n?n+" more registries":"other registries"}</span></span>`;
   }else{
-    head+=fed.map(f=>`<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${f.ok?" · "+f.results:" · timeout"}</span>`).join("");
+    /* A cached upstream is shown as cached with its age. It answered, but not
+       just now, and the difference is the whole federation claim. */
+    head+=fed.map(f=>{
+      const how=f.cached?` · ${f.results} cached ${Math.round((f.age_s||0)/60)}m`
+                        :(f.ok?" · "+f.results:" · timeout");
+      return `<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${how}</span>`}).join("");
   }
   head+=`</div>`;
   $("#out").innerHTML = res.length
