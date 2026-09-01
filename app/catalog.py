@@ -531,7 +531,7 @@ def sitemap_urls(conn: sqlite3.Connection) -> list[str]:
     return ([f"{B}/tools/"] + [f"{B}/tools/{s}" for s in published(conn)] +
             [f"{B}/ard-publishers"] +
             [f"{B}/ard-publishers/{p['publisher']}" for p in publisher_list(conn)] +
-            [f"{B}/bench", f"{B}/adoption"])
+            [f"{B}/bench", f"{B}/adoption", f"{B}/published"])
 
 
 # ---------------------------------------------------------------------------
@@ -845,3 +845,110 @@ crawlers find it.</p>
         body, f"{B}/ard-publishers",
         jsonld=f'<script type="application/ld+json">{ld}</script>')
 
+
+# ---------------------------------------------------------------------------
+# Where this project is published.
+#
+# IndexNow is domain-verified: submitting a huggingface.co or github.com URL
+# under our key is refused outright ("One or more URLs are not related to your
+# verified domain"). There is no protocol for pushing somebody else's URL to a
+# search engine, and anything claiming otherwise is selling something.
+#
+# What does work is a crawl path. One page on a domain that is itself indexed,
+# linking every external artefact, is how those artefacts get found. It doubles
+# as the answer to a question an answer engine will actually be asked: where is
+# this project published, and is any of it real.
+# ---------------------------------------------------------------------------
+
+PUBLISHED = [
+    ("Code and specification work", [
+        ("GitHub repository", "https://github.com/neuronto/agentic-resource-discovery",
+         "The registry, publisher, crawler, tool introspector and benchmark harness. Apache-2.0."),
+        ("ARD specification: interoperability field data",
+         "https://github.com/ards-project/ard-spec/issues/88",
+         "Measured urn:ai vs urn:air split, media-type fragmentation, and the finding that "
+         "183 of 199 publishers still serve the pre-v0.91 manifest path."),
+        ("ARD specification: reference implementation",
+         "https://github.com/ards-project/ard-spec/issues/87",
+         "Neuronto as a federated implementation, conformance verified in both modes."),
+        ("ARD documentation: reference implementations",
+         "https://github.com/ards-project/ard-docs/pull/23",
+         "Proposed entry on the specification's own implementations page."),
+        ("ARD connectors", "https://github.com/ards-project/ard-connectors/pull/6",
+         "Addition to the shared client-side finder list."),
+    ]),
+    ("Datasets and packages", [
+        ("Verified MCP Tools dataset",
+         "https://huggingface.co/datasets/AgenticResourceDiscovery/verified-mcp-tools",
+         "31,411 tools read from live servers' own tools/list, plus 7,708 introspection "
+         "results including which endpoints demand credentials. CC BY 4.0."),
+        ("ard-publish on PyPI", "https://pypi.org/project/ard-publish/",
+         "Build, validate and verify an ARD manifest for your own domain."),
+        ("agentic-resource-discovery on PyPI",
+         "https://pypi.org/project/agentic-resource-discovery/",
+         "Alias package for the same tool."),
+    ]),
+    ("Registries and directories", [
+        ("Official MCP Registry",
+         "https://registry.modelcontextprotocol.io/v0/servers?search=neuronto",
+         "Published as com.neuronto/agents-tools-search-discovery-ard-registry, "
+         "namespace verified by DNS."),
+        ("Docker MCP Registry", "https://github.com/docker/mcp-registry/pull/4863",
+         "Remote server submission."),
+        ("awesome-mcp-servers", "https://github.com/punkpeye/awesome-mcp-servers/pull/13302",
+         "Aggregators section."),
+        ("Cline MCP Marketplace", "https://github.com/cline/mcp-marketplace/issues/2372",
+         "Marketplace submission."),
+        ("mcp.so", "https://github.com/chatmcp/mcpso/issues/3857",
+         "Directory submission via the open route."),
+        ("APIs.guru", "https://github.com/APIs-guru/openapi-directory/issues/3188",
+         "OpenAPI directory submission."),
+    ]),
+]
+
+
+def render_published(conn: sqlite3.Connection) -> str:
+    n = sum(len(v) for _, v in PUBLISHED)
+    secs = []
+    for title, items in PUBLISHED:
+        rows = "".join(
+            f'<tr><td><a href="{esc(u)}" rel="noopener">{esc(name)}</a>'
+            f'<div class="dsc">{esc(desc)}</div>'
+            f'<div class="dsc"><code style="font-size:11px">{esc(u)}</code></div></td></tr>'
+            for name, u, desc in items)
+        secs.append(f'<h2 style="margin-top:34px;font-size:20px">{esc(title)}</h2>'
+                    f'<table class="tl"><tbody>{rows}</tbody></table>')
+
+    ld = json.dumps({
+        "@context": "https://schema.org", "@type": "Organization",
+        "name": "Neuronto", "url": B,
+        "description": "Agentic Resource Discovery (ARD) index, registry and publisher.",
+        "sameAs": [u for _, items in PUBLISHED for _, u, _ in items],
+    }, ensure_ascii=False)
+
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / Published</div>
+  <h1>Where Neuronto is published</h1>
+  <p class="lede">Every artefact of this project that lives somewhere other than this
+  domain: the source, the open dataset, the packages, the registry entries, and the
+  specification work. {n} links, each verified reachable.</p>
+</div>
+{"".join(secs)}
+
+<div class="note">
+  This page exists because search engines cannot be told about somebody else's URL. IndexNow
+  is domain-verified and refuses a submission for a host you do not control, so the only
+  honest way to get these discovered is to link them from a page that is itself indexed.
+  Everything above is a live artefact rather than an announcement: code you can run,
+  a dataset you can download, and submissions whose state you can read for yourself,
+  including the ones still open.
+</div>
+"""
+    return render.page(
+        "Where Neuronto is published: source, dataset, packages and registry entries",
+        f"All {n} external artefacts of the Neuronto Agentic Resource Discovery (ARD) Index: "
+        f"the Apache-2.0 source, the CC BY 4.0 verified MCP tools dataset, PyPI packages, "
+        f"MCP Registry entry and specification contributions.",
+        body, f"{B}/published",
+        jsonld=f'<script type="application/ld+json">{ld}</script>')
