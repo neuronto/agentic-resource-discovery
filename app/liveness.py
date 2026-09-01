@@ -52,15 +52,23 @@ async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
     sem = asyncio.Semaphore(config.LIVENESS_CONCURRENCY)
     alive = dead = 0
 
+    found: list[tuple] = []
     async with httpx.AsyncClient(
             limits=httpx.Limits(max_connections=config.LIVENESS_CONCURRENCY * 2)) as client:
         async def one(key: str, url: str):
-            nonlocal alive, dead
             async with sem:
                 ok, status, ms = await _probe(client, url)
-            store.mark_liveness(conn, key, ok, status, ms)
-            if ok: alive += 1
-            else:  dead += 1
-        await asyncio.gather(*(one(r["key"], r["url"]) for r in rows))
+            found.append((key, ok, status, ms))
+        await asyncio.gather(*(one(r["key"], r["url"]) for r in rows),
+                             return_exceptions=True)
+
+    # Writes go after the network phase, never inside the gather. SQLite takes
+    # one writer, and a transaction opened on the first probe used to stay open
+    # until the last one returned, holding the lock for the length of the whole
+    # sweep and refusing anyone trying to submit during it.
+    for key, ok, status, ms in found:
+        store.mark_liveness(conn, key, ok, status, ms)
+        if ok: alive += 1
+        else:  dead += 1
     conn.commit()
     return {"probed": len(rows), "alive": alive, "dead": dead}

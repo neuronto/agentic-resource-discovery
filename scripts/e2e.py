@@ -1979,6 +1979,68 @@ def t_every_search_shortcut_returns_something():
     assert not empty, f"these hints lead to an empty page: {empty}"
 
 
+def t_no_background_job_holds_the_write_lock_across_io():
+    """SQLite takes exactly one writer, so a transaction left open across a
+    network call blocks every other write for the length of that call.
+
+    This is not theoretical. On 2026-09-01 `from_upstreams` committed once per
+    upstream rather than once per query, holding the lock for the eight minutes
+    that stage runs. A real publisher submitting their MCP server in that window
+    was refused three times in five minutes with "index is mid-maintenance",
+    and our own test suite saw the same 503. `liveness.sweep` and
+    `crawl_domains` had the same shape.
+
+    Checked statically, because reproducing it needs an eight minute crawl and
+    the symptom is a rare user hitting a rare window.
+    """
+    import ast as _ast
+    import os as _os
+
+    root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "app")
+    writes = {"upsert_entry", "mark_liveness", "mark_introspection", "replace_tools",
+              "log_search", "add_private_entry"}
+    verbs = ("insert", "update", "delete", "replace into", "create ", "drop ")
+    offences = []
+
+    for fname in ("ingest.py", "liveness.py", "tools_index.py"):
+        path = _os.path.join(root, fname)
+        tree = _ast.parse(open(path, encoding="utf-8").read())
+        for fn in _ast.walk(tree):
+            if not isinstance(fn, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            marks = []
+            for node in _ast.walk(fn):
+                if isinstance(node, _ast.Await):
+                    marks.append((node.lineno, "await"))
+                elif isinstance(node, _ast.Call):
+                    f = node.func
+                    name = getattr(f, "attr", None) or getattr(f, "id", None)
+                    if name == "commit":
+                        marks.append((node.lineno, "commit"))
+                    elif name in writes:
+                        marks.append((node.lineno, "write"))
+                    elif name in ("execute", "executemany") and node.args:
+                        arg = node.args[0]
+                        sql = arg.value.lower() if isinstance(arg, _ast.Constant) and \
+                            isinstance(arg.value, str) else ""
+                        if any(v in sql for v in verbs):
+                            marks.append((node.lineno, "write"))
+            marks.sort()
+            open_write = None
+            for line, kind in marks:
+                if kind == "write":
+                    open_write = open_write or line
+                elif kind == "commit":
+                    open_write = None
+                elif kind == "await" and open_write is not None:
+                    offences.append(f"{fname}:{fn.name}: writes at line {open_write}, "
+                                    f"then awaits at line {line} with no commit between")
+                    open_write = None
+
+    assert not offences, ("a write transaction is held across network I/O:\n   "
+                          + "\n   ".join(offences))
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
