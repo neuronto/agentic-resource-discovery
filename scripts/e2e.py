@@ -774,6 +774,40 @@ def t_navigation_is_consistent_sitewide():
         assert not missing, f"{path} does not link: {missing}"
 
 
+def t_submit_accepts_a_bare_mcp_endpoint():
+    """Most MCP developers have no manifest. They must still be able to submit."""
+    s, d = post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=90)
+    assert s == 200, f"{s} {d}"
+    assert d["status"] == "indexed", d
+    assert d["verified_tools"] > 0, "no tools read from the server"
+    assert isinstance(d.get("tools"), list) and d["tools"], "tool names not returned"
+    assert d["identifier"].startswith("urn:air:"), d["identifier"]
+
+
+def t_submit_rejects_a_url_that_is_not_mcp():
+    s, d = post("/submit", {"endpoint": "https://example.com/"}, timeout=60)
+    assert s == 404, f"{s} {d}"
+    assert d["status"] == "not_an_mcp_server"
+    assert "handshake" in d["detail"].lower()
+
+
+def t_submitted_server_becomes_searchable():
+    """Indexing is worthless if the thing cannot then be found."""
+    s, d = post("/tools", {"query": {"text": "read wiki structure"}, "limit": 5})
+    assert s == 200, s
+    names = [t["tool"] for t in d["results"]]
+    assert any("wiki" in n.lower() for n in names), \
+        f"submitted server's tools are not searchable: {names}"
+
+
+def t_submit_page_documents_both_routes():
+    s, h = _html("/submit")
+    low = h.lower()
+    assert "only have an mcp server" in low, "MCP-only route not documented"
+    assert '"endpoint"' in h, "endpoint payload not shown"
+    assert "skills" in low, "does not explain how skills get listed"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
