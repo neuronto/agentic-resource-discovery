@@ -169,6 +169,16 @@ the path v0.91 renamed. Of 178 publishers our crawler has found, **157 serve the
 `ai-catalog.json` and only 14 serve `ard.json`**, which is why the tracker checks both:
 measuring the path rather than the practice gets the answer wrong.
 
+## The open dataset
+
+The verified tool corpus is published as an open dataset, CC BY 4.0:
+**[huggingface.co/datasets/AgenticResourceDiscovery/verified-mcp-tools](https://huggingface.co/datasets/AgenticResourceDiscovery/verified-mcp-tools)**
+
+`tools.jsonl` carries all 31,411 verified tools with their input schemas, `servers.jsonl`
+carries 7,708 introspection results including the auth requirement and failure kind. It
+exists because tool-retrieval research (ToolRet, ACL Findings 2025) has been benchmarked on
+assembled corpora rather than the live ecosystem, and this is the live ecosystem.
+
 ## The badge
 
 If your MCP server is in the index, a badge states what we verified: how many tools your
