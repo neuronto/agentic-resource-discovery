@@ -467,7 +467,12 @@ list above answers, the result is empty rather than plausible.</p>
 <li>Save it as <code>/.well-known/ard.json</code> on your domain, and as <code>/.well-known/ai-catalog.json</code> too, since most deployed consumers still check the older name.</li>
 <li>Edit the descriptions and add <code>representativeQueries</code> in the words someone would actually ask with. That field is what every registry indexes on.</li>
 <li>Until you serve your own, the generated copy is hosted at <code>https://neuronto.com/m/&lt;your-domain&gt;.json</code>, with a response header saying it was generated rather than authored by you.</li>
-<li>Run the <a href="/console">free audit</a> to see which registries return you.</li>
+<li><b>Tell a registry it exists.</b> A manifest nobody has fetched is a manifest no agent
+can find, and crawling is on someone else's schedule.
+<code>curl -X POST https://neuronto.com/submit -H 'content-type: application/json' -d '{"domain":"example.com"}'</code>
+fetches it from your domain and indexes it in the same request. <a href="/submit">What each
+registry accepts</a>, including the ones that accept nothing.</li>
+<li>Then run the <a href="/console">free audit</a> to see which registries return you.</li>
 </ol>
 <p>The same thing from a terminal: <code>curl -X POST https://neuronto.com/manifest/build -H 'content-type: application/json' -d '{"domain":"example.com"}'</code>, or <code>pip install ard-publish</code> and <code>ard-publish generate example.com</code>.</p>
 <script>

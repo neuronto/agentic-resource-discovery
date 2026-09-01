@@ -509,6 +509,21 @@ returns you, and registries choose their own crawl frontiers. One of them only c
 domain for <b>your own representative queries</b>. The <a href="/console">web console</a> does the
 same without installing anything.</p>
 
+<h2>Step 4, tell a registry it exists</h2>
+<p>Step 3 measures whether a registry has seen your manifest. This is how you make one see
+it, and it is the step almost everyone skips. Crawling is not a plan you control: registries
+crawl domain lists they chose, and our own crawl of 375,958 domains found exactly one new
+publisher in its last 63,000. If you wait to be discovered, you may wait a long time.</p>
+<pre><code>curl -X POST https://neuronto.com/submit \
+  -H 'content-type: application/json' \
+  -d '{"domain":"example.com"}'</code></pre>
+<p>Both well-known paths are fetched from your domain and whatever parses is indexed in the
+same request, so a submission cannot list anything you do not actually publish. If you have
+an MCP server and never wrote a manifest, submit the endpoint instead and skip steps 1 and 2
+entirely: it has to complete a handshake, and its own tool list is read back.</p>
+<p>Not every registry accepts submissions. <a href="/submit">The comparison</a> lists what
+each public ARD registry takes, including the four that have no submission path at all and
+will reach you on their own schedule or not at all.</p>
 <h2>The mistake that costs you everything</h2>
 <p>Leaving out <code>representativeQueries</code>.</p>
 <p>It is the field registries build their semantic index from. Without it your entry is a valid
