@@ -76,7 +76,7 @@ returns them however the publisher spelled the type.
 **A verified tool index, not just a server index.** Every other registry stores a server
 name and whatever prose its publisher wrote. Neuronto handshakes with each indexed MCP
 endpoint and reads its `tools/list`, so the index holds the real tool names and input
-schemas, the thing an agent actually has to match on. Currently **31,411 verified tools
+schemas, the thing an agent actually has to match on. Currently **32,183 verified tools
 across 2,223 servers**, plus **1,918 endpoints recorded as requiring credentials**, which
 no other registry reports. Introspection is read only: a tool is never called.
 
@@ -89,6 +89,20 @@ nothing if it is unavailable, so the lexical fast path is never slowed by it.
 in ranking. Registries built on self-published manifests accumulate dead links
 quickly; serving them is the fastest way to become the index nobody trusts. Entries
 are demoted rather than deleted, because services come back.
+
+**Manifests generated from evidence, not from a form.** Most domains will never author a
+manifest by hand. They already run an MCP server, or serve an OpenAPI document, or publish
+`llms.txt`, and the manifest is a restatement of things a crawler can already find. Neuronto
+probes a domain, emits an entry only for each resource that actually answered, records what
+proved it, and hosts the result. Nothing is inferred, because a generated manifest that
+guesses would put a claim on somebody's domain that they never made and cannot defend.
+
+**A private half of the index.** The list of internal services an organisation's own agents
+may call usually lives in a system prompt, where nothing can search it and nobody can audit
+it. A domain that proves ownership by DNS can register those services, and one query then
+returns internal and public results together, each labelled with which it is. Private
+entries are held in separate storage from the public index rather than behind a flag, so no
+public search, count or page can reach them by construction.
 
 **Ranking that separates.** A relevance score is only useful if the gap between the
 first and fifth result is legible. Scores are scaled to preserve real separation
@@ -127,11 +141,23 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /search` | Ranked results. `federation`: `auto` (default), `referrals`, `none`. |
 | `POST /explore` | Facet counts over the index. |
 | `GET /agents` | Deterministic paginated listing, for browsing rather than ranking. |
-| `POST /mcp` | The same search as an MCP tool. |
+| `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. |
+| `POST /tools`, `GET /tools?q=` | Tool level search over verified tools rather than servers. |
+| `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. |
+| `POST /audit` | Publishing report: discovery, conformance, coverage, competition. |
+| `POST /manifest/build` | Generate a manifest for a domain from resources fetched there. |
+| `GET /m/{host}.json` | That generated manifest, hosted. |
+| `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. |
+| `POST /private/entries` | Register internal services. Key required. |
+| `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
+| `GET /.well-known/ard.json` | Our own publisher manifest. |
+| `GET /openapi.json` | OpenAPI 3.1 for everything above. |
 
-No key and no signup. Relevance scores are semantic only and are never a trust,
-compliance or safety rating, the specification is explicit that trust evaluation is
-decoupled from discovery.
+No key and no signup for anything that reads the public index. A key exists only to admit a
+verified domain's own private entries, and is issued only against a DNS proof of ownership.
+
+Relevance scores are semantic only and are never a trust, compliance or safety rating, the
+specification is explicit that trust evaluation is decoupled from discovery.
 
 ## Searching tools instead of servers
 
@@ -143,8 +169,10 @@ curl -s 'https://neuronto.com/tools?q=extract+text+from+a+pdf&limit=5'
 ```
 
 Every tool returned was read from that server's own `tools/list`. The same search is
-available to agents as the MCP tool `find_tool`, alongside `find_resource` and
-`registry_stats`.
+available to agents as the MCP tool `find_tool`, alongside `find_resource`,
+`registry_stats` and `publish_resource`. Only `publish_resource` writes, and it is the only
+one declaring `readOnlyHint: false`, so a client can tell from the tool list alone which
+call has an effect.
 
 ## Measuring whether any of this works
 
@@ -194,12 +222,107 @@ yet? Publish a manifest and the crawler will find you, or run the
 
 ## Publishing your own resources
 
-Serve a manifest at `/.well-known/ard.json` on your domain describing what you offer.
-Neuronto's crawler picks it up; there is no submission form and no allowlist.
+Four ways in, in ascending order of effort. There is no allowlist and no signup for any
+of them.
+
+**You already run an MCP server.** Submit the endpoint. Neuronto completes an `initialize`
+handshake and reads the server's own `tools/list`, which is stronger evidence than a
+manifest claim because the server answered for itself.
+
+```bash
+curl -X POST https://neuronto.com/submit \
+  -H 'content-type: application/json' \
+  -d '{"endpoint":"https://example.com/mcp"}'
+```
+
+**You are working inside an agent.** The same thing as an MCP tool, so a resource can be
+listed from inside a conversation without leaving it.
+
+```json
+{"method":"tools/call","params":{"name":"publish_resource",
+ "arguments":{"endpoint":"https://example.com/mcp"}}}
+```
+
+It verifies rather than trusts, exactly as the HTTP route does, and calls that route rather
+than reimplementing it so the two cannot drift apart.
+
+**You have no manifest and do not want to write one.** Ask for one to be generated from
+what your domain already exposes, and either copy it or link it.
+
+```bash
+curl -X POST https://neuronto.com/manifest/build \
+  -H 'content-type: application/json' -d '{"domain":"example.com"}'
+```
+
+Only resources that actually answered become entries, and each carries the evidence that
+produced it. The hosted copy at `https://neuronto.com/m/example.com.json` says in its own
+response headers that it was generated rather than authored by the domain owner.
+
+**You have a manifest.** Serve it at `/.well-known/ard.json` and submit the domain, or wait
+for the crawler.
+
+```bash
+curl -X POST https://neuronto.com/submit \
+  -H 'content-type: application/json' -d '{"domain":"example.com"}'
+```
+
+Serve it at `/.well-known/ai-catalog.json` as well. Version 0.91 of the specification
+renamed the file, but the deployed base has not moved: of the ARD publishers verified so
+far, the large majority still serve only the older path, so a consumer that checks one name
+misses most of the ecosystem.
 
 Include `representativeQueries` on every entry. It is the term registries build their
 semantic index from, and an entry without it is a valid catalogue entry that no
 search will ever return.
+
+### Checking whether it worked
+
+```bash
+curl -X POST https://neuronto.com/audit \
+  -H 'content-type: application/json' -d '{"domain":"example.com"}'
+```
+
+Reports whether the manifest is reachable on each of the four discovery paths, whether it
+satisfies the specification entry by entry, **which registries actually return you**, and
+**who is returned instead of you** for the queries you asked to be found for, with what
+those entries have that you may not. Free, no signup. There is a browser version at
+[/console](https://neuronto.com/console).
+
+## Private entries
+
+An organisation can register the internal services its own agents may call, and search
+across public and internal resources in one query.
+
+```bash
+# 1. ask for the proof record, publish it as a TXT record at your apex
+curl -X POST https://neuronto.com/claim \
+  -H 'content-type: application/json' -d '{"domain":"example.com"}'
+
+# 2. verify, which returns an API key
+curl -X POST https://neuronto.com/claim/verify \
+  -H 'content-type: application/json' -d '{"domain":"example.com"}'
+
+# 3. register an internal service
+curl -X POST https://neuronto.com/private/entries \
+  -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"entry":{"displayName":"Staff Directory","url":"https://internal/mcp",
+       "description":"Look up an employee record by name or badge number.",
+       "representativeQueries":["look up an employee record"]}}'
+
+# 4. the same key on search admits them, alongside public results
+curl -X POST https://neuronto.com/search \
+  -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"query":{"text":"look up an employee record"}}'
+```
+
+The proof value is derived from the domain and never changes, so asking again does not
+invalidate a record already published. It is read over DNS over HTTPS, so it verifies as
+soon as the authoritative zone serves it. Verification is the only thing that issues a key.
+
+Every result says whether it came from the public index or from your own entries. Private
+entries are never ranked against public ones by corpus statistics, because a single tenant's
+index is too small for those statistics to mean anything; they are placed by how much of the
+query their own text accounts for, which means the same thing at any size.
 
 ## Specification
 
