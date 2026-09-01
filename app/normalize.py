@@ -116,13 +116,32 @@ CONFORMANT = {
 }
 
 # The spelling we emit for each family when asked for a canonical form.
+# One canonical media type per family, so preferred_type() never returns None
+# for a family we actually index. An incomplete table here was not obviously
+# broken: callers do `preferred_type(kind) or kind`, and the bare family name
+# then round-tripped through media_family by substring accident, which held for
+# "plugin" and "webmcp" and failed silently for "agent" and "doc", both of which
+# resolved to "other".
 _PREFERRED = {
     "mcp-server": "application/mcp-server-card+json",
     "a2a-agent":  "application/a2a-agent-card+json",
+    "agent":      "application/agent-manifest+json",
     "skill":      "application/agent-skills+gzip",
     "catalog":    "application/ai-catalog+json",
     "registry":   "application/ai-registry+json",
+    "openapi":    "application/vnd.oai.openapi+json",
+    "webmcp":     "application/webmcp-tools+json",
+    "plugin":     "application/ai-plugin+json",
+    "graphql":    "application/graphql+json",
+    "dataset":    "application/dataset+json",
+    "package":    "application/vnd.npm.package+json",
+    "doc":        "text/markdown",
 }
+
+# Every family we recognise. A caller may legitimately pass one of these instead
+# of a media type, and it must resolve to itself rather than to whatever the
+# substring rules happen to say.
+FAMILIES: frozenset[str] = frozenset(list(_FAMILIES) + ["other"])
 
 
 def media_family(media_type: object | None) -> str:
@@ -138,6 +157,10 @@ def media_family(media_type: object | None) -> str:
         media_type = str(media_type)
     t = media_type.strip().lower()
     t = t.split(";")[0].strip()          # drop parameters: profile=, charset=
+    # A family name is a legal input, and must map to itself exactly. Leaving
+    # this to the substring rules made kind="agent" resolve to "other".
+    if t in FAMILIES:
+        return t
     if t in _LOOKUP:
         return _LOOKUP[t]
     # Unseen spelling: fall back to substring shape rather than giving up, so a

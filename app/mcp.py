@@ -40,10 +40,15 @@ TOOLS = [
                           "description": "The task, in plain language. For example: "
                                          "'scrape a website behind cloudflare'."},
                 "kind": {"type": "string",
-                         "enum": ["any", "mcp-server", "skill", "a2a-agent", "registry", "openapi"],
-                         "description": "Restrict to one family of resource. Matching is "
-                                        "normalised, so 'mcp-server' finds them under all "
-                                        "media types in circulation.",
+                         "enum": ["any", "mcp-server", "skill", "a2a-agent", "agent",
+                                  "webmcp", "plugin", "openapi", "graphql", "dataset",
+                                  "package", "doc", "catalog", "registry"],
+                         "description": (
+                             "Restrict to one family of resource. Matching is normalised, "
+                             "so 'mcp-server' finds them under every media type in "
+                             "circulation, and 'a2a-agent' or 'agent' both reach A2A cards "
+                             "and ACP, OASF and AgentFacts descriptors. 'webmcp' is "
+                             "browser-page tools, which are not callable servers."),
                          "default": "any"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 8},
                 "federate": {"type": "boolean", "default": True,

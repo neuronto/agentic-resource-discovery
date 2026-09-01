@@ -832,11 +832,121 @@ def t_media_type_normalisation_is_universal():
 def t_agent_filter_spans_both_agent_families():
     """A2A cards and ACP/OASF/AgentFacts descriptors are different but a caller
     asking for agents means both."""
-    s, d = post("/search", {"query": {"text": "agent"},
-                            "filter": {"type": ["application/a2a-agent-card+json"]},
+    s, d = post("/search", {"query": {"text": "agent",
+                                      "filter": {"type": ["application/a2a-agent-card+json"]}},
                             "federation": "none", "pageSize": 5})
     assert s == 200, s
     assert d["results"], "agent type filter returned nothing"
+
+
+def t_every_family_filters_end_to_end():
+    """Each family must be reachable through the MCP tool and return its own kind.
+
+    The taxonomy touches five places: the classifier, the preferred-type table,
+    the MCP kind enum, the search filter and the homepage. An incomplete table
+    in any one of them fails silently, which is how kind="agent" and kind="doc"
+    came to resolve to "other" while every surface still returned 200.
+    """
+    s, st = get("/stats")
+    fams = [k for k, v in (st.get("families") or {}).items() if k and v]
+    assert len(fams) >= 10, f"only {len(fams)} families in the index"
+
+    s, d = _rpc("tools/list")
+    tool = next(t for t in d["result"]["tools"] if t["name"] == "find_resource")
+    enum = set(tool["inputSchema"]["properties"]["kind"]["enum"])
+    missing = [f for f in fams if f not in enum and f != "other"]
+    assert not missing, f"families indexed but not offered by the MCP tool: {missing}"
+
+    # and the filter must actually restrict
+    s, res = post("/search", {"query": {"text": "api",
+                                        "filter": {"type": ["application/graphql+json"]}},
+                              "federation": "none", "pageSize": 5})
+    assert s == 200, s
+    for r in res["results"]:
+        t = (r.get("type") or "").lower()
+        assert "graphql" in t, f"graphql filter returned {t}"
+
+
+def t_family_names_round_trip():
+    """A bare family name is a legal filter value and must mean itself."""
+    for fam, must in (("mcp-server", "mcp"), ("skill", "skill"),
+                      ("openapi", "openapi"), ("graphql", "graphql")):
+        s, d = post("/search", {"query": {"text": "a", "filter": {"type": [fam]}},
+                                "federation": "none", "pageSize": 3})
+        assert s == 200, f"{fam}: {s}"
+        for r in d["results"]:
+            t = (r.get("type") or "").lower()
+            assert must in t or t == "", f"filter {fam!r} returned type {t!r}"
+
+
+def t_filter_at_the_top_level_is_honoured_not_ignored():
+    """A misplaced filter must not silently return everything.
+
+    The spec nests filter inside query. A caller putting it at the top level got
+    unfiltered results with no error, which is the worst of both options.
+    """
+    s, d = post("/search", {"query": {"text": "api"},
+                            "filter": {"type": ["application/graphql+json"]},
+                            "federation": "none", "pageSize": 5})
+    assert s == 200, s
+    for r in d["results"]:
+        t = (r.get("type") or "").lower()
+        assert "graphql" in t, f"top-level filter ignored, returned {t}"
+
+
+def t_social_preview_is_complete_on_every_page():
+    """A shared link with no image renders as a grey box nobody clicks.
+
+    The homepage carries its own head, separate from generated pages, and had
+    no og:image at all while declaring twitter:card=summary_large_image. Facebook
+    fell back to scraping the page and blew up the 32px favicon mark; LinkedIn
+    fell back to the bare domain.
+    """
+    import re as _re
+    for path in ("/", "/what-is-ard", "/publish", "/console",
+                 "/tools/", "/ard-publishers", "/submit", "/published"):
+        s, h = _html(path)
+        assert s == 200, f"{path} -> {s}"
+        for tag in ('property="og:title"', 'property="og:description"',
+                    'property="og:image"', 'property="og:url"',
+                    'name="twitter:card"'):
+            assert tag in h, f"{path} missing {tag}"
+        img = _re.search(r'og:image" content="([^"]+)"', h).group(1)
+        assert img.startswith("https://"), f"{path} og:image is not absolute: {img}"
+        # a large-image card with no image is worse than no card
+        if 'content="summary_large_image"' in h:
+            assert 'name="twitter:image"' in h, f"{path} claims a large card with no image"
+
+
+def t_no_dashes_in_anything_a_crawler_reads():
+    """Rule 4 applies hardest where it is most visible: the preview card."""
+    import re as _re
+    for path in ("/", "/what-is-ard", "/tools/", "/ard-publishers", "/published"):
+        s, h = _html(path)
+        head = h[:h.find("</head>")] if "</head>" in h else h[:4000]
+        bad = _re.findall(r"[\u2014\u2013]", head)
+        assert not bad, f"{path} head contains {len(bad)} em/en dashes"
+
+
+def t_preview_image_is_reachable_and_large_enough():
+    """Facebook and LinkedIn ignore images under 200px and prefer 1200x630+."""
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/img/discovery.jpg", headers={"User-Agent": "facebookexternalhit/1.1"}),
+        timeout=30)
+    assert r.status == 200, r.status
+    data = r.read()
+    assert len(data) > 20000, f"preview image is only {len(data)} bytes"
+    import struct
+    i, w, hgt = 2, 0, 0
+    while i < len(data) - 9:
+        if data[i] != 0xFF:
+            break
+        m = data[i + 1]
+        if m in (0xC0, 0xC2):
+            hgt, w = struct.unpack(">HH", data[i + 5:i + 9])
+            break
+        i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
+    assert w >= 1200 and hgt >= 600, f"preview image is {w}x{hgt}, too small for a large card"
 
 
 def main():
