@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
+import threading
 import urllib.parse
 import time
 from pathlib import Path
@@ -87,17 +89,88 @@ _conn: sqlite3.Connection | None = None
 WEB = Path(__file__).resolve().parent.parent / "web"
 
 
+_dbtls = threading.local()
+_db_init_lock = threading.Lock()
+_db_ready = False
+
+
 def db() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
-        _conn = store.connect()
-        store.init(_conn)
-    return _conn
+    """A connection for this thread.
+
+    One shared connection was the original design, and it is the wrong one as
+    soon as anything runs in a threadpool: SQLite serialises every statement on
+    a connection behind its own mutex, so readers queue behind each other even
+    though WAL was built so they would not have to. A connection per thread is
+    cheap, and read-only handlers then genuinely run in parallel.
+
+    Schema setup still happens exactly once, under a lock, on the first
+    connection any thread opens.
+    """
+    global _db_ready
+    c = getattr(_dbtls, "conn", None)
+    if c is not None:
+        return c
+    c = store.connect()
+    with _db_init_lock:
+        if not _db_ready:
+            store.init(c)
+            _db_ready = True
+    _dbtls.conn = c
+    return c
+
+
+# The expensive pages, with the TTL each is served at. Warmed on startup and
+# refreshed on a timer, so the first visitor after a deploy is never the one who
+# pays for a 22 second build.
+def _warmable():
+    return [
+        ("tools-index", 1800, lambda: catalog.render_index(db())),
+        ("pubs-index",  1800, lambda: catalog.render_publishers_index(db())),
+        ("published",   3600, lambda: catalog.render_published(db())),
+        ("adoption-html", 3600, lambda: catalog.render_adoption(adoption.report(db()))),
+    ] + [(f"cat-{slug}", 1800, (lambda sl: lambda: catalog.render_category(db(), sl))(slug))
+         for slug in sorted(catalog.published(db()))]
+
+
+def _warm_all() -> None:
+    """Build anything missing or stale. Runs in a thread, never on a request.
+
+    One worker does this for all of them. Between renders it yields briefly:
+    warming is background work and must never be the reason a real request
+    waits, which on a two core box it otherwise is.
+    """
+    if not render.claim_warm(f"pid{os.getpid()}"):
+        return
+    built = 0
+    try:
+        for key, ttl, build in _warmable():
+            try:
+                if render.warm(key, ttl, build):
+                    built += 1
+                    time.sleep(0.25)
+            except Exception:
+                continue
+    finally:
+        render.release_warm()
+    if built:
+        print(f"page cache: warmed {built} page(s)", flush=True)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     db()
+    # In a thread: warming touches every tool row and would otherwise block the
+    # event loop, and therefore every request, for the whole of startup.
+    threading.Thread(target=_warm_all, name="page-warm", daemon=True).start()
+
+    async def _refresher():
+        # Rebuilds ahead of expiry so the stale-while-revalidate path is a
+        # fallback rather than the normal case.
+        while True:
+            await asyncio.sleep(600)
+            await asyncio.to_thread(_warm_all)
+
+    asyncio.ensure_future(_refresher())
 
 
 @app.middleware("http")
@@ -186,7 +259,7 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
 
 
 @app.post("/explore")
-async def explore_endpoint(body: dict) -> JSONResponse:
+def explore_endpoint(body: dict) -> JSONResponse:
     """POST /explore - optional introspection over facets (§5.3.3).
 
     Explore does not federate; it is scoped to this registry's own index.
@@ -241,7 +314,7 @@ async def explore_endpoint(body: dict) -> JSONResponse:
 
 
 @app.get("/agents")
-async def agents_endpoint(
+def agents_endpoint(
     filter: str | None = Query(None),
     orderBy: str | None = Query(None),
     pageSize: int = Query(20, ge=1, le=100),
@@ -355,13 +428,13 @@ def _manifest() -> dict:
 CACHE = {"Cache-Control": "public, max-age=900"}
 
 @app.get("/.well-known/ard.json", include_in_schema=False)
-async def ard_json(): return JSONResponse(_manifest(), headers=CACHE)
+def ard_json(): return JSONResponse(_manifest(), headers=CACHE)
 
 @app.get("/.well-known/ai-catalog.json", include_in_schema=False)
-async def ai_catalog(): return JSONResponse(_manifest(), headers=CACHE)
+def ai_catalog(): return JSONResponse(_manifest(), headers=CACHE)
 
 @app.get("/.well-known/did.json", include_in_schema=False)
-async def did_json():
+def did_json():
     B = config.PUBLIC_BASE
     return JSONResponse({
         "@context": ["https://www.w3.org/ns/did/v1"],
@@ -376,12 +449,12 @@ async def did_json():
         ]}, headers=CACHE)
 
 @app.get("/.well-known/mcp/server-card.json", include_in_schema=False)
-async def mcp_card():
+def mcp_card():
     from .mcp import server_card
     return JSONResponse(server_card(), headers=CACHE)
 
 @app.get("/robots.txt", include_in_schema=False)
-async def robots():
+def robots():
     B = config.PUBLIC_BASE
     # Social crawlers named explicitly. They fetch a URL to build the preview
     # card when a link is shared, and several of them do not follow the wildcard
@@ -399,7 +472,7 @@ async def robots():
                              headers={"Cache-Control": "public, max-age=300"})
 
 @app.get("/sitemap.xml", include_in_schema=False)
-async def sitemap():
+def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
             "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
@@ -422,7 +495,7 @@ async def sitemap():
     return Response(body, media_type="application/xml")
 
 @app.get("/llms.txt", include_in_schema=False)
-async def llms_txt():
+def llms_txt():
     B = config.PUBLIC_BASE
     c = store.counts(db())
     return PlainTextResponse(f"""# Neuronto
@@ -491,7 +564,7 @@ no allowlist.
 # ─────────────────────────── Operations ─────────────────────────────────────
 
 @app.get("/health")
-async def health():
+def health():
     c = store.counts(db())
     t = store.tool_counts(db())
     return {"status": "ok", "entries": c["entries"], "publishers": c["publishers"],
@@ -499,7 +572,7 @@ async def health():
             "verified_tools": t["tools"], "servers_introspected": t["introspected"]}
 
 @app.get("/stats")
-async def stats(days: int = Query(30, ge=7, le=90)):
+def stats(days: int = Query(30, ge=7, le=90)):
     conn = db()
     c = store.counts(conn)
     regs = [dict(r) for r in conn.execute("SELECT * FROM registries")]
@@ -604,9 +677,15 @@ def _render_home() -> str:
                          f'{_fmt(c["entries"])} entries · {_fmt(c["publishers"])} publishers'))
 
 
+# The homepage, the submit page and the console are the most-requested HTML we
+# serve and none of them carried a Cache-Control header, so no browser, proxy or
+# CDN could hold any of them. They are read-only and change a few times a day.
+PAGE_CACHE = {"Cache-Control": "public, max-age=900"}
+
+
 @app.get("/", include_in_schema=False)
 async def home():
-    return HTMLResponse(_render_home())
+    return HTMLResponse(_render_home(), headers=PAGE_CACHE)
 
 @app.get("/about", include_in_schema=False)
 @app.get("/registry", include_in_schema=False)
@@ -650,7 +729,7 @@ _MARK = (WEB / "mark.svg")
 
 @app.get("/favicon.svg", include_in_schema=False)
 @app.get("/icon.svg", include_in_schema=False)
-async def favicon_svg():
+def favicon_svg():
     if _MARK.exists():
         return Response(_MARK.read_text(encoding="utf-8"), media_type="image/svg+xml",
                         headers={"Cache-Control": "public, max-age=604800"})
@@ -658,7 +737,7 @@ async def favicon_svg():
 
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon_ico():
+def favicon_ico():
     # Browsers still probe /favicon.ico. Point them at the vector rather than
     # shipping a bitmap that would only ever look worse.
     return Response(status_code=301, headers={"Location": "/favicon.svg"})
@@ -712,7 +791,7 @@ async def audit_endpoint(body: dict) -> JSONResponse:
 
 
 @app.get("/metrics.json", include_in_schema=False)
-async def metrics_json():
+def metrics_json():
     """Public operating numbers, so our claims can be checked rather than taken.
 
     Every figure we publish anywhere is derived from these. Exposing them is the
@@ -754,7 +833,7 @@ async def metrics_json():
 
 
 @app.get("/demand")
-async def demand_endpoint(domain: str = Query(..., min_length=3),
+def demand_endpoint(domain: str = Query(..., min_length=3),
                           days: int = Query(30, ge=1, le=365),
                           limit: int = Query(25, ge=1, le=200)) -> JSONResponse:
     """Did anyone come looking, and what did they ask?
@@ -849,7 +928,7 @@ async def manifest_build(body: dict) -> JSONResponse:
 
 
 @app.get("/m/{host}.json", include_in_schema=False)
-async def hosted_manifest(host: str):
+def hosted_manifest(host: str):
     h = _host_arg(host)
     if not h:
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -866,7 +945,7 @@ async def hosted_manifest(host: str):
 
 
 @app.post("/claim")
-async def claim_start(body: dict) -> JSONResponse:
+def claim_start(body: dict) -> JSONResponse:
     """Begin proving you own a domain."""
     host = _host_arg((body or {}).get("domain"))
     if not host:
@@ -910,7 +989,7 @@ async def claim_verify(body: dict) -> JSONResponse:
 
 
 @app.post("/private/entries")
-async def private_add(body: dict, request: Request) -> JSONResponse:
+def private_add(body: dict, request: Request) -> JSONResponse:
     """Register an internal service, visible only to this domain's key.
 
     An organisation's list of approved internal services usually lives in a
@@ -939,7 +1018,7 @@ async def private_add(body: dict, request: Request) -> JSONResponse:
 
 
 @app.get("/private/entries")
-async def private_list(request: Request) -> JSONResponse:
+def private_list(request: Request) -> JSONResponse:
     key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
     conn = db()
     owner = publisher.domain_for_key(conn, key)
@@ -950,7 +1029,7 @@ async def private_list(request: Request) -> JSONResponse:
 
 
 @app.delete("/private/entries")
-async def private_delete(body: dict, request: Request) -> JSONResponse:
+def private_delete(body: dict, request: Request) -> JSONResponse:
     """Remove an internal service. Scoped to the caller's own domain."""
     key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
     conn = db()
@@ -969,11 +1048,11 @@ async def private_delete(body: dict, request: Request) -> JSONResponse:
 
 
 @app.get("/console", include_in_schema=False)
-async def console_page():
+def console_page():
     f = WEB / "console.html"
     if f.exists():
-        return HTMLResponse(f.read_text(encoding="utf-8"))
-    return HTMLResponse(_render_home())
+        return HTMLResponse(f.read_text(encoding="utf-8"), headers=PAGE_CACHE)
+    return HTMLResponse(_render_home(), headers=PAGE_CACHE)
 
 
 # IndexNow. Bing, Yandex, Seznam and Naver accept a push rather than waiting to
@@ -984,7 +1063,7 @@ INDEXNOW_KEY = "888578862bc02c46e40d0914ace6f376"
 
 
 @app.get("/" + INDEXNOW_KEY + ".txt", include_in_schema=False)
-async def indexnow_key_file():
+def indexnow_key_file():
     """Ownership is proved by serving the key at the site root."""
     return PlainTextResponse(INDEXNOW_KEY)
 
@@ -1003,13 +1082,13 @@ GUIDES = {
 
 
 @app.get("/registries", include_in_schema=False)
-async def registries_redirect():
+def registries_redirect():
     # The comparison moved to a name that says what it is.
     return RedirectResponse("/ard-registries", status_code=301)
 
 
 @app.get("/img/{name}", include_in_schema=False)
-async def image(name: str):
+def image(name: str):
     f = WEB / "img" / name
     if "/" in name or ".." in name or not f.exists():
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -1070,13 +1149,13 @@ async def tools_get(q: str | None = Query(None),
 
 
 @app.get("/tools/", include_in_schema=False)
-async def tools_index_slash():
+def tools_index_slash():
     html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
 
 
 @app.get("/tools/{slug}", include_in_schema=False)
-async def tools_category(slug: str):
+def tools_category(slug: str):
     if slug not in catalog.published(db()):
         return JSONResponse(status_code=404, content={"error": "not_found"})
     html_ = render.cached(f"cat-{slug}", 1800,
@@ -1121,7 +1200,7 @@ def _wants_html(request: Request) -> bool:
 
 
 @app.get("/bench")
-async def bench_endpoint(request: Request):
+def bench_endpoint(request: Request):
     got = bench.latest(db())
     if not got:
         return JSONResponse(status_code=404,
@@ -1141,7 +1220,7 @@ async def bench_endpoint(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/adoption")
-async def adoption_endpoint(request: Request):
+def adoption_endpoint(request: Request):
     rep = adoption.report(db())
     if _wants_html(request):
         html_ = render.cached("adoption-html", 3600,
@@ -1159,7 +1238,7 @@ async def adoption_endpoint(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/badge/{publisher}.svg", include_in_schema=False)
-async def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|dark)$")) -> Response:
+def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|dark)$")) -> Response:
     pub = publisher.strip().lower()
     # A hostname or reverse-DNS publisher id, nothing else. This is a public,
     # unauthenticated SVG generator; without the allowlist it is a text-echo
@@ -1178,7 +1257,7 @@ async def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|l
 
 @app.get("/badge", include_in_schema=False)
 @app.get("/badge/", include_in_schema=False)
-async def badge_help(request: Request, domain: str = Query("", max_length=100)):
+def badge_help(request: Request, domain: str = Query("", max_length=100)):
     """The badge, and the snippet for it, for whoever asks."""
     if _wants_html(request):
         return HTMLResponse(catalog.render_badge_page(db(), domain),
@@ -1198,14 +1277,14 @@ async def badge_help(request: Request, domain: str = Query("", max_length=100)):
 
 @app.get("/ard-publishers", include_in_schema=False)
 @app.get("/ard-publishers/", include_in_schema=False)
-async def publishers_index():
+def publishers_index():
     html_ = render.cached("pubs-index", 1800,
                           lambda: catalog.render_publishers_index(db()))
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
 
 
 @app.get("/ard-publishers/{host}", include_in_schema=False)
-async def publisher_page(host: str):
+def publisher_page(host: str):
     h = host.strip().lower()
     if not h or len(h) > 100 or not all(c.isalnum() or c in ".-_" for c in h):
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -1220,17 +1299,17 @@ async def publisher_page(host: str):
 # rather than 404 or serve a duplicate.
 @app.get("/publishers", include_in_schema=False)
 @app.get("/publishers/", include_in_schema=False)
-async def publishers_moved():
+def publishers_moved():
     return RedirectResponse("/ard-publishers", status_code=301)
 
 
 @app.get("/publishers/{host}", include_in_schema=False)
-async def publisher_moved(host: str):
+def publisher_moved(host: str):
     return RedirectResponse(f"/ard-publishers/{host}", status_code=301)
 
 
 @app.get("/feed.xml", include_in_schema=False)
-async def feed():
+def feed():
     """What changed in the agentic web, as a feed.
 
     The one distribution mechanism we can run perpetually without asking anyone
@@ -1551,21 +1630,22 @@ async function go(e){{
 </script>
 """
     return HTMLResponse(render.page(
-        "Submit your domain to the ARD index",
-        "Index your Agentic Resource Discovery manifest now. We fetch it live from your "
-        "domain: no account, no allowlist, no charge.",
-        body, f"{B}/submit"))
+        "How to submit to an ARD registry",
+        "How to get listed in an Agentic Resource Discovery registry, and how each public "
+        "ARD registry takes submissions. We fetch your manifest live from your domain, or "
+        "handshake with your MCP server: no account, no allowlist, no charge.",
+        body, f"{B}/submit"), headers=PAGE_CACHE)
 
 
 @app.get("/published", include_in_schema=False)
-async def published_page():
+def published_page():
     html_ = render.cached("published", 3600, lambda: catalog.render_published(db()))
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/blog", include_in_schema=False)
 @app.get("/blog/", include_in_schema=False)
-async def blog_index():
+def blog_index():
     f = WEB / "blog" / "index.html"
     if not f.exists():
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -1574,7 +1654,7 @@ async def blog_index():
 
 
 @app.get("/blog/{slug}", include_in_schema=False)
-async def blog_post(slug: str):
+def blog_post(slug: str):
     f = WEB / "blog" / f"{slug}.html"
     if "/" in slug or ".." in slug or not f.exists():
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -1583,7 +1663,7 @@ async def blog_post(slug: str):
 
 
 @app.get("/{slug}", include_in_schema=False)
-async def guide_page(slug: str):
+def guide_page(slug: str):
     name = GUIDES.get(slug)
     if not name:
         return JSONResponse(status_code=404, content={"error": "not_found"})
