@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
+import urllib.parse
 import time
 from pathlib import Path
 from typing import Any
@@ -876,11 +878,88 @@ async def feed():
 
 @app.post("/submit")
 async def submit_endpoint(body: dict) -> JSONResponse:
-    dom = str((body or {}).get("domain") or "").strip()
+    """Two ways in, because most MCP developers have no manifest.
+
+    `{"domain": "..."}` fetches the ARD manifest and indexes everything it
+    declares. `{"endpoint": "https://.../mcp"}` takes an MCP server directly:
+    we handshake with it and read its tool list, which is stronger evidence
+    than a manifest claim because the server itself answered.
+
+    Requiring a manifest turned away anyone who had only built a server, which
+    is nearly every MCP developer. Provenance is recorded rather than blurred:
+    an entry from a manifest carries source `crawl`, one from a direct
+    submission carries `submitted`, and the two are distinguishable in the API.
+    """
+    b = body or {}
+    endpoint = str(b.get("endpoint") or b.get("mcp") or "").strip()
+    dom = str(b.get("domain") or "").strip()
+
+    # ---- direct MCP endpoint --------------------------------------------
+    if endpoint:
+        if not endpoint.startswith(("http://", "https://")) or len(endpoint) > 500:
+            return JSONResponse(status_code=400, content={
+                "error": "invalid_request",
+                "detail": 'endpoint must be an absolute http(s) URL'})
+        conn = db()
+        import httpx as _httpx
+        try:
+            async with _httpx.AsyncClient(follow_redirects=True) as c:
+                res = await tools_index.introspect_one(c, endpoint)
+        except Exception:
+            res = {"status": "error:unreachable", "tools": [], "auth": False,
+                   "server_name": None}
+        if not res["status"].startswith("ok") and res["status"] != "auth":
+            return JSONResponse(status_code=404, content={
+                "status": "not_an_mcp_server",
+                "endpoint": endpoint,
+                "detail": ("this URL did not complete an MCP initialize handshake "
+                           f"({res['status']}). Nothing was indexed."),
+            })
+        host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
+        name = res.get("server_name") or host
+        entry = {
+            "identifier": f"urn:air:{host}:mcp:{re.sub(r'[^a-z0-9-]+', '-', name.lower())[:60]}",
+            "displayName": name,
+            "type": "application/mcp-server-card+json",
+            "url": endpoint,
+            "description": (f"MCP server at {host}, verified by introspection: "
+                            f"{len(res['tools'])} tools exposed."
+                            if res["tools"] else
+                            f"MCP server at {host}. Requires credentials before listing tools."
+                            if res["auth"] else f"MCP server at {host}."),
+        }
+        try:
+            key = store.upsert_entry(conn, entry, "submitted")
+            if res["tools"]:
+                store.replace_tools(conn, key, res["tools"])
+            store.mark_introspection(conn, key, res["status"], len(res["tools"]),
+                                     res["auth"], res.get("server_name"))
+            store.mark_liveness(conn, key, True, 200, None)
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                return JSONResponse(status_code=503, headers={"Retry-After": "60"},
+                                    content={"status": "busy", "endpoint": endpoint,
+                                             "detail": "index is mid-maintenance, retry shortly"})
+            raise
+        catalog.invalidate_publishers(); render.invalidate()
+        return JSONResponse({
+            "status": "indexed",
+            "endpoint": endpoint,
+            "server_name": res.get("server_name"),
+            "verified_tools": len(res["tools"]),
+            "tools": [t.get("name") for t in res["tools"]][:40],
+            "auth_required": res["auth"],
+            "identifier": entry["identifier"],
+            "note": ("verified by handshaking with your server and reading its own "
+                     "tools/list. To have your whole domain indexed, including skills, "
+                     "APIs and agents, publish an ARD manifest and submit the domain: "
+                     f"{config.PUBLIC_BASE}/publish"),
+        })
+
+    # ---- whole domain via its manifest ----------------------------------
     host = (dom.replace("https://", "").replace("http://", "")
                .strip("/").split("/")[0].lower())
-    # A hostname, strictly. `../etc/passwd` reduces to `..` after the path split,
-    # which passed a naive "contains a dot" check and reached the fetcher.
     labels = host.split(".")
     if (not host or len(host) > 253 or len(labels) < 2
             or not all(l and l[0].isalnum() and l[-1].isalnum()
@@ -888,21 +967,18 @@ async def submit_endpoint(body: dict) -> JSONResponse:
             or not labels[-1].isalpha() or len(labels[-1]) < 2):
         return JSONResponse(status_code=400, content={
             "error": "invalid_request",
-            "detail": "a hostname is required, for example {\"domain\": \"example.com\"}"})
+            "detail": ('send {"domain": "example.com"} for a whole domain, or '
+                       '{"endpoint": "https://example.com/mcp"} for a single MCP server')})
 
     conn = db()
     before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                           (host,)).fetchone()[0]
-    # Live fetch and ingest, both well-known paths, exactly as the crawler does.
-    # A long maintenance job can hold the write lock; that is our problem, not the
-    # submitter's, so it gets an honest 503 with a retry rather than a 500.
     try:
         got = await ingest.crawl_domains(conn, [host], concurrency=2, skip_seen_hours=0)
     except sqlite3.OperationalError as e:
         if "locked" in str(e).lower():
             return JSONResponse(status_code=503, headers={"Retry-After": "60"}, content={
-                "status": "busy",
-                "domain": host,
+                "status": "busy", "domain": host,
                 "detail": ("the index is mid-maintenance and cannot accept a write right "
                            "now. Your domain was not indexed; try again in a minute."),
             })
@@ -912,16 +988,18 @@ async def submit_endpoint(body: dict) -> JSONResponse:
     row = conn.execute("SELECT manifest_path FROM crawl_seen WHERE domain=?",
                        (host,)).fetchone()
     path = row["manifest_path"] if row else None
-    catalog.invalidate_publishers()
-    render.invalidate()
+    catalog.invalidate_publishers(); render.invalidate()
 
     if not path and after == 0:
         return JSONResponse(status_code=404, content={
             "status": "no_manifest",
             "domain": host,
             "checked": ingest.PATHS,
-            "detail": ("no ARD manifest found at either well-known path. Serve one and "
-                       "submit again; see " + config.PUBLIC_BASE + "/publish"),
+            "detail": ("no ARD manifest found at either well-known path. If you have an "
+                       "MCP server, submit it directly with "
+                       '{"endpoint": "https://your-host/mcp"} and we will verify it by '
+                       "handshake. To list everything on your domain, publish a manifest: "
+                       + config.PUBLIC_BASE + "/publish"),
         })
 
     return JSONResponse({
@@ -944,23 +1022,34 @@ async def submit_page():
 <div class="pgh">
   <div class="crumb"><a href="/">Index</a> / Submit</div>
   <h1>Submit your domain to the ARD index</h1>
-  <p class="lede">If you serve an Agentic Resource Discovery manifest, this indexes it now
-  rather than whenever a crawler reaches you. We fetch it live from your domain, so there is
-  nothing to fill in beyond the hostname. No account, no allowlist, no charge, no paid
-  ranking.</p>
+  <p class="lede">Two ways in, and neither needs an account, an allowlist, a charge or any
+  paid ranking. Give us a <b>domain</b> that serves an ARD manifest and we index everything
+  it declares. Or give us an <b>MCP server URL</b> directly, with no manifest at all, and we
+  handshake with it and read its own tool list.</p>
 </div>
 
 <div class="note" style="max-width:62ch">
   <form id="f" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
-    <input id="d" placeholder="example.com" aria-label="Your domain"
+    <input id="d" placeholder="example.com  or  https://your-host/mcp" aria-label="Your domain or MCP endpoint"
            style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);
                   border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
-    <button class="btn btn--w" type="submit">Index my domain</button>
+    <button class="btn btn--w" type="submit">Index it</button>
   </form>
   <pre id="o" style="margin-top:14px;display:none;white-space:pre-wrap"></pre>
 </div>
 
-<h2 style="margin-top:34px;font-size:20px">What happens when you submit</h2>
+<h2 style="margin-top:34px;font-size:20px">I only have an MCP server</h2>
+<p class="lede">Then submit the server itself. Most MCP developers have a repository, a
+package and a running endpoint but no manifest, and requiring one turned all of them away.
+We complete an <code>initialize</code> handshake and read <code>tools/list</code>, which is
+stronger evidence than a manifest claim because your server answered for itself. Your real
+tool names and input schemas are then searchable at
+<a href="/tools/">/tools</a>.</p>
+<pre style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>curl -s -X POST https://neuronto.com/submit \\
+  -H 'content-type: application/json' \\
+  -d '{{"endpoint":"https://your-host/mcp"}}'</code></pre>
+
+<h2 style="margin-top:34px;font-size:20px">What happens when you submit a domain</h2>
 <ol class="lede">
   <li>We request both well-known manifest paths on your domain, live.</li>
   <li>Whatever parses as a manifest is indexed immediately, with your declared types,
@@ -970,6 +1059,12 @@ async def submit_page():
   <li>You get a page at <code>{B}/ard-publishers/&lt;your-domain&gt;</code> and become
       searchable through <code>/search</code> and the MCP endpoint.</li>
 </ol>
+
+<h2 style="margin-top:30px;font-size:20px">Skills, APIs and agents</h2>
+<p class="lede">A manifest is the only way to list a skill, an OpenAPI service or an A2A
+agent, because unlike an MCP server they cannot be verified by handshake. We index all of
+them: three MCP media types, three A2A spellings, four skill types, plus OpenAPI, docs,
+catalogues and packages, normalised so a filter finds them however you spelled the type.</p>
 
 <h2 style="margin-top:30px;font-size:20px">Do it from the command line</h2>
 <pre style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>curl -s -X POST {B}/submit \\
