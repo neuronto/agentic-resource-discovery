@@ -25,6 +25,7 @@ import hashlib
 import json
 import re
 import secrets
+import threading
 import time
 
 import httpx
@@ -202,13 +203,23 @@ def domain_for_key(conn, key: str | None) -> str | None:
     r = conn.execute("SELECT domain FROM api_keys WHERE key=?", (key.strip(),)).fetchone()
     if not r:
         return None
+    # A bookkeeping write, so it never runs on the request's connection: that
+    # connection waits up to 45 s for the crawl's lock, on the event loop, on
+    # every authenticated request. Own connection, one second of patience,
+    # in a thread nobody waits for; a lost timestamp costs nothing.
+    threading.Thread(target=_touch_key, args=(key.strip(),), daemon=True).start()
+    return r["domain"]
+
+
+def _touch_key(key: str) -> None:
     try:
-        conn.execute("UPDATE api_keys SET last_used=? WHERE key=?",
-                     (int(time.time()), key.strip()))
-        conn.commit()
+        c = store.connect()
+        c.execute("PRAGMA busy_timeout=1000")
+        c.execute("UPDATE api_keys SET last_used=? WHERE key=?", (int(time.time()), key))
+        c.commit()
+        c.close()
     except Exception:
         pass
-    return r["domain"]
 
 
 # ---------------------------------------------------------------------------

@@ -54,6 +54,17 @@ class _MCP(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        # The domain route: an ARD manifest on the well-known path.
+        if self.path == "/.well-known/ard.json" and MODE["state"] != "down":
+            man = {"entries": [{"identifier": f"urn:air:127.0.0.1:mcp:manifest-test",
+                                "displayName": "manifest test",
+                                "type": "application/mcp-server-card+json",
+                                "url": f"{BASE}/mcp",
+                                "description": "from the manifest"}]}
+            return self._send(200, json.dumps(man).encode())
+        return self._send(404, b"nope", "text/plain")
+
     def do_POST(self):
         n = int(self.headers.get("content-length") or 0)
         try:
@@ -244,6 +255,64 @@ async def run():
     a = submissions.due(5)
     b = submissions.due(5)
     check(len(a) == 1 and len(b) == 0, "a claimed row is invisible to a second retrier")
+
+    # 13. a DOMAIN submission meets a locked index: busy, fast, indexed later --
+    # The domain path had the same shape as the endpoint path until
+    # 2026-09-02: the manifest's entries were written on the request
+    # connection with a 45 second wait. Now: fetch on the loop, write in a
+    # thread, and a lock is a queued busy.
+    MODE["state"] = "up"
+    # A hostname, because the route validates one; DNS is the only thing
+    # faked here (the fetch is pointed at the local server), the write path
+    # is the real code.
+    from app import ingest, publisher
+    host = "resilience.test"
+    _real_fetch = ingest.fetch_manifest
+    ingest.fetch_manifest = lambda dom, client=None: _real_fetch(f"http://127.0.0.1:{PORT}", client)
+    lock = sqlite3.connect(os.environ["NEURONTO_DB"], timeout=1)
+    lock.execute("BEGIN IMMEDIATE")
+    lock.execute("INSERT OR REPLACE INTO stats(k,v) VALUES('resilience-lock','2')")
+    t0 = time.perf_counter()
+    code, d = await submit({"domain": host})
+    took = time.perf_counter() - t0
+    check(code == 202 and d["status"] == "pending" and d["reason"] == "busy",
+          f"a domain submission against a locked index answers busy ({code} {d['status']} {d.get('reason')})")
+    check(took < 20 and d["submission"]["attempts"] == 0,
+          f"fast, and it costs the publisher no attempt ({took:.1f}s, attempts={d['submission']['attempts']})")
+    lock.rollback(); lock.close()
+    force_due(d["submission"]["id"])
+    await main.retry_due_submissions()
+    row = submissions.get(d["submission"]["id"])
+    c = store.connect()
+    n = c.execute("SELECT COUNT(*) FROM entries WHERE url=? AND sources LIKE '%crawl%'",
+                  (f"{BASE}/mcp",)).fetchone()[0]
+    seen = c.execute("SELECT manifest_path FROM crawl_seen WHERE domain=?", (host,)).fetchone()
+    c.close()
+    check(row["status"] == "indexed" and n == 1 and seen and seen[0] == "/.well-known/ard.json",
+          f"the manifest's entry is indexed on retry and the crawl records the path ({row['status']}, entries={n}, path={seen and seen[0]})")
+
+    ingest.fetch_manifest = _real_fetch
+
+    # 14. a manifest build against a locked index still returns the manifest -
+    # (the probing half is replaced by a fixed finding; what is under test is
+    # the write that gave two visitors a 500 on 2026-09-01)
+    _real_infer = publisher.infer_resources
+    async def _fake_infer(h):
+        return [{"identifier": f"urn:air:{h}:mcp:t", "displayName": "t",
+                 "type": "application/mcp-server-card+json", "url": f"https://{h}/mcp",
+                 "description": "t", "_evidence": "fixed by the test"}]
+    publisher.infer_resources = _fake_infer
+    lock = sqlite3.connect(os.environ["NEURONTO_DB"], timeout=1)
+    lock.execute("BEGIN IMMEDIATE")
+    lock.execute("INSERT OR REPLACE INTO stats(k,v) VALUES('resilience-lock','3')")
+    t0 = time.perf_counter()
+    resp = await main.manifest_build({"domain": host})
+    took = time.perf_counter() - t0
+    d = json.loads(bytes(resp.body).decode())
+    check(resp.status_code == 200 and d.get("manifest") and d.get("hosted_at") is None and "busy" in d.get("hosted_note", ""),
+          f"manifest build under a lock is a 200 with the manifest and an honest hosted_note, not a 500 ({resp.status_code}, {took:.1f}s)")
+    lock.rollback(); lock.close()
+    publisher.infer_resources = _real_infer
 
     print("  --------------------------------------------------------------")
     print(f"  {_n} passed, 0 failed\n")
