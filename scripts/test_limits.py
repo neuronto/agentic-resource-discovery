@@ -91,7 +91,9 @@ def t_callers_are_isolated_from_each_other():
 
 def t_a_verified_key_gets_its_own_larger_allowance():
     ip = FakeRequest(ip="10.0.2.1")
-    keyed = FakeRequest(ip="10.0.2.1", key="nk_averifiedlookingkey123456")
+    # Deliberately too short to match the shape of a real key, so the leak
+    # scanner that runs before every push does not learn to ignore this file.
+    keyed = FakeRequest(ip="10.0.2.1", key="nk_FAKE")
     anon_limit = limits.RULES["audit"][0]
     for _ in range(anon_limit + 1):
         limits.check("audit", ip)
