@@ -15,10 +15,9 @@ __pycache__/
 # working notes for outbound submissions, not part of the product
 submissions/
 
-# Deployment configuration stays private. Service units, nginx vhosts and the
-# sync script describe the machine this runs on: paths, ports, resource limits,
-# certificate locations. None of that is any part of the product, and publishing
-# it hands an attacker a map for nothing in return.
+# Deployment configuration stays private. It describes the machine this runs
+# on, which is no part of the product, and publishing it hands an attacker a
+# map for nothing in return.
 deploy/
 
 # internal working guidance, never published
@@ -45,3 +44,4 @@ internal/
 dist/
 build/
 dataset/
+._*

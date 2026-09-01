@@ -31,8 +31,8 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
 from . import (adoption, audit, badge, bench, catalog, config, embed,
-               federation, ingest, liveness, render, search, store,
-               tools_index)
+               federation, ingest, liveness, publisher, render, search,
+               store, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry", version="1.0.0",
@@ -69,12 +69,13 @@ async def _timing(request: Request, call_next):
 # ─────────────────────────── Registry REST API (§5.3) ───────────────────────
 
 @app.post("/search")
-async def search_endpoint(body: dict) -> JSONResponse:
+async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     """POST /search - the one endpoint the spec mandates.
 
     Every result carries `identifier`, `score` (0-100) and `source`, which are
     the three fields the conformance tool requires of a SearchResultItem.
     """
+    request_key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
     q = body.get("query") or {}
     text = (q.get("text") or "").strip()
     if not text:
@@ -97,7 +98,12 @@ async def search_endpoint(body: dict) -> JSONResponse:
 
     t0 = time.perf_counter()
     conn = db()
-    out = await search.search(conn, text, flt, page_size, mode)
+    # A bearer key admits exactly one domain's private entries into the ranking.
+    # Resolved before the search rather than filtered after, so private rows
+    # never enter a result set the caller is not entitled to.
+    auth = (request_key or "")
+    owner = publisher.domain_for_key(conn, auth)
+    out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner)
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
     store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
@@ -602,6 +608,17 @@ async def audit_endpoint(body: dict) -> JSONResponse:
     if "error" in report:
         return JSONResponse(status_code=400, content=report)
     report["indexed_here"] = hits
+    # Where they place against everyone else competing for the same queries.
+    # Run here rather than inside `audit.run` because it reads our index, and
+    # `run` is deliberately network-only so it can be pointed at any domain.
+    try:
+        comp = audit.competition(conn, report["domain"], (report.get("_manifest") or None))
+        report["competition"] = comp
+        report["recommendations"] = (report.get("recommendations") or []) \
+            + audit.competition_advice(comp)
+    except Exception:
+        pass
+    report.pop("_manifest", None)
     return JSONResponse(report)
 
 
@@ -672,6 +689,183 @@ async def demand_endpoint(domain: str = Query(..., min_length=3),
                  "reported. Federated results served from other registries are not counted.")
     d["console"] = f"{config.PUBLIC_BASE}/console?domain={host}"
     return JSONResponse(d, headers={"Cache-Control": "private, max-age=60"})
+
+
+
+# ---------------------------------------------------------------------------
+# Publisher services: a hosted manifest, proven ownership, private entries.
+# ---------------------------------------------------------------------------
+
+def _host_arg(v: str) -> str | None:
+    h = str(v or "").replace("https://", "").replace("http://", "").strip("/").split("/")[0].lower()
+    labels = h.split(".")
+    if (not h or len(h) > 253 or len(labels) < 2
+            or not all(l and l[0].isalnum() and l[-1].isalnum()
+                       and all(c.isalnum() or c == "-" for c in l) for l in labels)
+            or not labels[-1].isalpha() or len(labels[-1]) < 2):
+        return None
+    return h
+
+
+@app.post("/manifest/build")
+async def manifest_build(body: dict) -> JSONResponse:
+    """Write the manifest for a domain from what that domain already publishes.
+
+    Most domains will never author one by hand, and they do not have to: an MCP
+    server, an OpenAPI document or an llms.txt is already the substance of an
+    entry. Nothing here is inferred from a name or guessed from a pattern. Every
+    entry cites the fetch that produced it, so the publisher can check each line
+    against their own server before they adopt it.
+    """
+    host = _host_arg((body or {}).get("domain"))
+    if not host:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "a hostname is required"})
+    found = await publisher.infer_resources(host)
+    if not found:
+        return JSONResponse(status_code=404, content={
+            "domain": host, "status": "nothing_found",
+            "detail": ("no MCP server, OpenAPI document, agent card or llms.txt was "
+                       "reachable on this domain, so there is nothing to describe. "
+                       "We will not invent entries."),
+            "looked_for": ["/mcp", "/openapi.json", "/.well-known/agent-card.json",
+                           "/llms.txt"],
+        })
+    man = publisher.manifest_for(host, found)
+    conn = db()
+    conn.execute("""INSERT INTO stats(k,v) VALUES(?,?)
+                    ON CONFLICT(k) DO UPDATE SET v=excluded.v""",
+                 (f"manifest:{host}", json.dumps(man, ensure_ascii=False)))
+    conn.commit()
+    return JSONResponse({
+        "domain": host,
+        "entries": len(man["entries"]),
+        "evidence": [{"entry": e.get("displayName"), "because": e.get("_evidence")}
+                     for e in found],
+        "manifest": man,
+        "hosted_at": f"{config.PUBLIC_BASE}/m/{host}.json",
+        "how_to_adopt": [
+            f"Serve this JSON yourself at https://{host}/.well-known/ard.json, or",
+            f"point at ours: add to robots.txt   Agentmap: {config.PUBLIC_BASE}/m/{host}.json",
+            "Serving it on your own domain is stronger: it is your statement, not ours.",
+        ],
+    })
+
+
+@app.get("/m/{host}.json", include_in_schema=False)
+async def hosted_manifest(host: str):
+    h = _host_arg(host)
+    if not h:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    r = db().execute("SELECT v FROM stats WHERE k=?", (f"manifest:{h}",)).fetchone()
+    if not r:
+        return JSONResponse(status_code=404, content={
+            "error": "not_built",
+            "detail": f"POST {config.PUBLIC_BASE}/manifest/build with this domain first"})
+    return JSONResponse(json.loads(r["v"]), headers={
+        "Cache-Control": "public, max-age=1800",
+        "X-Manifest-Source": ("generated by neuronto.com from resources fetched on "
+                              "this domain; not authored by the domain owner"),
+    })
+
+
+@app.post("/claim")
+async def claim_start(body: dict) -> JSONResponse:
+    """Begin proving you own a domain."""
+    host = _host_arg((body or {}).get("domain"))
+    if not host:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "a hostname is required"})
+    tok = publisher.claim_token(host)
+    return JSONResponse({
+        "domain": host,
+        "record": {"type": "TXT", "name": "@", "host": host,
+                   "value": publisher.TXT_PREFIX + tok},
+        "then": f"POST {config.PUBLIC_BASE}/claim/verify with the same domain",
+        "note": ("the value is derived from your domain and never changes, so asking "
+                 "again does not invalidate a record you already published"),
+    })
+
+
+@app.post("/claim/verify")
+async def claim_verify(body: dict) -> JSONResponse:
+    host = _host_arg((body or {}).get("domain"))
+    if not host:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "a hostname is required"})
+    res = await publisher.verify_domain(host)
+    if not res["verified"]:
+        return JSONResponse(status_code=403, content={
+            "domain": host, "verified": False,
+            "expected_txt": res["expect"], "txt_found": res["found"],
+            "detail": ("the proof record is not visible yet. DNS changes can take a few "
+                       "minutes to propagate; try again shortly."),
+        })
+    key = publisher.issue_key(db(), host)
+    return JSONResponse({
+        "domain": host, "verified": True, "api_key": key,
+        "grants": [f"read and write private entries for {host}",
+                   "nothing else; the key is scoped to this domain alone"],
+        "usage": f"curl -H 'authorization: Bearer {key}' {config.PUBLIC_BASE}/search ...",
+        "warning": "this key is shown once and is not recoverable",
+    })
+
+
+@app.post("/private/entries")
+async def private_add(body: dict, request: Request) -> JSONResponse:
+    """Register an internal service, visible only to this domain's key.
+
+    An organisation's list of approved internal services usually lives in a
+    system prompt, where an agent cannot search it and nobody can audit it. Here
+    it is indexed alongside the public world and returned by the same query,
+    labelled, so a caller always knows which half a result came from.
+    """
+    key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
+    conn = db()
+    owner = publisher.domain_for_key(conn, key)
+    if not owner:
+        return JSONResponse(status_code=401, content={
+            "error": "unauthorized",
+            "detail": f"verify your domain first: POST {config.PUBLIC_BASE}/claim"})
+    ent = (body or {}).get("entry") or body or {}
+    k = publisher.add_private(conn, owner, ent)
+    if not k:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "entry.displayName is required"})
+    n = store.private_count(conn, owner)
+    return JSONResponse({"status": "added", "owner": owner, "private_entries": n,
+                         "note": ("visible only to this domain's key. It is held in a separate "
+                                  "table from the public index, so no public query, count or "
+                                  "page can reach it.")})
+
+
+@app.get("/private/entries")
+async def private_list(request: Request) -> JSONResponse:
+    key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
+    conn = db()
+    owner = publisher.domain_for_key(conn, key)
+    if not owner:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    rows = store.list_private(conn, owner)
+    return JSONResponse({"owner": owner, "count": len(rows), "entries": rows})
+
+
+@app.delete("/private/entries")
+async def private_delete(body: dict, request: Request) -> JSONResponse:
+    """Remove an internal service. Scoped to the caller's own domain."""
+    key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
+    conn = db()
+    owner = publisher.domain_for_key(conn, key)
+    if not owner:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    ident = str((body or {}).get("identifier") or "").strip()
+    if not ident:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": "identifier is required"})
+    gone = store.delete_private(conn, owner, ident)
+    return JSONResponse({"status": "deleted" if gone else "not_found",
+                         "owner": owner, "private_entries": store.private_count(conn, owner)},
+                        status_code=200 if gone else 404)
 
 
 @app.get("/console", include_in_schema=False)

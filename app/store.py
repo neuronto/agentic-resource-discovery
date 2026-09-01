@@ -8,6 +8,7 @@ not from bolting on a heavier engine.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -171,6 +172,28 @@ CREATE TABLE IF NOT EXISTS impressions (
 CREATE INDEX IF NOT EXISTS idx_imp_entry ON impressions(entry_key, ts);
 CREATE INDEX IF NOT EXISTS idx_imp_search ON impressions(search_id);
 
+-- Proven domain ownership. A TXT record survives a change of hosting and is
+-- the same mechanism the MCP registry uses for namespaces, so a publisher who
+-- has done it once already understands it.
+CREATE TABLE IF NOT EXISTS claims (
+  domain      TEXT PRIMARY KEY,
+  token       TEXT,
+  verified    INTEGER DEFAULT 0,
+  verified_at INTEGER,
+  created     INTEGER
+);
+
+-- Keys are scoped to one verified domain and grant exactly one privilege:
+-- seeing and writing that domain's private entries. Nothing global.
+CREATE TABLE IF NOT EXISTS api_keys (
+  key       TEXT PRIMARY KEY,
+  domain    TEXT NOT NULL,
+  label     TEXT,
+  created   INTEGER,
+  last_used INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_keys_domain ON api_keys(domain);
+
 -- Benchmark runs. Kept so a published number can always be traced to the run
 -- that produced it.
 CREATE TABLE IF NOT EXISTS bench_runs (
@@ -180,11 +203,48 @@ CREATE TABLE IF NOT EXISTS bench_runs (
   k        INTEGER,
   results  TEXT                       -- json: per-target metrics
 );
+
+-- An organisation's internal services, in a table of their own.
+--
+-- These were briefly kept in `entries` behind a `visibility` column. That was
+-- wrong twice over. It leaked: every public count is a plain COUNT(*) over
+-- `entries`, so a private row silently joined the published totals, and sealing
+-- it would have meant adding the same predicate to thirty queries and to every
+-- query written afterwards. And it modelled them as the same kind of thing when
+-- they are not: an internal endpoint sits behind the customer's firewall, so it
+-- can never be liveness-probed, introspected or embedded the way a public
+-- resource is. Kept apart, a public query cannot reach them by construction,
+-- and the crawl pipelines cannot waste probes on hosts they will never reach.
+CREATE TABLE IF NOT EXISTS private_entries (
+  key          TEXT PRIMARY KEY,
+  owner_domain TEXT NOT NULL,
+  identifier   TEXT,
+  display_name TEXT,
+  description  TEXT,
+  url          TEXT,
+  type_raw     TEXT,
+  type_family  TEXT,
+  tags         TEXT,
+  capabilities TEXT,
+  rep_queries  TEXT,
+  created      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_private_owner ON private_entries(owner_domain);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS private_fts USING fts5(
+  key UNINDEXED, display_name, description, rep_queries, tags, tokenize='porter'
+);
 """
 
 # Columns added after the first deployment. SQLite has no "ADD COLUMN IF NOT
 # EXISTS", so this is applied by inspection in `init`.
 _ADD_COLUMNS = {
+    # Vestigial: private entries were briefly stored here behind these two
+    # columns before moving to `private_entries`. Retained only so the one-time
+    # migration in `init` can find any row left over from that design, and as a
+    # belt-and-braces filter in search. Nothing writes them any more.
+    "visibility":      "TEXT",
+    "owner_domain":    "TEXT",
     "mcp_checked":     "INTEGER",   # when we last introspected
     "mcp_tools":       "INTEGER",   # verified tool count
     "mcp_auth":        "INTEGER",   # 1 = endpoint demanded credentials
@@ -210,7 +270,28 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _migrate(conn)
+    _migrate_private(conn)
     conn.commit()
+
+
+def _migrate_private(conn: sqlite3.Connection) -> int:
+    """Move any row left over from the visibility-column design.
+
+    Private entries used to live in `entries`. Nothing writes them there now, so
+    this runs once and then finds nothing for the rest of the database's life.
+    """
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries)")]
+    if "visibility" not in cols:
+        return 0
+    rows = conn.execute(
+        "SELECT * FROM entries WHERE visibility='private'").fetchall()
+    for r in rows:
+        add_private_entry(conn, r["owner_domain"] or "", row_to_entry(r))
+        conn.execute("DELETE FROM entries WHERE key=?", (r["key"],))
+        conn.execute("DELETE FROM entries_fts WHERE key=?", (r["key"],))
+    if rows:
+        conn.commit()
+    return len(rows)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -636,3 +717,77 @@ def recent_searches(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
     rows = conn.execute("""SELECT q, results, ms, ts FROM searches
                            ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Private entries
+# ---------------------------------------------------------------------------
+
+def _private_key(domain: str, identifier: str) -> str:
+    return hashlib.sha1(f"private|{domain}|{identifier}".encode()).hexdigest()
+
+
+def add_private_entry(conn: sqlite3.Connection, domain: str, e: dict) -> str:
+    """Store one internal service for a verified domain."""
+    ident = e.get("identifier") or ""
+    if not ident:
+        return ""
+    key = _private_key(domain, ident)
+    js = lambda v: json.dumps(v) if v else None
+    conn.execute("""INSERT INTO private_entries
+          (key,owner_domain,identifier,display_name,description,url,
+           type_raw,type_family,tags,capabilities,rep_queries,created)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(key) DO UPDATE SET
+          display_name=excluded.display_name, description=excluded.description,
+          url=excluded.url, type_raw=excluded.type_raw,
+          type_family=excluded.type_family, tags=excluded.tags,
+          capabilities=excluded.capabilities, rep_queries=excluded.rep_queries""",
+        (key, domain.lower(), ident, e.get("displayName"), e.get("description"),
+         e.get("url"), e.get("type"), media_family(e.get("type")),
+         js(e.get("tags")), js(e.get("capabilities")), js(e.get("representativeQueries")),
+         int(time.time())))
+    conn.execute("DELETE FROM private_fts WHERE key=?", (key,))
+    conn.execute("""INSERT INTO private_fts(key,display_name,description,rep_queries,tags)
+                    VALUES(?,?,?,?,?)""",
+                 (key, e.get("displayName") or "", e.get("description") or "",
+                  " ".join(e.get("representativeQueries") or []),
+                  " ".join(str(t) for t in (e.get("tags") or []))))
+    conn.commit()
+    return key
+
+
+def private_count(conn: sqlite3.Connection, domain: str) -> int:
+    return conn.execute("SELECT COUNT(*) FROM private_entries WHERE owner_domain=?",
+                        (domain.lower(),)).fetchone()[0]
+
+
+def list_private(conn: sqlite3.Connection, domain: str) -> list[dict]:
+    return [private_row_to_entry(r) for r in conn.execute(
+        "SELECT * FROM private_entries WHERE owner_domain=? ORDER BY display_name",
+        (domain.lower(),))]
+
+
+def delete_private(conn: sqlite3.Connection, domain: str, identifier: str) -> bool:
+    key = _private_key(domain.lower(), identifier)
+    cur = conn.execute("DELETE FROM private_entries WHERE key=? AND owner_domain=?",
+                       (key, domain.lower()))
+    conn.execute("DELETE FROM private_fts WHERE key=?", (key,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def private_row_to_entry(r: sqlite3.Row) -> dict:
+    j = lambda s: json.loads(s or "[]")
+    out = {
+        "identifier": r["identifier"],
+        "displayName": r["display_name"],
+        "type": r["type_raw"] or None,
+        "url": r["url"] or None,
+        "description": r["description"] or None,
+        "tags": j(r["tags"]) or None,
+        "capabilities": j(r["capabilities"]) or None,
+        "representativeQueries": j(r["rep_queries"]) or None,
+        "visibility": "private",
+    }
+    return {k: v for k, v in out.items() if v is not None}

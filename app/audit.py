@@ -291,4 +291,143 @@ async def run(domain: str, local_hits: int = 0) -> dict:
             "discovery": disc["paths"], "manifest_url": disc["manifest_url"],
             "conformance": conf, "coverage": cov,
             "score": score(disc, conf, cov),
-            "recommendations": recommendations(disc, conf, cov)}
+            "recommendations": recommendations(disc, conf, cov),
+            # Internal: the caller may pass this to `competition`. Stripped
+            # before the report goes over the wire.
+            "_manifest": disc["manifest"]}
+
+
+# ---------------------------------------------------------------------------
+# Competition
+# ---------------------------------------------------------------------------
+
+def _why_ahead(e: dict) -> str:
+    """Say, in the publisher's terms, what this rival has that they may not."""
+    v = e.get("verification") or {}
+    bits = []
+    if v.get("tools"):
+        bits.append(f"{v['tools']} tools read from its own tools/list")
+    if v.get("reachable"):
+        bits.append("endpoint answered when probed")
+    n = e.get("_sources") or 0
+    if n > 1:
+        bits.append(f"listed by {n} independent registries")
+    if e.get("description") and len(e["description"]) > 120:
+        bits.append("a description long enough to match on")
+    if e.get("representativeQueries"):
+        bits.append(f"{len(e['representativeQueries'])} stated queries")
+    return "; ".join(bits) or "a closer text match on this query"
+
+
+def competition(conn, domain: str, manifest: dict | None,
+                queries: list[str] | None = None) -> dict:
+    """For the publisher's own stated queries, who is beating them, and why.
+
+    Coverage answers "does any registry return me". This answers the question
+    that follows it, and the one a publisher actually cares about: when an agent
+    asks for what I do, what comes back instead of me, and what do those entries
+    have that I do not?
+
+    The queries come from the publisher's own `representativeQueries`, so this
+    is scored against their stated intent rather than ours. The reasons are read
+    off the winning entries rather than asserted: how many tools we read from
+    the server itself, whether it answered when probed, how many independent
+    registries carry it. Every one of those is something the publisher can go
+    and change, which is the only reason to put a number in front of them.
+    """
+    from . import search as _search
+
+    qs = list(queries or [])
+    if not qs:
+        for e in (manifest or {}).get("entries", [])[:6]:
+            if isinstance(e, dict):
+                qs += [str(q) for q in (e.get("representativeQueries") or [])[:2]]
+    # A domain with no manifest is exactly the one that needs this most, so fall
+    # back to what we already hold for it, and then to its own name.
+    if not qs:
+        for r in conn.execute(
+                """SELECT rep_queries, display_name FROM entries
+                   WHERE lower(publisher)=? LIMIT 8""", (domain.lower(),)):
+            try:
+                qs += [str(q) for q in (json.loads(r["rep_queries"] or "[]"))[:2]]
+            except Exception:
+                pass
+            if not qs and r["display_name"]:
+                qs.append(str(r["display_name"]))
+    qs = [q for q in dict.fromkeys(qs) if q.strip()][:5]
+    if not qs:
+        return {"queries": [], "note": ("nothing to test against: this domain publishes no "
+                                        "representativeQueries and has no indexed entries. "
+                                        "Add representativeQueries to each entry, they are "
+                                        "what an agent matches on.")}
+
+    dom = domain.lower()
+    rows = []
+    for q in qs:
+        hits = _search.local_search(conn, q, None, 10)
+        rank_of, ahead = None, []
+        for i, e in enumerate(hits, 1):
+            mine = (e.get("url") or "").lower().find("//" + dom) >= 0 \
+                   or dom in (e.get("identifier") or "").lower()
+            if mine and rank_of is None:
+                rank_of = i
+            elif not mine and rank_of is None and len(ahead) < 3:
+                ahead.append({"name": e.get("displayName") or e.get("identifier"),
+                              "identifier": e.get("identifier"),
+                              "score": e.get("score"),
+                              "has_that_you_may_not": _why_ahead(e)})
+        rows.append({"query": q,
+                     "your_best_rank": rank_of,
+                     "results_considered": len(hits),
+                     "ahead_of_you": ahead})
+
+    ranked = [r["your_best_rank"] for r in rows if r["your_best_rank"]]
+    return {
+        "queries": rows,
+        "summary": {
+            "tested": len(rows),
+            "you_appear_in": len(ranked),
+            "best_rank": min(ranked) if ranked else None,
+            "median_rank": (sorted(ranked)[len(ranked) // 2] if ranked else None),
+        },
+        "note": ("measured against this index only, over the top 10 for each of your own "
+                 "representativeQueries. Ranking is relevance, never endorsement, and it "
+                 "is recomputed on every request rather than stored."),
+    }
+
+
+def competition_advice(comp: dict) -> list[str]:
+    """Turn the comparison into instructions, in the report's existing voice."""
+    out: list[str] = []
+    qs = comp.get("queries") or []
+    if not qs:
+        return out
+    summ = comp.get("summary") or {}
+    missing = [q["query"] for q in qs if not q["your_best_rank"]]
+    if missing and len(missing) == len(qs):
+        out.append("You are not returned for any of your own representativeQueries. "
+                   "The text an agent matches on is your displayName, description and "
+                   "those queries, so rewrite them to say what the resource does in the "
+                   "words someone would ask for it: " + ", ".join(repr(m) for m in missing[:3]))
+    elif missing:
+        out.append("Not returned for " + ", ".join(repr(m) for m in missing[:3])
+                   + ". Those entries need a description that contains the words in the query.")
+
+    # One-word queries lose to anything specific, and it is a common mistake.
+    vague = [q["query"] for q in qs if len(q["query"].split()) < 2]
+    if vague:
+        out.append("Single-word representativeQueries like "
+                   + ", ".join(repr(v) for v in vague[:3])
+                   + " compete against the whole index. A query should read like the "
+                     "request an agent would actually make, not like a category.")
+
+    beaten = [q for q in qs if q["your_best_rank"] and q["your_best_rank"] > 3]
+    if beaten:
+        out.append(f"Ranked {beaten[0]['your_best_rank']} for {beaten[0]['query']!r}. "
+                   "Entries above you are there on evidence we could read: a reachable "
+                   "endpoint, tools listed by the server itself, or corroboration from "
+                   "another registry. Publishing a callable endpoint is what closes that.")
+    if summ.get("you_appear_in") == summ.get("tested") and summ.get("best_rank") == 1:
+        out.append("You rank first for every query you asked to be found for. "
+                   "The remaining work is coverage, not relevance.")
+    return out

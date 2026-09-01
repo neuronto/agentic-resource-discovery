@@ -8,6 +8,13 @@ API, as §5.3.5 requires.
 
 Streamable HTTP, JSON-RPC 2.0, no auth. Discovery is public by nature; putting
 a key in front of it would defeat the point.
+
+Three tools read and one writes. `publish_resource` is unauthenticated like the
+rest, which is safe only because it verifies rather than trusts: an endpoint has
+to complete an MCP handshake and a domain has to serve a manifest that parses,
+so the cost of listing something is owning something that answers. That is the
+same bar the HTTP submit route applies, and it calls that route rather than
+reimplementing it, so the two cannot drift apart.
 """
 from __future__ import annotations
 
@@ -86,6 +93,29 @@ TOOLS = [
         },
     },
     {
+        "name": "publish_resource",
+        "title": "Publish a resource to the index",
+        "description": (
+            "List an MCP server or an ARD-publishing domain in this index so other agents "
+            "can discover it. Give `endpoint` for an MCP server URL, or `domain` for a site "
+            "that serves an ARD manifest. The submission is verified before it is indexed: "
+            "an endpoint must complete an MCP initialize handshake, and a domain must serve "
+            "a manifest that parses. Nothing is taken on trust, so a listing that succeeds "
+            "here is one an agent can actually call."),
+        "annotations": {"title": "Publish a resource", "readOnlyHint": False,
+                        "destructiveHint": False, "idempotentHint": True,
+                        "openWorldHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "endpoint": {"type": "string",
+                             "description": "Absolute URL of an MCP server, e.g. https://example.com/mcp"},
+                "domain":   {"type": "string",
+                             "description": "A domain serving /.well-known/ard.json, e.g. example.com"},
+            },
+        },
+    },
+    {
         "name": "registry_stats",
         "title": "Index statistics",
         "description": "How large this index is, what it holds, how much of it has been "
@@ -151,6 +181,30 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
         params = body.get("params") or {}
         name = params.get("name")
         args = params.get("arguments") or {}
+
+        if name == "publish_resource":
+            endpoint = str(args.get("endpoint") or "").strip()
+            domain = str(args.get("domain") or "").strip()
+            if not endpoint and not domain:
+                return 200, {"jsonrpc": "2.0", "id": rid, "result": {
+                    **_text({"error": "give either `endpoint` (an MCP server URL) or "
+                                      "`domain` (a site serving an ARD manifest)"}),
+                    "isError": True}}
+            # Deferred import: main imports this module, so the reference can
+            # only be resolved at call time. Calling the endpoint's own handler
+            # rather than reimplementing it means the agent route and the HTTP
+            # route cannot drift apart, and both apply the same verification.
+            from .main import submit_endpoint
+            resp = await submit_endpoint({"endpoint": endpoint, "domain": domain})
+            payload = json.loads(bytes(resp.body).decode() or "{}")
+            ok = resp.status_code < 400 and payload.get("status") not in (
+                "not_an_mcp_server", "no_manifest")
+            if ok:
+                payload.setdefault("note",
+                    "indexed and searchable. It will be re-checked periodically; an "
+                    "endpoint that stops answering is demoted, not deleted.")
+            return 200, {"jsonrpc": "2.0", "id": rid,
+                         "result": {**_text(payload), **({} if ok else {"isError": True})}}
 
         if name == "registry_stats":
             c = store.counts(conn)

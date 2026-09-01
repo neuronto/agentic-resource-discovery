@@ -77,9 +77,73 @@ def _passes_filter(row: sqlite3.Row, flt: dict | None) -> bool:
     return True
 
 
+# Words that carry no discrimination, so coverage is not credited for them.
+_STOP = {"a","an","and","are","as","at","be","by","can","do","for","from","get",
+         "how","i","in","is","it","me","my","of","on","or","that","the","to",
+         "up","what","when","which","with","you","your"}
+
+
+def _content_terms(text: str) -> list[str]:
+    """The words a match should actually be judged on."""
+    ws = [w for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+          if len(w) > 2 and w not in _STOP]
+    return list(dict.fromkeys(ws))
+
+
+def _coverage(row, terms: list[str]) -> float:
+    """How much of the query this entry's own text accounts for.
+
+    BM25 cannot be used here. A tenant's private index holds a handful of
+    documents, often one, and BM25's IDF term is a statement about a corpus: in
+    a single-document index every term appears in 100% of documents, so IDF
+    collapses and every score converges on zero. The first version of this
+    compared a 1-document BM25 against a 10,000-document BM25 and the private
+    entry sorted below every public result for its own owner's query.
+
+    Coverage is corpus-independent, so it means the same thing for a tenant with
+    one internal service and a tenant with a thousand: the fraction of the
+    query's content words this entry's text accounts for. Prefix matching keeps
+    it in step with the stemmed FTS query that selected the row.
+    """
+    if not terms:
+        return 0.0
+    hay = " ".join(str(row[c] or "") for c in
+                   ("display_name", "description", "rep_queries", "tags")).lower()
+    words = set(re.findall(r"[a-z0-9]+", hay))
+    hit = sum(1 for t in terms
+              if any(w.startswith(t) or t.startswith(w) for w in words))
+    return hit / len(terms)
+
+
+# A private entry must account for at least this much of the query. The FTS
+# query is an OR over terms, so without a floor an internal service sharing one
+# incidental word with the query would be admitted to the caller's results.
+_PRIVATE_MIN_COVERAGE = 0.4
+
+
+def _private_hits(conn: sqlite3.Connection, match: str, owner_domain: str,
+                  limit: int) -> list[sqlite3.Row]:
+    """That domain's internal services matching the query."""
+    try:
+        return conn.execute("""
+          SELECT p.* FROM private_fts JOIN private_entries p ON p.key = private_fts.key
+          WHERE private_fts MATCH ? AND p.owner_domain = ?
+          LIMIT ?""", (match, owner_domain.lower(), limit)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+
 def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
-                 limit: int) -> list[dict]:
-    """BM25 over our own index, field-weighted, liveness-adjusted."""
+                 limit: int, owner_domain: str | None = None) -> list[dict]:
+    """BM25 over our own index, field-weighted, liveness-adjusted.
+
+    `owner_domain` is the verified domain behind the caller's bearer key,
+    resolved before this is called. It admits that domain's internal services
+    into the same ranking as public ones, so one query answers "what can I use
+    for this" across both. The default is None, so a caller who presents nothing
+    searches only the public index: private data lives in a separate table that
+    the public query cannot reach, and admitting it takes a deliberate argument.
+    """
     match = _fts_query(text)
     if not match:
         return []
@@ -96,8 +160,21 @@ def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
     except sqlite3.OperationalError:
         return []
 
-    kept = [r for r in rows if _passes_filter(r, flt)]
-    if not kept:
+    # `visibility` is vestigial, but a stray row from the old design must never
+    # surface, so the public leg still refuses one.
+    kept = [r for r in rows
+            if _passes_filter(r, flt) and _col(r, "visibility") != "private"]
+    terms = _content_terms(text)
+    priv = []
+    if owner_domain:
+        for r in _private_hits(conn, match, owner_domain, max(limit, 20)):
+            if not _passes_filter(r, flt):
+                continue
+            cov = _coverage(r, terms)
+            if cov >= _PRIVATE_MIN_COVERAGE:
+                priv.append((r, cov))
+        priv.sort(key=lambda rc: -rc[1])
+    if not kept and not priv:
         return []
     # bm25() is negative and lower is better; flip so higher is better.
     raw = []
@@ -106,15 +183,28 @@ def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
         n_src = len(json.loads(r["sources"] or "[]"))
         raw.append(base * rank.source_bonus(n_src)
                         * rank.verified_bonus(_col(r, "mcp_tools")))
-    scores = rank.scale_scores(raw)
+    scores = rank.scale_scores(raw) if raw else []
 
     out = []
+    # An internal service is placed by coverage on the same 0-100 band: one that
+    # accounts for the whole query ranks with the best public match, one that
+    # accounts for half sits mid-list. It is neither promoted for being the
+    # caller's own nor penalised for being unverifiable, and it carries a label
+    # so the caller always knows which half of the index answered.
+    for r, cov in priv:
+        e = store.private_row_to_entry(r)
+        e["score"] = int(round(100 * cov))
+        e["source"] = config.PUBLIC_BASE
+        e["_key"] = r["key"]
+        e["_live"] = None
+        out.append(e)
     for r, s in zip(kept, scores):
         e = store.row_to_entry(r)
         e["score"] = rank.apply_liveness(s, r["live"])
         e["source"] = config.PUBLIC_BASE
         e["_key"] = r["key"]
         e["_live"] = r["live"]
+        e["_sources"] = len(json.loads(r["sources"] or "[]"))
         _attach_verification(e, r)
         out.append(e)
     out.sort(key=lambda x: -x["score"])
@@ -155,7 +245,8 @@ def _attach_verification(entry: dict, row: sqlite3.Row) -> None:
 
 
 async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
-                 page_size: int, mode: str, use_dense: bool | None = None) -> dict:
+                 page_size: int, mode: str, use_dense: bool | None = None,
+                 owner_domain: str | None = None) -> dict:
     """Run a search in the requested federation mode (§5.4).
 
     `none`       our index only, lexical only. The fast path, tens of ms.
@@ -173,7 +264,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     if mode not in ("auto", "referrals", "none"):
         mode = "auto"
 
-    local = local_search(conn, text, flt, max(page_size, 10) * 3)
+    local = local_search(conn, text, flt, max(page_size, 10) * 3, owner_domain)
 
     if mode == "none":
         return {"results": local[:page_size], "_federated": [], "_dense": None}
@@ -251,6 +342,8 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             r = conn.execute("SELECT * FROM entries WHERE key=?", (k,)).fetchone()
             if not r or not _passes_filter(r, flt):
                 continue
+            if _col(r, "visibility") == "private":
+                continue    # unreachable: private rows are not in `entries`
             e = store.row_to_entry(r)
             e.update({"source": config.PUBLIC_BASE, "_key": k, "_live": r["live"]})
             _attach_verification(e, r)
