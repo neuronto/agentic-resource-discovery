@@ -856,34 +856,89 @@ const _nq=$("#navq"); if(_nq) _nq.addEventListener("focus",e=>{e.target.blur();$
 const p=new URLSearchParams(location.search).get("q");
 if(p){setQuery(p);}
 
-let busy=false;
+
+/* One search, painted twice.
+
+   Federated search is bounded by the slowest upstream, which is consistently
+   over a second while every other registry answers inside 700ms. Waiting for
+   all of them before drawing anything meant a two second blank on a phone.
+   So both calls go out at once: this index answers in about 200ms and gets
+   painted immediately, marked as still waiting on the others, and the fused
+   result replaces it when it lands. No upstream is dropped and nothing is
+   hidden, the reader just stops waiting on the slowest one to see anything. */
+let seq=0;
+
+function rowsHtml(res){
+  return `<div class="scroll"><table class="tbl"><tbody>`+res.map(e=>{
+    const url=e.url||"", host=url?url.replace(/^https?:\/\//,"").split("/")[0]:"";
+    const kind=(e.type||"").replace("application/","").replace(/\+json$/,"").replace("-card","");
+    return `<tr><td style="width:100%"><div class="cellflex">
+      <span class="sc">${e.score==null?"-":e.score}</span>
+      <div style="min-width:0"><div class="nm">${esc(e.displayName||e.identifier)}${kind?`<span class="badge">${esc(kind)}</span>`:""}</div>
+      ${e.description?`<div class="ds">${esc(e.description)}</div>`:""}</div></div></td>
+      <td class="num"><span class="src">${esc(host)}</span></td>
+      <td class="num"><span class="src">${esc((e.source||"").replace(/^https?:\/\//,"").split("/")[0])}</span></td></tr>`}).join("")
+    +`</tbody></table></div>`;
+}
+
+function paint(d, ms, pending){
+  const res=d.results||[], fed=(d.federation&&d.federation.registries)||[];
+  let head=`<div class="rmeta"><span class="tick hi">${ms}ms</span>`+
+    `<span class="tick on">${res.length} result${res.length===1?"":"s"}</span>`;
+  if(pending){
+    const n=((STATS&&STATS.federation&&STATS.federation.upstreams)||[]).length;
+    head+=`<span class="tick"><span class="dots">${n?n+" more registries":"other registries"}</span></span>`;
+  }else{
+    head+=fed.map(f=>`<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${f.ok?" · "+f.results:" · timeout"}</span>`).join("");
+  }
+  head+=`</div>`;
+  $("#out").innerHTML = res.length
+    ? head+rowsHtml(res)
+    : head+'<div class="empty">No match. Try describing the task more plainly.</div>';
+}
+
+async function ask(q, federation, preview){
+  const h={"content-type":"application/json"};
+  if(preview) h["x-neuronto-preview"]="1";
+  const r=await fetch("/search",{method:"POST",headers:h,
+    body:JSON.stringify({query:{text:q},federation:federation,pageSize:12})});
+  if(!r.ok) throw new Error("http "+r.status);
+  return r.json();
+}
+
 async function run(){
-  const q=$("#q").value.trim(); if(!q||busy) return;
-  busy=true; $("#btn").disabled=true;
+  const q=$("#q").value.trim(); if(!q) return;
+  const mine=++seq, t0=performance.now();
+  $("#btn").disabled=true;
   $("#out").innerHTML='<div class="empty"><span class="dots">searching every registry</span></div>';
-  const t0=performance.now();
+
+  const local=ask(q,"none",true), federated=ask(q,"auto",false);
+  /* Without this, a rejection that loses the race to the other call is an
+     unhandled rejection in the console on every failed search. */
+  local.catch(()=>{}); federated.catch(()=>{});
+  let drawn=false;
+
   try{
-    const r=await fetch("/search",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({query:{text:q},federation:"auto",pageSize:12})});
-    const ms=Math.round(performance.now()-t0), d=await r.json();
-    const res=d.results||[], fed=(d.federation&&d.federation.registries)||[];
-    const head=`<div class="rmeta"><span class="tick hi">${ms}ms</span>
-      <span class="tick on">${res.length} results</span>`+
-      fed.map(f=>`<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${f.ok?" · "+f.results:" · timeout"}</span>`).join("")+`</div>`;
-    if(!res.length){$("#out").innerHTML=head+'<div class="empty">No match. Try describing the task more plainly.</div>';return}
-    $("#out").innerHTML=head+`<div class="scroll"><table class="tbl"><tbody>`+res.map(e=>{
-      const url=e.url||"", host=url?url.replace(/^https?:\/\//,"").split("/")[0]:"";
-      const kind=(e.type||"").replace("application/","").replace(/\+json$/,"").replace("-card","");
-      return `<tr><td style="width:100%"><div class="cellflex">
-        <span class="sc">${e.score==null?"-":e.score}</span>
-        <div style="min-width:0"><div class="nm">${esc(e.displayName||e.identifier)}${kind?`<span class="badge">${esc(kind)}</span>`:""}</div>
-        ${e.description?`<div class="ds">${esc(e.description)}</div>`:""}</div></div></td>
-        <td class="num"><span class="src">${esc(host)}</span></td>
-        <td class="num"><span class="src">${esc((e.source||"").replace(/^https?:\/\//,"").split("/")[0])}</span></td></tr>`}).join("")
-      +`</tbody></table></div>`;
+    const d=await local;
+    if(mine!==seq) return;
+    paint(d, Math.round(performance.now()-t0), true); drawn=true;
+    $("#btn").disabled=false;          // interactive again after ~200ms
+  }catch(e){ /* the federated call still has a chance */ }
+
+  try{
+    const d=await federated;
+    if(mine!==seq) return;
+    paint(d, Math.round(performance.now()-t0), false); drawn=true;
     load(WIN);
-  }catch(err){$("#out").innerHTML='<div class="empty">Search failed. Try again.</div>'}
-  finally{busy=false;$("#btn").disabled=false}
+  }catch(e){
+    if(mine!==seq) return;
+    /* Keep what is on screen. Losing results that already arrived because a
+       later call failed would be strictly worse than showing them. */
+    if(!drawn) $("#out").innerHTML='<div class="empty">Search failed. Try again.</div>';
+    else { const t=document.querySelector(".rmeta .tick .dots");
+           if(t){ t.classList.remove("dots"); t.textContent="other registries unavailable";
+                  t.parentElement.classList.add("off"); } }
+  }finally{ if(mine===seq) $("#btn").disabled=false }
 }
 $("#f").addEventListener("submit",e=>{e.preventDefault();run()});
 if(p) run();

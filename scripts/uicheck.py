@@ -38,6 +38,10 @@ _passed: list[str] = []
 _failed: list[str] = []
 
 
+def _obj(v):
+    return json.loads(v) if isinstance(v, (str, bytes, bytearray)) else v
+
+
 def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"  {'PASS' if ok else 'FAIL'}  {name}{'  ' + detail if detail else ''}")
     (_passed if ok else _failed).append(name)
@@ -180,6 +184,51 @@ async def behaviour(page):
           f"({st['placeholder']!r})")
 
 
+async def search_paints_fast(page):
+    """A search must show results long before the slowest registry answers.
+
+    Federated search is bounded by its slowest upstream, consistently over a
+    second. The page therefore asks twice, this index first, and paints that.
+    If the two-phase logic is ever collapsed back into one call, first paint
+    silently returns to two seconds and nothing else fails.
+    """
+    print("\n  Search latency, as a reader experiences it\n  " + "-" * 62)
+    await page.send(zd.cdp.emulation.set_device_metrics_override(
+        width=390, height=844, device_scale_factor=1, mobile=True))
+    await page.get(url())
+    await asyncio.sleep(1.5)
+    # An async expression needs await_promise, or the unresolved promise comes
+    # back as an empty object and every assertion below reads a missing key.
+    got = _obj(await page.evaluate("""
+      (async () => {
+        const t0 = performance.now();
+        document.getElementById('q').value = 'query a postgres database';
+        document.getElementById('f').dispatchEvent(new Event('submit', {cancelable:true}));
+        let first = null, pending = false;
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 50));
+          if (first === null && document.querySelector('#out tbody tr')) {
+            first = Math.round(performance.now() - t0);
+            pending = !!document.querySelector('#out .rmeta .dots');
+          }
+          if (first !== null && !document.querySelector('#out .rmeta .dots')) break;
+        }
+        const rows = document.querySelectorAll('#out tbody tr').length;
+        const chips = [...document.querySelectorAll('#out .rmeta .tick')].map(t => t.textContent.trim());
+        return JSON.stringify({ first, pending, rows,
+          full: Math.round(performance.now() - t0), chips });
+      })()
+    """, await_promise=True))
+    check("first results paint in under 900ms", (got["first"] or 9999) < 900,
+          f"({got['first']}ms, {got['rows']} rows)")
+    check("first paint is marked as still awaiting the other registries",
+          bool(got["pending"]), "(so the reader is not told a partial answer is final)")
+    check("the federated answer replaces it", len(got["chips"]) > 2,
+          f"(final chips: {got['chips'][:6]})")
+    check("federation still completes", (got["full"] or 0) > (got["first"] or 0),
+          f"(full answer at {got['full']}ms)")
+
+
 async def main() -> int:
     print(f"\n  UI checks against {BASE}")
     browser = await zd.start(headless=True,
@@ -188,6 +237,7 @@ async def main() -> int:
         page = await browser.get("about:blank")
         await viewports(page)
         await behaviour(page)
+        await search_paints_fast(page)
     finally:
         await browser.stop()
     print("  " + "-" * 62)
