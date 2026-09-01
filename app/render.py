@@ -521,11 +521,15 @@ _CACHE_DB = Path(os.getenv("NEURONTO_PAGECACHE_DB",
 def _build_stamp() -> str:
     h = hashlib.sha1()
     here = Path(__file__).resolve().parent
-    for name in sorted(("render.py", "catalog.py", "badge.py")):
-        f = here / name
+    files = [here / n for n in ("render.py", "catalog.py", "badge.py")]
+    # The templates count as much as the code: a rewritten hero in web/*.html
+    # is a page change even though no Python moved, and leaving them out meant
+    # an edited template deployed cleanly, passed health, and reached nobody.
+    files += sorted((here.parent / "web").rglob("*.html"))
+    for f in files:
         try:
-            h.update(str(f.stat().st_mtime_ns).encode())
-            h.update(str(f.stat().st_size).encode())
+            st = f.stat()
+            h.update(f"{f.name}:{st.st_mtime_ns}:{st.st_size}".encode())
         except OSError:
             pass
     return h.hexdigest()[:8]
