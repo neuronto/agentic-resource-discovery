@@ -208,11 +208,17 @@ def _rpc(method, params=None, rid=1):
                          "params": params or {}}, timeout=60)
 
 
-def t_mcp_lists_all_three_tools():
+def t_mcp_lists_every_tool_and_labels_the_write():
     s, d = _rpc("tools/list")
     assert s == 200, s
-    names = {t["name"] for t in d["result"]["tools"]}
-    assert names == {"find_resource", "find_tool", "registry_stats"}, names
+    tools = {t["name"]: t for t in d["result"]["tools"]}
+    assert set(tools) == {"find_resource", "find_tool", "registry_stats",
+                          "publish_resource"}, set(tools)
+    # A client decides what it may call unattended from these hints, so the one
+    # tool that writes must be the only one that says so.
+    writes = {n for n, t in tools.items()
+              if t["annotations"].get("readOnlyHint") is False}
+    assert writes == {"publish_resource"}, writes
 
 
 def t_mcp_find_tool_matches_rest():
@@ -1010,6 +1016,152 @@ def t_metrics_json_is_public_and_complete():
     assert d["ard_publishers"]["verified_manifests"] > 100
     # the path split is the finding we reported upstream; it must stay visible
     assert d["ard_publishers"]["by_path"], "manifest path split not published"
+
+
+def _post_auth(path, payload, key, method="POST"):
+    req = urllib.request.Request(BASE + path, data=json.dumps(payload).encode(),
+                                 headers={**UA, "Authorization": f"Bearer {key}"},
+                                 method=method)
+    try:
+        r = urllib.request.urlopen(req, timeout=40)
+        return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def t_manifest_generation_only_emits_what_it_fetched():
+    """A generated manifest must never invent an entry."""
+    s, d = post("/manifest/build", {"domain": "mcp.deepwiki.com"})
+    assert s == 200, s
+    assert d.get("entries", 0) > 0, "generated nothing for a known MCP host"
+    built = (d.get("manifest") or {}).get("entries") or []
+    assert len(built) == d["entries"], "the count and the manifest disagree"
+    assert len(d.get("evidence") or []) == len(built), \
+        "an entry was emitted with no evidence behind it"
+    for e in built:
+        assert e.get("url"), "entry with no endpoint"
+    for ev in d["evidence"]:
+        assert ev.get("because"), "evidence with no reason"
+    # and it must be served back as a real manifest
+    s2, d2 = get("/m/mcp.deepwiki.com.json")
+    assert s2 == 200, s2
+    assert d2.get("specVersion") and d2.get("entries"), "hosted manifest malformed"
+    for e in d2["entries"]:
+        assert not any(k.startswith("_") for k in e), "internal key leaked into manifest"
+
+
+def t_hosted_manifest_states_it_is_not_authored_by_the_owner():
+    """Hosting a manifest for a domain must never look like the domain wrote it."""
+    r = urllib.request.urlopen(
+        urllib.request.Request(BASE + "/m/mcp.deepwiki.com.json", headers=UA), timeout=30)
+    src = r.headers.get("x-manifest-source") or ""
+    assert "not authored by the domain owner" in src.lower(), f"missing disclaimer: {src!r}"
+
+
+def t_claim_requires_dns_proof():
+    """An unverified domain must not receive a key."""
+    s, d = post("/claim", {"domain": "example.com"})
+    assert s == 200, s
+    val = ((d.get("record") or {}).get("value") or "")
+    assert val.startswith("neuronto-site-verification="), d
+    s2, d2 = post("/claim/verify", {"domain": "example.com"})
+    assert s2 >= 400 or not d2.get("verified"), "issued a key without proof"
+    assert not d2.get("api_key"), "LEAK: key issued for an unproven domain"
+
+
+def t_private_endpoints_reject_anonymous_callers():
+    for method, payload in (("POST", {"entry": {"displayName": "x"}}),
+                            ("DELETE", {"identifier": "x"})):
+        req = urllib.request.Request(BASE + "/private/entries",
+                                     data=json.dumps(payload).encode(),
+                                     headers=UA, method=method)
+        try:
+            urllib.request.urlopen(req, timeout=20)
+            raise AssertionError(f"{method} /private/entries allowed anonymously")
+        except urllib.error.HTTPError as e:
+            assert e.code == 401, f"{method} gave {e.code}, want 401"
+    try:
+        urllib.request.urlopen(urllib.request.Request(
+            BASE + "/private/entries", headers=UA), timeout=20)
+        raise AssertionError("GET /private/entries allowed anonymously")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401, e.code
+
+
+def t_private_entries_are_absent_from_every_public_surface():
+    """The isolation claim, checked rather than asserted."""
+    s, d = get("/metrics.json")
+    assert s == 200
+    total = d["index"]["entries"]
+    assert sum(d["index"]["by_kind"].values()) == total, \
+        "by_kind does not reconcile with the entry total, a hidden class exists"
+    # nothing public may ever carry the private label
+    for q in ("employee", "internal", "staff directory", "payroll"):
+        s2, d2 = post("/search", {"query": {"text": q}, "federation": "none",
+                                  "pageSize": 25})
+        assert s2 == 200, s2
+        leaked = [r for r in d2.get("results", []) if r.get("visibility") == "private"]
+        assert not leaked, f"LEAK: {q!r} returned private entries {leaked[:1]}"
+
+
+def t_publish_resource_verifies_before_indexing():
+    """The agent publishing route must hold the same bar as the HTTP one."""
+    s, d = post("/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    names = {t["name"] for t in d["result"]["tools"]}
+    assert "publish_resource" in names, names
+    tool = [t for t in d["result"]["tools"] if t["name"] == "publish_resource"][0]
+    assert tool["annotations"]["readOnlyHint"] is False, "write tool claims read-only"
+
+    def call(args):
+        _, r = post("/mcp", {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                             "params": {"name": "publish_resource", "arguments": args}})
+        res = r["result"]
+        return res.get("isError", False), json.loads(res["content"][0]["text"])
+
+    err, _ = call({})
+    assert err, "accepted a submission with no endpoint and no domain"
+    err, body = call({"endpoint": "https://example.com/definitely-not-mcp"})
+    assert err, f"indexed a URL that is not an MCP server: {body}"
+    err, body = call({"endpoint": "https://mcp.deepwiki.com/mcp"})
+    assert not err and body.get("status") == "indexed", body
+    assert body.get("verified_tools", 0) > 0, "indexed without reading any tools"
+
+
+def t_publish_resource_and_submit_cannot_drift():
+    """Both routes must produce the same identifier for the same server."""
+    _, r = post("/mcp", {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                         "params": {"name": "publish_resource",
+                                    "arguments": {"endpoint": "https://mcp.deepwiki.com/mcp"}}})
+    via_mcp = json.loads(r["result"]["content"][0]["text"]).get("identifier")
+    _, via_http = post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"})
+    assert via_mcp and via_mcp == via_http.get("identifier"), \
+        f"routes disagree: {via_mcp} vs {via_http.get('identifier')}"
+
+
+def t_audit_reports_who_outranks_the_publisher():
+    """The comparison must be present, honest and free of internal keys."""
+    s, d = post("/audit", {"domain": "vercel.com"}, timeout=90)
+    assert s == 200, s
+    assert "_manifest" not in d, "internal manifest leaked into the report"
+    comp = d.get("competition")
+    assert comp, "no competition section"
+    assert "note" in comp and "never endorsement" in comp["note"], comp.get("note")
+    for q in comp.get("queries", []):
+        for a in q.get("ahead_of_you", []):
+            assert a.get("has_that_you_may_not"), "a rival is listed with no reason"
+    assert any("rank" in r.lower() or "returned" in r.lower()
+               for r in d["recommendations"]), "comparison produced no advice"
+
+
+def t_audit_advice_names_a_fixable_cause():
+    """A finding a publisher cannot act on is not a finding."""
+    s, d = post("/audit", {"domain": "huggingface.co"}, timeout=90)
+    assert s == 200, s
+    recs = d.get("recommendations") or []
+    assert recs, "no recommendations"
+    for r in recs:
+        assert "\u2014" not in r and "\u2013" not in r, f"dash in copy: {r}"
+        assert len(r) > 40, f"advice too thin to act on: {r}"
 
 
 def main():
