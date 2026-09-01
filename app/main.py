@@ -333,7 +333,7 @@ async def sitemap():
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
-            "/tools/", "/bench", "/adoption", "/submit"]
+            "/tools/", "/bench", "/adoption", "/submit", "/published"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
     urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
                                    for p in catalog.publisher_list(db())]
@@ -1004,6 +1004,12 @@ async function go(e){{
         "Index your Agentic Resource Discovery manifest now. We fetch it live from your "
         "domain: no account, no allowlist, no charge.",
         body, f"{B}/submit"))
+
+
+@app.get("/published", include_in_schema=False)
+async def published_page():
+    html_ = render.cached("published", 3600, lambda: catalog.render_published(db()))
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/blog", include_in_schema=False)

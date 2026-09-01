@@ -718,6 +718,44 @@ def t_submit_validates_input():
         assert s == 400, f"accepted {bad!r} with {s}"
 
 
+def t_published_page_lists_every_external_artefact():
+    """The crawl path to everything we published off-domain.
+
+    IndexNow is domain-verified and refuses a foreign URL, so a page that is
+    itself indexed and links each artefact is the only honest way to get them
+    discovered. If a link rots, the page becomes a liability rather than an asset.
+    """
+    s, h = _html("/published")
+    assert s == 200, s
+    import re as _re
+    ext = set(_re.findall(r'href="(https?://(?!neuronto\.com)[^"]+)"', h))
+    assert len(ext) >= 12, f"only {len(ext)} external artefacts linked"
+    for must in ("github.com/neuronto/agentic-resource-discovery",
+                 "huggingface.co/datasets/", "pypi.org/project/ard-publish",
+                 "registry.modelcontextprotocol.io"):
+        assert any(must in u for u in ext), f"missing {must}"
+    assert "application/ld+json" in h and '"sameAs"' in h, "no sameAs schema"
+
+
+def t_published_links_all_resolve():
+    """Every external link must actually be reachable."""
+    import re as _re
+    s, h = _html("/published")
+    ext = sorted(set(_re.findall(r'href="(https?://(?!neuronto\.com)[^"]+)"', h)))
+    dead = []
+    for u in ext:
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25)
+            if r.status != 200:
+                dead.append((u, r.status))
+        except urllib.error.HTTPError as e:
+            dead.append((u, e.code))
+        except Exception as e:
+            dead.append((u, type(e).__name__))
+    assert not dead, f"dead links on /published: {dead}"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
