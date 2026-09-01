@@ -29,6 +29,12 @@ _FAMILIES: dict[str, tuple[str, ...]] = {
         "application/mcp-server-card+json",
         "application/vnd.mcp+json",
         "application/mcp+json",
+        # Seen in the wild spelled out in full. The substring fallback below
+        # looks for "mcp" and missed this entirely, so real MCP servers were
+        # being filed as "other" and dropped from every MCP filter. This is the
+        # exact failure we criticise other registries for.
+        "application/vnd.modelcontextprotocol.server+json",
+        "application/modelcontextprotocol-server+json",
     ),
     "a2a-agent": (
         "application/a2a-agent-card+json",
@@ -45,12 +51,53 @@ _FAMILIES: dict[str, tuple[str, ...]] = {
         "application/ai-skill-archive+gzip",
         "application/vnd.github.copilot-plugin",
     ),
+    # Agent descriptors that are not A2A agent cards. ACP (IBM), OASF (AGNTCY /
+    # Cisco), NANDA AgentFacts and the generic Agent Manifest all describe an
+    # agent, so a caller asking for agents must find them, but they are not
+    # interchangeable with an A2A card and are not filed as one.
+    "agent": (
+        "application/agent-manifest+json",
+        "application/acp-agent-manifest+json",
+        "application/vnd.acp.agent+json",
+        "application/oasf-record+json",
+        "application/vnd.oasf.record+json",
+        "application/agentfacts+json",
+        "application/vnd.nanda.agentfacts+json",
+        "application/vnd.openclaw.agent+json",
+        "application/nlweb+json",
+    ),
+    # Tools exposed by a page to a browser agent, W3C WebMCP. Not a callable
+    # server: it exists only while the page is open, so it is not an mcp-server.
+    "webmcp": (
+        "application/webmcp-tools+json",
+        "application/vnd.webmcp+json",
+    ),
+    # Plugin manifests, including the OpenAI-era one still in circulation.
+    "plugin": (
+        "application/ai-plugin+json",
+        "application/agent-plugins+json",
+        "application/vnd.ai-plugin+json",
+    ),
+    "graphql": (
+        "application/graphql+json",
+        "application/graphql-response+json",
+        "application/vnd.graphql.sdl",
+    ),
+    "dataset": (
+        "application/dataset+json",
+        "application/vnd.dataset+json",
+    ),
     "catalog":  ("application/ai-catalog+json", "application/ai-catalog"),
     "registry": ("application/ai-registry+json", "application/ai-registry"),
     "openapi":  ("application/vnd.oai.openapi+json", "application/openapi+json",
                  "application/vnd.oai.openapi", "application/rest-api+json"),
-    "package":  ("application/vnd.npm.package+json",),
-    "doc":      ("text/llms.txt", "text/markdown", "text/plain", "text/html"),
+    "package":  ("application/vnd.npm.package+json", "application/vnd.npm+json",
+                 "application/vnd.pypi.package+json", "application/vnd.pypi+json",
+                 "application/vnd.oci.image.manifest.v1+json",
+                 "application/cli-manifest+json"),
+    "doc":      ("text/llms.txt", "text/markdown", "text/plain", "text/html",
+                 "text/asciidoc", "application/schema+json",
+                 "application/linkset+json"),
 }
 
 _LOOKUP: dict[str, str] = {}
@@ -95,12 +142,24 @@ def media_family(media_type: object | None) -> str:
         return _LOOKUP[t]
     # Unseen spelling: fall back to substring shape rather than giving up, so a
     # new variant of a known family still lands in the right bucket.
-    if "mcp" in t and "server" in t: return "mcp-server"
+    # Order matters: the most specific shape wins. "webmcp" contains "mcp", and
+    # an OASF record contains "agent", so the narrow tests come first.
+    if "webmcp" in t:   return "webmcp"
+    if ("mcp" in t or "modelcontextprotocol" in t) and "server" in t:
+        return "mcp-server"
     if "a2a" in t or "agent-card" in t: return "a2a-agent"
+    if "agentfacts" in t or "oasf" in t or "agent-manifest" in t or "nlweb" in t:
+        return "agent"
     if "skill" in t:    return "skill"
+    if "plugin" in t:   return "plugin"
+    if "graphql" in t:  return "graphql"
     if "registry" in t: return "registry"
     if "catalog" in t:  return "catalog"
-    if "openapi" in t:  return "openapi"
+    if "openapi" in t or "swagger" in t: return "openapi"
+    if "asyncapi" in t: return "openapi"
+    if "dataset" in t:  return "dataset"
+    if "npm" in t or "pypi" in t or "package" in t or "oci.image" in t:
+        return "package"
     return "other"
 
 
@@ -115,7 +174,13 @@ def expand_type_filter(values: list[str]) -> set[str]:
     means "MCP servers", not "entries whose type string is exactly this". We
     match on family so the filter finds them however the publisher spelled it.
     """
-    return {media_family(v) for v in values if v}
+    fams = {media_family(v) for v in values if v}
+    # A2A cards and other agent descriptors are different things, but a caller
+    # asking for one almost always means "an agent". Expanding across the pair
+    # is the same courtesy we already extend across MCP spellings.
+    if fams & {"a2a-agent", "agent"}:
+        fams |= {"a2a-agent", "agent"}
+    return fams
 
 
 _URN_RE = re.compile(r"^urn:(air|ai):([^:]+):(.+)$", re.I)

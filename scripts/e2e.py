@@ -808,6 +808,37 @@ def t_submit_page_documents_both_routes():
     assert "skills" in low, "does not explain how skills get listed"
 
 
+def t_media_type_normalisation_is_universal():
+    """Every spelling in circulation must land in the right family.
+
+    The classifier looked for the substring "mcp" and therefore filed
+    application/vnd.modelcontextprotocol.server+json, a real MCP server type
+    seen in our own crawl, as "other". That is precisely the silent-drop failure
+    this registry exists to fix, committed by us.
+    """
+    s, d = post("/explore", {"resultType": {"facets": [{"field": "type_family",
+                                                        "limit": 20}]}})
+    assert s == 200, s
+    fams = {b["value"]: b["count"] for b in d["facets"]["type_family"]["buckets"]}
+    for expected in ("mcp-server", "skill", "a2a-agent", "openapi", "doc",
+                     "plugin", "graphql", "package"):
+        assert expected in fams, f"family {expected} absent from the index"
+    # "other" must stay a genuine remainder, not a dumping ground
+    total = sum(fams.values())
+    assert fams.get("other", 0) / total < 0.05, \
+        f"{fams.get('other')} of {total} entries unclassified"
+
+
+def t_agent_filter_spans_both_agent_families():
+    """A2A cards and ACP/OASF/AgentFacts descriptors are different but a caller
+    asking for agents means both."""
+    s, d = post("/search", {"query": {"text": "agent"},
+                            "filter": {"type": ["application/a2a-agent-card+json"]},
+                            "federation": "none", "pageSize": 5})
+    assert s == 200, s
+    assert d["results"], "agent type filter returned nothing"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):
