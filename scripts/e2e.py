@@ -930,23 +930,50 @@ def t_no_dashes_in_anything_a_crawler_reads():
 
 def t_preview_image_is_reachable_and_large_enough():
     """Facebook and LinkedIn ignore images under 200px and prefer 1200x630+."""
+    import re as _re, struct
+    s, h = _html("/")
+    url = _re.search(r'og:image" content="([^"]+)"', h).group(1)
     r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/img/discovery.jpg", headers={"User-Agent": "facebookexternalhit/1.1"}),
-        timeout=30)
+        url, headers={"User-Agent": "facebookexternalhit/1.1"}), timeout=30)
     assert r.status == 200, r.status
+    ctype = r.headers.get("Content-Type", "")
     data = r.read()
+    # A PNG served as image/jpeg is a reason for a crawler to drop the card, and
+    # it happened: the image route hardcoded image/jpeg for every extension.
+    if url.endswith(".png"):
+        assert ctype == "image/png", f"PNG served as {ctype!r}"
+        assert data[:8] == b"\x89PNG\r\n\x1a\n", "not actually a PNG"
+        w, hgt = struct.unpack(">II", data[16:24])
+    else:
+        assert "jpeg" in ctype, ctype
+        i, w, hgt = 2, 0, 0
+        while i < len(data) - 9:
+            if data[i] != 0xFF:
+                break
+            if data[i + 1] in (0xC0, 0xC2):
+                hgt, w = struct.unpack(">HH", data[i + 5:i + 9]); break
+            i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
     assert len(data) > 20000, f"preview image is only {len(data)} bytes"
-    import struct
-    i, w, hgt = 2, 0, 0
-    while i < len(data) - 9:
-        if data[i] != 0xFF:
-            break
-        m = data[i + 1]
-        if m in (0xC0, 0xC2):
-            hgt, w = struct.unpack(">HH", data[i + 5:i + 9])
-            break
-        i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
     assert w >= 1200 and hgt >= 600, f"preview image is {w}x{hgt}, too small for a large card"
+
+
+def t_preview_crawlers_get_html_not_json():
+    """/bench and /adoption negotiate content, and a crawler sends Accept: */*.
+
+    Biasing to JSON meant a shared link to either rendered as no card at all.
+    """
+    for path in ("/bench", "/adoption"):
+        req = urllib.request.Request(BASE + path, headers={
+            "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+            "Accept": "*/*"})
+        r = urllib.request.urlopen(req, timeout=40)
+        body = r.read().decode("utf-8", "replace")
+        assert "text/html" in r.headers.get("Content-Type", ""), \
+            f"{path} serves {r.headers.get('Content-Type')} to a preview crawler"
+        assert 'property="og:image"' in body, f"{path} has no card for a crawler"
+    # and an API client still gets JSON
+    s, d = get("/bench")
+    assert isinstance(d, dict) and "targets" in d, "API client no longer gets JSON"
 
 
 def main():

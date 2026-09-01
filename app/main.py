@@ -642,7 +642,13 @@ async def image(name: str):
     f = WEB / "img" / name
     if "/" in name or ".." in name or not f.exists():
         return JSONResponse(status_code=404, content={"error": "not_found"})
-    return Response(f.read_bytes(), media_type="image/jpeg",
+    # Derive the type from the extension. Serving a PNG as image/jpeg is not
+    # cosmetic: preview crawlers fetch og:image and validate it, and a mismatched
+    # content type is a reason to drop the card.
+    kind = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif"}.get(
+        name.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    return Response(f.read_bytes(), media_type=kind,
                     headers={"Cache-Control": "public, max-age=604800, immutable"})
 
 
@@ -714,16 +720,32 @@ async def tools_category(slug: str):
 # stored run keeps the endpoint cheap; running one is an operator action.
 # ---------------------------------------------------------------------------
 
-def _wants_html(request: Request) -> bool:
-    """Content negotiation, biased to JSON.
+# Crawlers that build a link preview. They send Accept: */* and would otherwise
+# receive JSON, so a shared link to /bench or /adoption rendered as no card at
+# all. Serving them the same HTML a browser gets is not cloaking: it is the
+# identical content a human sees at that URL.
+_PREVIEW_BOTS = ("facebookexternalhit", "linkedinbot", "twitterbot", "slackbot",
+                 "discordbot", "telegrambot", "whatsapp", "applebot",
+                 "redditbot", "googlebot", "bingbot", "gptbot", "claude",
+                 "perplexity", "duckduckbot", "yandex", "embedly", "quora link",
+                 "pinterest", "skypeuripreview", "vkshare", "iframely")
 
-    A browser or crawler sends `text/html` and gets the page; anything else,
-    including a bare request with no Accept header, gets JSON. Biasing to JSON
-    keeps the published harness link and every existing API client working
-    exactly as before.
+
+def _wants_html(request: Request) -> bool:
+    """Content negotiation, biased to JSON but never at a crawler's expense.
+
+    An explicit `application/json` always wins, so the API and the published
+    benchmark harness are unchanged. A browser asking for `text/html` gets the
+    page. A preview crawler gets the page too, identified by user agent, because
+    it sends `*/*` and JSON renders as no card.
     """
     a = (request.headers.get("accept") or "").lower()
-    return "text/html" in a and "application/json" not in a
+    if "application/json" in a:
+        return False
+    if "text/html" in a:
+        return True
+    ua = (request.headers.get("user-agent") or "").lower()
+    return any(b in ua for b in _PREVIEW_BOTS)
 
 
 @app.get("/bench")
