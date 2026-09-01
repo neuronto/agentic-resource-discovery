@@ -136,6 +136,14 @@ async def from_upstreams(conn, queries: list[str] | None = None) -> list[dict]:
                     for e in (r.json().get("results") or []):
                         if isinstance(e, dict) and store.upsert_entry(conn, e, uid):
                             n += 1
+                    # Commit per query, not per upstream. SQLite takes one
+                    # writer, and an open transaction here spanned every
+                    # remaining POST in the battery: the lock was held for the
+                    # eight minutes this stage runs, and a publisher submitting
+                    # in that window was refused with "index is mid-maintenance"
+                    # after waiting out the busy timeout. Happened to a real
+                    # publisher on 2026-09-01, three times in five minutes.
+                    conn.commit()
                 except Exception:
                     continue
                 await asyncio.sleep(0.05)
@@ -258,6 +266,13 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
                     continue
             if got:
                 found += 1; entries += got
+            # Bound the transaction to one domain. These writes run inside a
+            # gather of up to 2000 coroutines, so without this the lock is held
+            # for the whole chunk while every one of them is still fetching.
+            try:
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
         # Record WHICH path answered. This used to be dropped here, so every
         # publisher the crawler found had a manifest and no record of where,
         # and `verified_manifests` (which counts a non-null path) undercounted

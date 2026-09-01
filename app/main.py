@@ -1564,20 +1564,37 @@ async def _submit(body: dict) -> JSONResponse:
                             f"MCP server at {host}. Requires credentials before listing tools."
                             if res["auth"] else f"MCP server at {host}."),
         }
-        try:
-            key = store.upsert_entry(conn, entry, "submitted")
-            if res["tools"]:
-                store.replace_tools(conn, key, res["tools"])
-            store.mark_introspection(conn, key, res["status"], len(res["tools"]),
-                                     res["auth"], res.get("server_name"))
-            store.mark_liveness(conn, key, True, 200, None)
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower():
-                return JSONResponse(status_code=503, headers={"Retry-After": "60"},
-                                    content={"status": "busy", "endpoint": endpoint,
-                                             "detail": "index is mid-maintenance, retry shortly"})
-            raise
+        # A publisher joining the index is the rarest and most valuable write we
+        # take, and it is worth more than one attempt. A background refresh that
+        # overlapped this used to refuse them outright: on 2026-09-01 a real
+        # publisher was turned away three times in five minutes while our own
+        # ingest held the write lock. The long-held transactions that caused it
+        # are fixed, and this retry is the belt to that braces.
+        for attempt in range(3):
+            try:
+                key = store.upsert_entry(conn, entry, "submitted")
+                if res["tools"]:
+                    store.replace_tools(conn, key, res["tools"])
+                store.mark_introspection(conn, key, res["status"], len(res["tools"]),
+                                         res["auth"], res.get("server_name"))
+                store.mark_liveness(conn, key, True, 200, None)
+                conn.commit()
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e).lower():
+                    raise
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if attempt == 2:
+                    return JSONResponse(status_code=503, headers={"Retry-After": "30"},
+                                        content={"status": "busy", "endpoint": endpoint,
+                                                 "detail": ("the index was busy writing and could "
+                                                            "not accept this submission. Nothing "
+                                                            "is wrong with your server, retry "
+                                                            "shortly.")})
+                await asyncio.sleep(1.5 * (attempt + 1))
         catalog.invalidate_publishers(); render.invalidate()
         return JSONResponse({
             "status": "indexed",
