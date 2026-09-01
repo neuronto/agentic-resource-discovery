@@ -108,7 +108,9 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
     store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
                      entries=out["results"])
-    payload: dict[str, Any] = {"results": search.clean(out["results"])}
+    cleaned = search.clean(out["results"])
+    payload: dict[str, Any] = {"results": cleaned,
+                               "queryMatch": search.query_match(text, cleaned)}
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
     fed = out.get("_federated") or []
