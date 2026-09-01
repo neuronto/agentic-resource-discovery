@@ -275,6 +275,9 @@ def composition(conn: sqlite3.Connection) -> dict:
 
 KIND_LABEL = {
     "mcp-server": "MCP servers", "skill": "Agent skills", "a2a-agent": "A2A agents",
+    "agent": "Agent descriptors (ACP, OASF, AgentFacts)",
+    "webmcp": "WebMCP browser tools", "plugin": "Plugin manifests",
+    "graphql": "GraphQL APIs", "dataset": "Datasets",
     "openapi": "OpenAPI services", "doc": "Machine-readable docs",
     "registry": "ARD registries", "catalog": "Catalogues", "package": "Packages",
     "other": "Other callable resources", "unclassified": "Unclassified",
