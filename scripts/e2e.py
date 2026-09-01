@@ -1148,7 +1148,7 @@ def _post_auth(path, payload, key, method="POST"):
 
 def t_manifest_generation_only_emits_what_it_fetched():
     """A generated manifest must never invent an entry."""
-    s, d = post("/manifest/build", {"domain": "mcp.deepwiki.com"})
+    s, d = not_rate_limited(*post("/manifest/build", {"domain": "mcp.deepwiki.com"}), "manifest build")
     assert s == 200, s
     assert d.get("entries", 0) > 0, "generated nothing for a known MCP host"
     built = (d.get("manifest") or {}).get("entries") or []
