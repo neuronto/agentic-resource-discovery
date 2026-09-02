@@ -1,0 +1,57 @@
+{
+  "name": "neuronto-agent-finder",
+  "displayName": "Neuronto Agent Finder (ARD)",
+  "description": "Find the MCP servers, skills, agents and APIs that can do a task. Searches every public Agentic Resource Discovery (ARD) registry at once, from inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "neuronto",
+  "license": "Apache-2.0",
+  "homepage": "https://neuronto.com/connect/vscode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neuronto/agentic-resource-discovery.git",
+    "directory": "clients/vscode"
+  },
+  "bugs": { "url": "https://github.com/neuronto/agentic-resource-discovery/issues" },
+  "icon": "icon.png",
+  "engines": { "vscode": "^1.101.0" },
+  "categories": ["AI", "Chat", "Other"],
+  "keywords": ["mcp", "mcp-server", "ard", "agentic resource discovery", "discovery",
+               "registry", "tool discovery", "agents", "copilot"],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "neuronto.agentFinder",
+        "label": "Neuronto ARD Registry"
+      }
+    ],
+    "commands": [
+      {
+        "command": "neuronto.findResource",
+        "title": "Neuronto: Find a tool, MCP server or agent for a task",
+        "category": "Neuronto"
+      }
+    ],
+    "configuration": {
+      "title": "Neuronto Agent Finder",
+      "properties": {
+        "neuronto.endpoint": {
+          "type": "string",
+          "default": "https://neuronto.com/mcp",
+          "markdownDescription": "MCP endpoint to register. Point this at any other public ARD registry's MCP endpoint to use that one instead; the list is at [neuronto.com/ard-registries](https://neuronto.com/ard-registries)."
+        },
+        "neuronto.searchEndpoint": {
+          "type": "string",
+          "default": "https://neuronto.com/search",
+          "markdownDescription": "REST endpoint used by the **Find a tool** command."
+        },
+        "neuronto.federate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Search every other public ARD registry as well as this index, and fuse the rankings. Turning this off keeps the query on one index."
+        }
+      }
+    }
+  }
+}
