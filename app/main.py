@@ -1593,7 +1593,7 @@ def connect_page(request: Request):
         "a2a": {"endpoint": f"{B}/a2a", "card": f"{B}/.well-known/agent-card.json"},
         "rest": f"{B}/search",
         "claude_code": ["/plugin marketplace add neuronto/ard-connectors",
-                        "/plugin install agentfinder@ard-connectors"],
+                        "/plugin install neuronto-agent-finder@neuronto"],
         "clients": {
             "claude_desktop": {"mcpServers": {"neuronto": {
                 "command": "npx", "args": ["-y", "mcp-remote", f"{B}/mcp"]}}},

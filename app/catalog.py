@@ -1203,7 +1203,7 @@ def render_connect_page() -> str:
                 f'<pre id="{idx}">{esc(code)}</pre></div>{n}')
 
     claude_code = ("/plugin marketplace add neuronto/ard-connectors\n"
-                   "/plugin install agentfinder@ard-connectors")
+                   "/plugin install neuronto-agent-finder@neuronto")
     claude_desktop = json.dumps({"mcpServers": {"neuronto": {
         "command": "npx", "args": ["-y", "mcp-remote", mcp]}}}, indent=2)
     cursor = json.dumps({"mcpServers": {"neuronto": {"url": mcp}}}, indent=2)
