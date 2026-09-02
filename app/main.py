@@ -587,6 +587,7 @@ def sitemap():
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
             "/tools/", "/bench", "/adoption", "/submit", "/published"]
+    urls += [f"/connect/{s_}" for s_ in catalog.CLIENTS]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
     urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
                                    for p in catalog.publisher_list(db())]
@@ -1618,6 +1619,27 @@ def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|d
                              # cache headers; an hour keeps badge fetches from
                              # ever being load while staying fresh enough.
                              "ETag": f'W/"{hash(svg) & 0xffffffff:x}"'})
+
+
+@app.get("/connect/{slug}", include_in_schema=False)
+def connect_client_page(slug: str, request: Request):
+    """One page per client, because that is the query people actually type."""
+    if slug not in catalog.CLIENTS:
+        return Response(status_code=404)
+    if _wants_html(request):
+        html_ = render.cached(f"connect-{slug}-html", 3600,
+                              lambda: catalog.render_client_page(slug))
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
+                                            "Vary": "Accept"})
+    c = catalog.CLIENTS[slug]
+    B = config.PUBLIC_BASE
+    return JSONResponse({
+        "client": c["name"], "kind": c["kind"],
+        "endpoint": f"{B}/mcp",
+        "config_location": c["label"],
+        "docs": c["doc"],
+        "all_clients": f"{B}/connect",
+    }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
 
 
 @app.get("/privacy", include_in_schema=False)

@@ -1207,6 +1207,9 @@ def render_connect_page() -> str:
                 f'<pre id="{idx}">{esc(code)}</pre></div>{n}')
 
     j = lambda o: json.dumps(o, indent=2)
+    others = "".join(
+        f'<a href="/connect/{s_}">{esc(c_["name"])}</a>'
+        for s_, c_ in CLIENTS.items())
     claude_code = ("/plugin marketplace add neuronto/ard-connectors\n"
                    "/plugin install neuronto-agent-finder@neuronto")
     claude_desktop = j({"mcpServers": {"neuronto": {
@@ -1250,6 +1253,10 @@ def render_connect_page() -> str:
   line-height:1.55;white-space:pre}}
 h2.csec{{margin:44px 0 0;font-size:20px}}
 h3.cli{{margin:30px 0 0;font-size:16px}}
+.others{{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}}
+.others a{{border:1px solid var(--line);border-radius:999px;padding:5px 12px;
+  font-size:13px;color:var(--fg2);text-decoration:none}}
+.others a:hover{{color:var(--fg);border-color:var(--fg2)}}
 </style>
 
 <div class="cwrap">
@@ -1345,6 +1352,13 @@ h3.cli{{margin:30px 0 0;font-size:16px}}
   <code>405</code> to GET: there is no server-initiated stream, because every tool answers
   inside the request that asked. Full reference at <a href="/api-docs">/api-docs</a>, and
   <a href="/agents.md">/agents.md</a> if you are an agent reading this yourself.</p>
+</div>
+
+<h2 class="csec">One page per client</h2>
+<div class="cwrap">
+  <p class="lede">Each of these covers that client on its own, including the quirk that
+  makes a config copied from somewhere else fail in it.</p>
+  <div class="others">{others}</div>
 </div>
 
 <h2 class="csec">What you get back</h2>
@@ -1474,3 +1488,233 @@ service does, the service or this page is wrong, and either way we want to know.
         "What Neuronto receives, what it stores and what leaves the machine. No accounts, "
         "no IP addresses, no tracking cookies; keyed searches are not recorded at all.",
         body, f"{B}/privacy")
+
+
+# One page per client. Not eleven copies of one page: a reader arrives from
+# "how do I add an MCP server to <their client>", and what they need is that
+# client's config key, that client's quirk and that client's failure mode. The
+# quirks below are the whole reason these pages are not interchangeable.
+CLIENTS = {
+    "claude-code": dict(
+        name="Claude Code", kind="CLI",
+        label="Two commands, in Claude Code",
+        code=("/plugin marketplace add neuronto/ard-connectors\n"
+              "/plugin install neuronto-agent-finder@neuronto"),
+        lang="text",
+        quirk=("Claude Code is the only client here that takes a plugin rather than a "
+               "config file, so the connector arrives bundled with a skill. The skill is "
+               "what makes plain language work: you ask for a capability and it searches "
+               "ARD without you naming a registry, shows the finder menu once, remembers "
+               "the choice, and never installs anything it finds."),
+        after="Then ask: <code>/agentfinder a tool that can read PDFs</code>.",
+        doc="https://github.com/neuronto/ard-connectors"),
+    "claude-desktop": dict(
+        name="Claude Desktop", kind="desktop app",
+        label="claude_desktop_config.json",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "command": "npx",\n'
+             '      "args": ["-y", "mcp-remote", "%MCP%"]\n    }\n  }\n}',
+        quirk=("Claude Desktop does not speak remote MCP directly, so this goes through "
+               "<code>mcp-remote</code>, which proxies the HTTP endpoint over stdio. That "
+               "is why this is the one entry here with a <code>command</code> rather than "
+               "a URL, and why it needs Node available."),
+        after="Settings, Developer, Edit Config. Restart Claude after saving.",
+        doc="https://modelcontextprotocol.io/quickstart/user"),
+    "cursor": dict(
+        name="Cursor", kind="editor",
+        label="~/.cursor/mcp.json, or .cursor/mcp.json in a project",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("Cursor takes a bare <code>url</code> with no transport field and works out "
+               "the rest. Project-level config wins over the global file, which is useful "
+               "when you want discovery in one repository and not everywhere."),
+        after="Settings, MCP, then check the server shows as connected.",
+        doc="https://cursor.com/docs/mcp"),
+    "vscode": dict(
+        name="VS Code and GitHub Copilot", kind="editor",
+        label=".vscode/mcp.json",
+        code='{\n  "servers": {\n    "neuronto": {\n      "type": "http",\n'
+             '      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("VS Code is the odd one out twice over: the top-level key is "
+               "<code>servers</code> rather than <code>mcpServers</code>, and the transport "
+               "must be stated explicitly as <code>http</code>. Copying a Claude or Cursor "
+               "block here silently does nothing."),
+        after=("Or run <code>MCP: Add Server</code> from the command palette and choose "
+               "HTTP. Tools appear in Copilot's agent mode."),
+        doc="https://code.visualstudio.com/docs/copilot/chat/mcp-servers"),
+    "zed": dict(
+        name="Zed", kind="editor",
+        label="Zed settings.json",
+        code='{\n  "context_servers": {\n    "neuronto": {\n      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("Zed calls them context servers, not MCP servers, so the key is "
+               "<code>context_servers</code> and nothing else on this page will work here. "
+               "Zed is also deprecating its own MCP extension format in favour of the "
+               "official MCP registry, where this server is already published, so a listing "
+               "you find inside Zed and this config point at the same endpoint."),
+        after="Or Settings, AI, MCP Servers, Add Server, Add Remote Server.",
+        doc="https://zed.dev/docs/ai/mcp"),
+    "windsurf": dict(
+        name="Windsurf", kind="editor",
+        label="~/.codeium/mcp_config.json",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "serverUrl": "%MCP%"\n    }\n  }\n}',
+        quirk=("Cascade wants <code>serverUrl</code> for a remote HTTP server, not "
+               "<code>url</code>. This is the single most common reason a working config "
+               "copied from another client does nothing in Windsurf. Press the refresh "
+               "button in the MCP panel after saving; it does not pick the file up on its own."),
+        after="Cascade, then the plugins or MCP panel, then refresh.",
+        doc="https://docs.devin.ai/windsurf/plugins/cascade/mcp"),
+    "jetbrains": dict(
+        name="JetBrains AI Assistant", kind="IDE",
+        label="Settings, Tools, AI Assistant, MCP, New MCP Server, as JSON",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("Choose the Streamable HTTP transport in the dialog; AI Assistant keeps SSE "
+               "only for legacy servers and this endpoint is not one. The same setting "
+               "covers IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider and the rest of the "
+               "family, and a server can be scoped globally or to one project."),
+        after="There is also an Import from Claude button if you already have a config there.",
+        doc="https://www.jetbrains.com/help/ai-assistant/mcp.html"),
+    "continue": dict(
+        name="Continue", kind="editor extension",
+        label=".continue/mcpServers/neuronto.yaml",
+        code=("name: Neuronto\nversion: 0.0.1\nschema: v1\nmcpServers:\n"
+              "  - name: Neuronto\n    type: streamable-http\n    url: %MCP%"),
+        lang="yaml",
+        quirk=("Continue is the only client here configured in YAML rather than JSON, and "
+               "it wants the transport spelled <code>streamable-http</code> with a hyphen. "
+               "MCP tools are available in agent mode only, so if the server connects and "
+               "no tools appear, check the mode before checking the config."),
+        after="One file per server, in the .continue/mcpServers folder of your workspace.",
+        doc="https://docs.continue.dev/customize/deep-dives/mcp"),
+    "gemini-cli": dict(
+        name="Gemini CLI", kind="CLI",
+        label="~/.gemini/settings.json",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "httpUrl": "%MCP%"\n    }\n  }\n}',
+        quirk=("Gemini CLI uses <code>httpUrl</code> for a streamable HTTP server, which no "
+               "other client on this list uses. A plain <code>url</code> here is read as "
+               "something else and the server will not connect."),
+        after="Then <code>/mcp</code> in the CLI to confirm the server and its tools.",
+        doc="https://geminicli.com/docs/tools/mcp-server/"),
+    "codex": dict(
+        name="Codex CLI", kind="CLI",
+        label="MCP server config",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "type": "http",\n'
+             '      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("Codex wants the transport declared as <code>http</code>. The endpoint needs "
+               "no OAuth block: it is public and unauthenticated, so any client field for "
+               "credentials is left out rather than filled with a placeholder."),
+        after="Tools appear once the server is enabled for the session.",
+        doc="https://developers.openai.com/learn/docs-mcp"),
+    "warp": dict(
+        name="Warp", kind="terminal",
+        label="MCP servers, + Add, paste JSON",
+        code='{\n  "mcpServers": {\n    "neuronto": {\n      "url": "%MCP%"\n    }\n  }\n}',
+        quirk=("Warp takes the JSON through its UI rather than a file you edit, and adds "
+               "every server in the snippet at once. Headers are supported but not needed "
+               "here, because there is nothing to authenticate."),
+        after="Warp Drive, MCP servers, + Add, then paste.",
+        doc="https://docs.warp.dev/agents/capabilities/mcp/"),
+    "goose": dict(
+        name="Goose", kind="agent CLI",
+        label="One-click extension link",
+        code="%GOOSE%",
+        lang="text",
+        quirk=("Goose is the only client here that installs from a deeplink rather than a "
+               "config file. Opening the link with Goose installed adds the extension "
+               "directly. By hand, add a remote extension with type "
+               "<code>streamable_http</code> and the same URL."),
+        after="Or: goose configure, Add Extension, Remote Extension.",
+        doc="https://goose-docs.ai/docs/getting-started/using-extensions/"),
+}
+
+
+def render_client_page(slug: str) -> str | None:
+    """One client's setup, as the page someone lands on from a search."""
+    c = CLIENTS.get(slug)
+    if not c:
+        return None
+    B = config.PUBLIC_BASE
+    mcp = f"{B}/mcp"
+    goose = ("goose://extension?url=" + urllib.parse.quote(mcp, safe="") +
+             "&type=streamable_http&id=neuronto&name=Neuronto&description=" +
+             urllib.parse.quote("Find MCP servers, skills, agents and APIs across every "
+                                "public ARD registry"))
+    code = c["code"].replace("%MCP%", mcp).replace("%GOOSE%", goose)
+    others = "".join(
+        f'<a href="/connect/{s}">{esc(o["name"])}</a>'
+        for s, o in CLIENTS.items() if s != slug)
+
+    body = f"""
+<style>
+.cwrap{{max-width:70ch}}
+.cnote{{color:var(--fg2);font-size:13px;line-height:1.6;margin:8px 0 0}}
+.snip{{margin:18px 0 0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}}
+.snip .lbl{{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:8px 12px;background:var(--panel2);border-bottom:1px solid var(--line);
+  font-size:13px;color:var(--fg2)}}
+.snip .lbl button{{background:none;border:1px solid var(--line2);border-radius:6px;
+  color:var(--fg2);padding:3px 10px;font-size:12px;cursor:pointer}}
+.snip pre{{margin:0;padding:12px;overflow-x:auto;font-family:var(--mono);font-size:13px;
+  line-height:1.55;white-space:pre}}
+h2.csec{{margin:40px 0 0;font-size:20px}}
+.others{{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}}
+.others a{{border:1px solid var(--line);border-radius:999px;padding:5px 12px;
+  font-size:13px;color:var(--fg2);text-decoration:none}}
+.others a:hover{{color:var(--fg);border-color:var(--fg2)}}
+</style>
+
+<div class="cwrap">
+  <p class="lede">Neuronto is an Agentic Resource Discovery (ARD) registry. Connected to
+  {esc(c['name'])}, it lets the agent find the MCP servers, skills, agents and APIs that can
+  do a task, searching this index and every other public ARD registry at once rather than a
+  single catalogue.</p>
+  <p class="lede" style="margin-top:14px">No account, no key, no signup.</p>
+</div>
+
+<h2 class="csec">How to add Neuronto to {esc(c['name'])}</h2>
+<div class="cwrap">
+  <div class="snip"><div class="lbl"><span>{esc(c['label'])}</span>
+    <button type="button" onclick="cp(this)">Copy</button></div>
+    <pre>{esc(code)}</pre></div>
+  <p class="cnote">{c['after']}</p>
+</div>
+
+<h2 class="csec">What is different about {esc(c['name'])}</h2>
+<div class="cwrap">
+  <p class="lede">{c['quirk']}</p>
+  <p class="cnote" style="margin-top:14px">Client documentation:
+    <a href="{esc(c['doc'])}" rel="noopener">{esc(c['doc'])}</a></p>
+</div>
+
+<h2 class="csec">What you get back</h2>
+<div class="cwrap">
+  <p class="lede">Ranked matches with the endpoint to connect to, which registries carried
+  each one, and what was verified by fetching it: whether the endpoint answered, and the
+  tools its own <code>tools/list</code> returned. The <code>score</code> is semantic
+  relevance only and is never a trust or safety rating.</p>
+  <p class="lede" style="margin-top:14px">The endpoint is POST only and answers
+  <code>405</code> to GET, because every tool answers inside the request that asked. Full
+  reference at <a href="/api-docs">/api-docs</a>; <a href="/privacy">privacy</a> covers what
+  is stored, which for a keyed search is nothing.</p>
+</div>
+
+<h2 class="csec">Another client</h2>
+<div class="cwrap">
+  <div class="others">{others}</div>
+  <p class="cnote" style="margin-top:14px">All of them on one page:
+    <a href="/connect">/connect</a>.</p>
+</div>
+
+<script>
+function cp(btn){{
+  const t=btn.closest('.snip').querySelector('pre').textContent;
+  navigator.clipboard.writeText(t).then(()=>{{
+    const o=btn.textContent; btn.textContent='Copied';
+    setTimeout(()=>{{btn.textContent=o;}},1400);
+  }});
+}}
+</script>
+"""
+    return render.page(
+        f"Neuronto for {c['name']}",
+        f"Add the Neuronto ARD registry to {c['name']} as an MCP server, and let it find "
+        f"the MCP servers, skills, agents and APIs for a task across every public ARD "
+        f"registry at once. Copy-paste config, no key, no signup.",
+        body, f"{B}/connect/{slug}")
