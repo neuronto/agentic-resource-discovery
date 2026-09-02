@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import urllib.parse
 import time
 
 from . import config, render, store
@@ -1191,7 +1192,10 @@ def render_connect_page() -> str:
     The distribution problem is not that people disagree with the idea, it is
     that every client wants its config in a slightly different shape and each
     difference is a step where someone stops. So: one page, one block per
-    client, nothing to fill in. The MCP endpoint is the same URL in all of them.
+    client, nothing to fill in. Every snippet below was checked against that
+    client's own documentation; the key names genuinely differ (`url`,
+    `serverUrl`, `httpUrl`, `context_servers`) and guessing one wrong is worse
+    than omitting the client.
     """
     B = config.PUBLIC_BASE
     mcp = f"{B}/mcp"
@@ -1202,13 +1206,26 @@ def render_connect_page() -> str:
                 f'<button type="button" onclick="cp(\'{idx}\',this)">Copy</button></div>'
                 f'<pre id="{idx}">{esc(code)}</pre></div>{n}')
 
+    j = lambda o: json.dumps(o, indent=2)
     claude_code = ("/plugin marketplace add neuronto/ard-connectors\n"
                    "/plugin install neuronto-agent-finder@neuronto")
-    claude_desktop = json.dumps({"mcpServers": {"neuronto": {
-        "command": "npx", "args": ["-y", "mcp-remote", mcp]}}}, indent=2)
-    cursor = json.dumps({"mcpServers": {"neuronto": {"url": mcp}}}, indent=2)
-    vscode = json.dumps({"servers": {"neuronto": {"type": "http", "url": mcp}}}, indent=2)
-    gemini = json.dumps({"mcpServers": {"neuronto": {"httpUrl": mcp}}}, indent=2)
+    claude_desktop = j({"mcpServers": {"neuronto": {
+        "command": "npx", "args": ["-y", "mcp-remote", mcp]}}})
+    cursor = j({"mcpServers": {"neuronto": {"url": mcp}}})
+    vscode = j({"servers": {"neuronto": {"type": "http", "url": mcp}}})
+    gemini = j({"mcpServers": {"neuronto": {"httpUrl": mcp}}})
+    zed = j({"context_servers": {"neuronto": {"url": mcp}}})
+    windsurf = j({"mcpServers": {"neuronto": {"serverUrl": mcp}}})
+    warp = j({"mcpServers": {"neuronto": {"url": mcp}}})
+    codex = j({"mcpServers": {"neuronto": {"type": "http", "url": mcp}}})
+    jetbrains = j({"mcpServers": {"neuronto": {"url": mcp}}})
+    cont = ("name: Neuronto\nversion: 0.0.1\nschema: v1\nmcpServers:\n"
+            "  - name: Neuronto\n    type: streamable-http\n"
+            f"    url: {mcp}\n")
+    goose = ("goose://extension?url=" + urllib.parse.quote(mcp, safe="") +
+             "&type=streamable_http&id=neuronto&name=Neuronto"
+             "&description=" + urllib.parse.quote(
+                 "Find MCP servers, skills, agents and APIs across every public ARD registry"))
     rest = ('curl -s -X POST ' + B + '/search \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"query":{"text":"read a PDF and extract tables"}}\'')
@@ -1231,52 +1248,90 @@ def render_connect_page() -> str:
 .snip .lbl button:hover{{color:var(--fg);border-color:var(--fg2)}}
 .snip pre{{margin:0;padding:12px;overflow-x:auto;font-family:var(--mono);font-size:13px;
   line-height:1.55;white-space:pre}}
-.ctabs{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0;
-  margin:26px 0 0;max-width:none}}
 h2.csec{{margin:44px 0 0;font-size:20px}}
+h3.cli{{margin:30px 0 0;font-size:16px}}
 </style>
 
 <div class="cwrap">
   <p class="lede">One endpoint, <code>{esc(mcp)}</code>, answers every client below. It
   searches this index and every other public ARD registry at once and fuses the rankings,
   so a single connector covers the federation rather than one catalogue.</p>
-  <p class="lede" style="margin-top:14px">Nothing here needs an account, a key or a signup.
-  Anonymous callers get 60 requests an hour; <a href="/console">proving a domain</a> raises
-  that to 300.</p>
+  <p class="lede" style="margin-top:14px">No account, no key, no signup. Anonymous callers
+  get 60 requests an hour; <a href="/console">proving a domain</a> raises that to 300, and
+  a keyed search is not logged at all (see <a href="/privacy">privacy</a>).</p>
 </div>
 
 <h2 class="csec">Claude Code</h2>
 <div class="cwrap">
   <p class="lede">Installs a skill, so asking for a tool in plain language searches ARD
-  without you naming a registry. It shows the finder menu once, remembers the choice, and
-  never installs anything it finds.</p>
+  without you naming a registry. The plugin bundles the connector, so this is the whole
+  setup.</p>
   {snip('c1', 'Two commands, in Claude Code', claude_code)}
   <p class="cnote">Then: <code>/agentfinder a tool that can read PDFs</code>. The
   marketplace lists every public Agent Finder, not only this one. Source:
   <a href="https://github.com/neuronto/ard-connectors">neuronto/ard-connectors</a>.</p>
 </div>
 
-<h2 class="csec">Claude Desktop</h2>
+<h2 class="csec">Editors and IDEs</h2>
 <div class="cwrap">
+  <h3 class="cli">Cursor</h3>
+  {snip('c3', '~/.cursor/mcp.json, or .cursor/mcp.json in a project', cursor)}
+
+  <h3 class="cli">VS Code and GitHub Copilot</h3>
+  {snip('c4', '.vscode/mcp.json', vscode)}
+  <p class="cnote">Or run <code>MCP: Add Server</code> from the command palette and
+  choose HTTP.</p>
+
+  <h3 class="cli">Zed</h3>
+  {snip('c8', 'Zed settings.json', zed)}
+  <p class="cnote">Or Settings, AI, MCP Servers, Add Server, Add Remote Server. Zed is
+  deprecating its own MCP extensions in favour of the official MCP registry, where this
+  server is already published.</p>
+
+  <h3 class="cli">Windsurf (Cascade)</h3>
+  {snip('c9', '~/.codeium/mcp_config.json', windsurf)}
+  <p class="cnote">Cascade uses <code>serverUrl</code> for remote HTTP servers rather
+  than <code>url</code>. Press refresh after adding it.</p>
+
+  <h3 class="cli">JetBrains AI Assistant</h3>
+  {snip('c10', 'Settings, Tools, AI Assistant, MCP, New MCP Server, as JSON', jetbrains)}
+  <p class="cnote">Choose the Streamable HTTP transport. Works across IntelliJ IDEA,
+  PyCharm, WebStorm, Rider and the rest of the family.</p>
+
+  <h3 class="cli">Continue</h3>
+  {snip('c11', '.continue/mcpServers/neuronto.yaml', cont)}
+  <p class="cnote">MCP tools are available in agent mode.</p>
+</div>
+
+<h2 class="csec">Terminals and CLIs</h2>
+<div class="cwrap">
+  <h3 class="cli">Claude Desktop</h3>
   {snip('c2', 'claude_desktop_config.json', claude_desktop)}
   <p class="cnote">Settings, Developer, Edit Config. Restart Claude after saving.</p>
-</div>
 
-<h2 class="csec">Cursor</h2>
-<div class="cwrap">
-  {snip('c3', '~/.cursor/mcp.json, or .cursor/mcp.json in a project', cursor)}
-</div>
-
-<h2 class="csec">VS Code and GitHub Copilot</h2>
-<div class="cwrap">
-  {snip('c4', '.vscode/mcp.json', vscode)}
-  <p class="cnote">Workspace file, or run <code>MCP: Add Server</code> from the command
-  palette and choose HTTP.</p>
-</div>
-
-<h2 class="csec">Gemini CLI</h2>
-<div class="cwrap">
+  <h3 class="cli">Gemini CLI</h3>
   {snip('c5', '~/.gemini/settings.json', gemini)}
+
+  <h3 class="cli">Codex CLI</h3>
+  {snip('c12', 'MCP server config', codex)}
+
+  <h3 class="cli">Warp</h3>
+  {snip('c13', 'MCP servers, + Add, paste JSON', warp)}
+
+  <h3 class="cli">Goose</h3>
+  {snip('c14', 'One-click extension link', goose)}
+  <p class="cnote">Open that link with Goose installed and it adds the extension. Or add
+  a remote extension by hand with type <code>streamable_http</code>.</p>
+</div>
+
+<h2 class="csec">Agent platforms</h2>
+<div class="cwrap">
+  <p class="lede">Anything that can call an MCP server or an HTTP endpoint can use this
+  index. In <b>n8n</b>, add the <i>MCP Client Tool</i> node and point it at
+  <code>{esc(mcp)}</code> with HTTP Streamable transport. In <b>Cline</b> and
+  <b>Roo Code</b>, use Configure MCP Servers and add a remote server with the same URL.
+  <b>Dify</b>, <b>LangFlow</b> and similar tool-calling platforms take it as either an MCP
+  server or a plain REST call.</p>
 </div>
 
 <h2 class="csec">Anything else</h2>
@@ -1312,11 +1367,10 @@ function cp(id,btn){{
 """
     return render.page(
         "Connect a client to the index",
-        "Copy-paste setup for Claude Code, Claude Desktop, Cursor, VS Code, Copilot and "
-        "Gemini, plus the REST and A2A interfaces. One endpoint searches every public ARD "
-        "registry at once. No key, no signup.",
+        "Copy-paste setup for Claude Code, Cursor, VS Code, Zed, Windsurf, JetBrains, "
+        "Continue, Claude Desktop, Gemini CLI, Codex, Warp, Goose and n8n, plus REST and "
+        "A2A. One endpoint searches every public ARD registry at once. No key, no signup.",
         body, f"{B}/connect")
-
 
 def render_privacy_page() -> str:
     """What this service receives, what it keeps, and what leaves it.
