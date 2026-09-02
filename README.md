@@ -141,13 +141,15 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /search` | Ranked results. `federation`: `auto` (default), `referrals`, `none`. |
 | `POST /explore` | Facet counts over the index. |
 | `GET /agents` | Deterministic paginated listing, for browsing rather than ranking. |
-| `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. |
+| `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. `GET` and `DELETE` answer `405`: there is no server-initiated stream, every tool answers inside the request that asked. |
+| `POST /a2a` | The same index over A2A. `message/send` returns a Message. Card at `/.well-known/agent-card.json` and `/.well-known/agent.json`. |
 | `POST /tools`, `GET /tools?q=` | Tool level search over verified tools rather than servers. |
 | `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. `200` indexed, `202` kept and retried. |
 | `GET /submit/status/{id}` | Where a submission stands, with the last answer its endpoint gave. |
 | `POST /audit` | Publishing report: discovery, conformance, coverage, competition. |
 | `POST /manifest/build` | Generate a manifest for a domain from resources fetched there. |
 | `GET /m/{host}.json` | That generated manifest, hosted. |
+| `GET /agents.md` | What to call and how, for an agent that has already arrived. |
 | `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. |
 | `POST /private/entries` | Register internal services. Key required. |
 | `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
