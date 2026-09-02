@@ -1,0 +1,24 @@
+{
+  "name": "neuronto",
+  "version": "1.0.0",
+  "description": "Find the MCP servers, skills, agents and APIs that can do a task. Searches every public Agentic Resource Discovery (ARD) registry at once, from the command line or from code.",
+  "keywords": ["mcp", "mcp-server", "mcp-client", "ard", "agentic-resource-discovery",
+               "discovery", "tool-discovery", "registry", "agents", "ai-agents",
+               "llm-tools", "search"],
+  "homepage": "https://neuronto.com/connect",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neuronto/agentic-resource-discovery.git",
+    "directory": "sdk/node"
+  },
+  "bugs": { "url": "https://github.com/neuronto/agentic-resource-discovery/issues" },
+  "license": "Apache-2.0",
+  "author": "Neuronto",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "main": "./index.js",
+  "exports": { ".": "./index.js" },
+  "bin": { "neuronto": "./cli.js" },
+  "files": ["index.js", "cli.js", "README.md", "LICENSE"],
+  "scripts": { "test": "node test.js" }
+}
