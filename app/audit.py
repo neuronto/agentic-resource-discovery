@@ -169,6 +169,23 @@ def conformance(manifest: dict | None) -> dict:
             "entries": len(entries), "findings": findings}
 
 
+def queries_for(manifest: dict | None, domain: str) -> list[str]:
+    """The publisher's own stated queries, derived once for the whole report.
+
+    Coverage and competition each used to build this list themselves with
+    different limits, so the two halves of the same report answered slightly
+    different questions. Everything that scores a registry now scores it on
+    exactly these.
+    """
+    queries: list[str] = []
+    for e in (manifest or {}).get("entries", [])[:4]:
+        if isinstance(e, dict):
+            queries += [str(q) for q in (e.get("representativeQueries") or [])[:2]]
+    if not queries:
+        queries = [domain.split(".")[0]]
+    return queries[:5]
+
+
 async def coverage(client: httpx.AsyncClient, domain: str, manifest: dict | None,
                    local_hits: int) -> list[dict]:
     """Which registries actually return this domain.
@@ -177,13 +194,7 @@ async def coverage(client: httpx.AsyncClient, domain: str, manifest: dict | None
     because that is what they are asking to be found for. Anything else measures
     our imagination rather than their intent.
     """
-    queries: list[str] = []
-    for e in (manifest or {}).get("entries", [])[:4]:
-        if isinstance(e, dict):
-            queries += [str(q) for q in (e.get("representativeQueries") or [])[:2]]
-    if not queries:
-        queries = [domain.split(".")[0]]
-    queries = queries[:5]
+    queries = queries_for(manifest, domain)
 
     async def ask(url, q):
         try:
