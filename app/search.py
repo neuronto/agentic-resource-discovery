@@ -36,27 +36,74 @@ def tool_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
     entry's text, so an entry surfaces for what its tools do without anything
     being restated as if the publisher had claimed it.
 
-    Best-matching tool per entry, in rank order, deduplicated.
+    Returns (entry keys in rank order, {key: the tool that matched}).
     """
-    match = _fts_query(text)
-    if not match:
-        return []
-    try:
-        rows = conn.execute(
-            """SELECT entry_key FROM tools_fts WHERE tools_fts MATCH ?
-               ORDER BY bm25(tools_fts) LIMIT ?""", (match, limit * 4)).fetchall()
-    except sqlite3.OperationalError:
-        return []
+    terms = _fts_terms(text)
+    if not terms:
+        return [], {}
+
+    # Strict before loose. "charge a credit card" as a pure OR matches every
+    # tool containing any of those words, thousands of them, and BM25 then ranks
+    # a translation API above Stripe. The same query as a conjunction matches
+    # 32 tools, and Stripe's `PostCharges` ("To charge a credit card or other
+    # payment source") is one of them.
+    #
+    # So: try the phrase, then the conjunction, then the OR, and take the first
+    # that returns anything. The OR is kept as the last resort because it is
+    # what makes a long natural-language query work at all when no strict form
+    # matches, which was the reason it was chosen in the first place.
+    # `strict` marks the attempts where every content word had to be present.
+    # A single-term query is strict by definition; the OR fallback never is.
+    attempts: list[tuple[str, bool]] = []
+    if len(terms) > 1:
+        attempts.append((" ".join(t.strip('*') for t in terms), True))  # phrase-ish
+        attempts.append((" AND ".join(terms), True))
+    attempts.append((" OR ".join(terms), len(terms) == 1))
+
+    rows, strict = [], False
+    for match, strict in attempts:
+        try:
+            rows = conn.execute(
+                """SELECT tools_fts.entry_key AS entry_key, t.name AS name,
+                          t.description AS description
+                   FROM tools_fts
+                   JOIN tools t ON t.id = tools_fts.tool_id
+                   WHERE tools_fts MATCH ?
+                   ORDER BY bm25(tools_fts) LIMIT ?""",
+                (match, limit * 4)).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        if rows:
+            break
+    if not rows:
+        return [], {}
+
+    # Carry the tool that matched, not just the fact that one did. An answer of
+    # "Stripe" is a guess the caller has to verify; "Stripe, because PostCharges
+    # says: To charge a credit card or other payment source" is evidence. It is
+    # also what keeps `query_match` honest, since the words that matched are now
+    # frequently in the tool rather than in the entry's own prose.
+    # The matched tool is only reported when the match was strict. Reaching an
+    # entry through the OR fallback means *some* word of the query appeared
+    # somewhere in 95,994 tools, which is not evidence and must not be shown as
+    # it: the nonsense query "zzzz nonexistent capability qqqq" matches a tool
+    # containing the word "capability", and calling that a match would tell a
+    # caller we had found something when we had found nothing.
     out: list[str] = []
+    detail: dict[str, dict] = {}
     seen: set[str] = set()
     for r in rows:
         k = r["entry_key"]
-        if k and k not in seen:
-            seen.add(k)
-            out.append(k)
-            if len(out) >= limit:
-                break
-    return out
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(k)
+        if strict:
+            detail[k] = {"name": r["name"],
+                         "description": (r["description"] or "")[:300] or None}
+        if len(out) >= limit:
+            break
+    return out, detail
 
 
 def diversify(entries: list[dict], page_size: int, cap: int | None = None) -> list[dict]:
@@ -126,6 +173,19 @@ def _fts_query(text: str) -> str:
             "find", "give", "show", "make"}
     keep = [t for t in toks if t not in stop] or toks
     return " OR ".join(f'"{t}"*' for t in keep[:16])
+
+
+def _fts_terms(text: str) -> list[str]:
+    """The content words of a query, in order, as FTS5 prefix terms."""
+    toks = [t.lower() for t in _TOKEN.findall(text or "") if len(t) > 1]
+    if not toks:
+        return []
+    stop = {"the", "and", "for", "with", "that", "this", "you", "your", "can",
+            "get", "how", "what", "which", "from", "into", "are", "was", "some",
+            "any", "all", "one", "out", "use", "using", "want", "need", "please",
+            "find", "give", "show", "make"}
+    keep = [t for t in toks if t not in stop] or toks
+    return [f'"{t}"*' for t in keep[:16]]
 
 
 def _passes_filter(row: sqlite3.Row, flt: dict | None) -> bool:
@@ -219,7 +279,8 @@ def _private_hits(conn: sqlite3.Connection, match: str, owner_domain: str,
 
 
 
-def local_by_keys(conn: sqlite3.Connection, keys: list[str]) -> list[dict]:
+def local_by_keys(conn: sqlite3.Connection, keys: list[str],
+                  flt: dict | None = None) -> list[dict]:
     """Load entries the tool leg found but the lexical leg did not.
 
     Built exactly as `local_search` builds one, so a result reaching the page
@@ -227,6 +288,12 @@ def local_by_keys(conn: sqlite3.Connection, keys: list[str]) -> list[dict]:
     own text: same shape, same liveness treatment, same verification block.
     The score is a floor rather than a BM25 value, because there is no lexical
     match on this entry to derive one from; RRF decides its final position.
+
+    `flt` is applied here for the same reason it is applied in `local_search`:
+    an entry reaching the page through its tools is still an entry, and a client
+    that asked for GraphQL must not be handed an OpenAPI document because the
+    match happened one level down. Skipping this made a type filter silently
+    stop applying the moment the tool leg started running on the fast path.
     """
     if not keys:
         return []
@@ -237,6 +304,8 @@ def local_by_keys(conn: sqlite3.Connection, keys: list[str]) -> list[dict]:
     for k in keys:                      # preserve the tool leg's ordering
         r = by_key.get(k)
         if r is None or _col(r, "visibility") == "private":
+            continue
+        if not _passes_filter(r, flt):
             continue
         e = store.row_to_entry(r)
         e["score"] = rank.apply_liveness(rank._FLOOR, r["live"])
@@ -387,13 +456,34 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     local = await asyncio.to_thread(
         lambda: local_search(store.tls_conn(), text, flt, max(page_size, 10) * 3, owner_domain))
 
-    if mode == "none":
-        return {"results": diversify(local, page_size)[:page_size],
-                "_federated": [], "_dense": None}
-    if mode == "referrals":
-        return {"results": diversify(local, page_size)[:page_size],
-                "referrals": federation.referral_entries(),
-                "_federated": [], "_dense": None}
+    # The tool leg runs in EVERY mode. It is pure SQLite against `tools_fts` on
+    # the threadpool, single-digit milliseconds, and no network, so the latency
+    # argument that keeps the dense leg out of the fast path does not apply to
+    # it. It used to run only in `auto`, which meant `federation: none` searched
+    # entry prose alone: Stripe's whole OpenAPI description is one sentence
+    # pointing at their docs site, so the fast path could not find it for
+    # "charge a credit card" while the operation `PostCharges` said exactly that
+    # one level down.
+    tool_order, tool_detail = await asyncio.to_thread(
+        lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3))
+    by_key: dict[str, dict] = {e["_key"]: e for e in local}
+    missing = [k for k in tool_order if k not in by_key]
+    if missing:
+        extra = await asyncio.to_thread(
+            lambda: local_by_keys(store.tls_conn(), missing, flt))
+        for e in extra:
+            by_key.setdefault(e["_key"], e)
+    for k, td in tool_detail.items():
+        e = by_key.get(k)
+        if e is not None and td.get("name"):
+            e["matchedTool"] = td
+
+    if mode in ("none", "referrals"):
+        local_fused = _fuse_local(local, tool_order, by_key, page_size)
+        out = {"results": local_fused, "_federated": [], "_dense": None}
+        if mode == "referrals":
+            out["referrals"] = federation.referral_entries()
+        return out
 
     # auto: fuse our ordering, the dense ordering, and each upstream's
     # ordering, all through RRF. Sparse and dense are launched together so the
@@ -417,20 +507,8 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             dense_task.cancel()
             dense_order, dense_state = [], "timeout"
 
-    tool_order = await asyncio.to_thread(
-        lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3))
-
     rankings = [[e["_key"] for e in local]]
     leg_weights = [1.0]
-    by_key: dict[str, dict] = {e["_key"]: e for e in local}
-    # Entries found only through their tools still need their row loaded, or
-    # the fusion would score a key it cannot return.
-    missing = [k for k in tool_order if k not in by_key]
-    if missing:
-        extra = await asyncio.to_thread(
-            lambda: local_by_keys(store.tls_conn(), missing))
-        for e in extra:
-            by_key.setdefault(e["_key"], e)
     if tool_order:
         rankings.append([k for k in tool_order if k in by_key])
         leg_weights.append(TOOL_LEG_WEIGHT)
@@ -506,6 +584,33 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             "_dense": {"state": dense_state, "candidates": len(dense_order)}}
 
 
+def _fuse_local(local: list[dict], tool_order: list[str],
+                by_key: dict[str, dict], page_size: int) -> list[dict]:
+    """Fuse the lexical and tool legs for the modes that do not federate.
+
+    Same RRF and the same tool weight as `auto` uses, so the two paths agree
+    about what our own index thinks; `auto` then adds the dense and upstream
+    legs on top. Without this the fast path and the default path disagreed about
+    the contents of one index, which is worse than either being wrong alone.
+    """
+    if not tool_order:
+        return diversify(local, page_size)[:page_size]
+    rankings = [[e["_key"] for e in local],
+                [k for k in tool_order if k in by_key]]
+    fused = rank.rrf(rankings, weights=[1.0, TOOL_LEG_WEIGHT])
+    scored = rank.fuse_to_scores(fused)          # same call the auto path makes
+    out = []
+    for k, sc in sorted(scored.items(), key=lambda kv: -kv[1]):
+        e = by_key.get(k)
+        if not e:
+            continue
+        e = dict(e)
+        e["score"] = rank.apply_liveness(sc, e.get("_live"))
+        out.append(e)
+    out.sort(key=lambda x: -x["score"])
+    return diversify(out, page_size)[:page_size]
+
+
 async def _dense_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
     """Dense ranking, isolated so a failure here can never fail a search."""
     try:
@@ -547,9 +652,18 @@ def query_match(text: str, results: list[dict]) -> dict:
         return {"coverage": 0.0, "confidence": "none", "queryTerms": terms,
                 "note": "no result, or no content words in the query"}
     top = results[0]
+    # The tool that matched counts as the top result's own text. Since the tool
+    # leg runs on every path, an entry can legitimately be the best answer with
+    # none of the query's words in its prose: Stripe's description is one
+    # sentence pointing at its docs, and every word of "charge a credit card"
+    # lives in `PostCharges`. Reading only the prose scored that as coverage 0.0
+    # and confidence "none", which told the caller we had found nothing at the
+    # exact moment we had found the right thing.
+    mt = top.get("matchedTool") or {}
     hay = " ".join(str(top.get(k) or "") for k in ("displayName", "description")) + " " \
           + " ".join(str(x) for x in (top.get("representativeQueries") or [])) + " " \
-          + " ".join(str(x) for x in (top.get("tags") or []))
+          + " ".join(str(x) for x in (top.get("tags") or [])) + " " \
+          + str(mt.get("name") or "") + " " + str(mt.get("description") or "")
     words = set(re.findall(r"[a-z0-9]+", hay.lower()))
     hit = [t for t in terms
            if any(w.startswith(t) or t.startswith(w) for w in words)]
@@ -564,6 +678,7 @@ def query_match(text: str, results: list[dict]) -> dict:
         "note": ("each result's `score` is relative to the best hit in this response, "
                  "so the top result always scores near 100 even when nothing matched. "
                  "`coverage` is absolute: the fraction of the query's content words the "
-                 "top result's own text accounts for. It measures overlap, not "
+                 "top result's own text, including the tool that matched, accounts for. "
+                 "It measures overlap, not "
                  "correctness, and it is never a trust or safety rating."),
     }

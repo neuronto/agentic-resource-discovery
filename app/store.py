@@ -124,6 +124,29 @@ CREATE TABLE IF NOT EXISTS vectors (
   ts    INTEGER
 );
 
+-- The dense leg's second vector: an entry embedded from its TOOLS alone.
+--
+-- Its own table rather than a `kind` column on `vectors`, for the same reason
+-- private entries got their own table: a flag is a thing every query has to
+-- remember to filter, and the queries that forget are the ones that leak. Two
+-- tables cannot be confused with each other.
+--
+-- Why a second vector at all: `text_for` gives one 4000-character budget to
+-- prose and tool text together, so a server with 790 operations has almost all
+-- of them truncated away, and the truncated ones are exactly the verbs an agent
+-- searches by. Tools get their own budget here. Keyed by entry, not by tool:
+-- one vector per tool would be roughly twenty times the data for a signal that
+-- is consumed per entry anyway, and similarity over a bag of 790 operations is
+-- mush -- past a point, adding operations makes a vector LESS discriminating.
+CREATE TABLE IF NOT EXISTS tool_vectors (
+  key   TEXT PRIMARY KEY,          -- entry key, not tool id
+  model TEXT,
+  dim   INTEGER,
+  vec   BLOB,
+  n     INTEGER,                   -- tools distilled into this vector
+  ts    INTEGER
+);
+
 -- ARD adoption: does a host that ships a callable resource also publish a
 -- manifest? Measured, not asserted.
 CREATE TABLE IF NOT EXISTS adoption (
@@ -259,6 +282,15 @@ _ADD_COLUMNS = {
     "mcp_auth":        "INTEGER",   # 1 = endpoint demanded credentials
     "mcp_server_name": "TEXT",      # serverInfo.name it reported
     "mcp_status":      "TEXT",      # ok | auth | error:<kind>
+    # Reliability counters. `observations` deliberately stores state CHANGES,
+    # which answers "when did this break" exactly but throws the denominator
+    # away: an endpoint probed hourly for a month and always up leaves one row,
+    # indistinguishable from one probed once. Uptime needs the count of probes,
+    # so the probe loop keeps it here, O(1) per probe and no row growth.
+    "probe_n":         "INTEGER NOT NULL DEFAULT 0",   # probes attempted
+    "probe_ok":        "INTEGER NOT NULL DEFAULT 0",   # probes that answered
+    "probe_first":     "INTEGER",                      # first probe, unix ts
+    "probe_ms_sum":    "INTEGER NOT NULL DEFAULT 0",   # summed ms of answering probes
 }
 
 
@@ -632,8 +664,19 @@ def mark_liveness(conn: sqlite3.Connection, key: str, alive: bool,
                   status: int | None, ms: int | None) -> None:
     prev = conn.execute("SELECT live FROM entries WHERE key=?", (key,)).fetchone()
     now = int(time.time())
-    conn.execute("""UPDATE entries SET live=?, live_status=?, live_ms=?, live_checked=?
-                    WHERE key=?""", (1 if alive else 0, status, ms, now, key))
+    # Two records of the same probe, because they answer different questions.
+    # The counters below give the RATE (how often does this answer); the
+    # transition row below that gives the TIMELINE (when did it change). Storing
+    # only transitions, which is what this did until now, makes uptime
+    # uncomputable: a stable endpoint and a never-re-probed one look identical.
+    conn.execute("""UPDATE entries SET live=?, live_status=?, live_ms=?, live_checked=?,
+                           probe_n = COALESCE(probe_n,0) + 1,
+                           probe_ok = COALESCE(probe_ok,0) + ?,
+                           probe_first = COALESCE(probe_first, ?),
+                           probe_ms_sum = COALESCE(probe_ms_sum,0) + ?
+                    WHERE key=?""",
+                 (1 if alive else 0, status, ms, now,
+                  1 if alive else 0, now, (ms or 0) if alive else 0, key))
     # Record the transition, not the sample. First observation always counts.
     if prev is None or prev["live"] is None or prev["live"] != (1 if alive else 0):
         conn.execute("""INSERT INTO observations(entry_key,ts,kind,live,status,ms)

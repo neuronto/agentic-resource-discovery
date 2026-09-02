@@ -433,17 +433,35 @@ def t_page_counts_match_the_table_rule():
 
 
 def t_stub_categories_are_not_published():
-    """A category below the threshold must 404 and stay out of the sitemap."""
-    try:
-        s, _ = _html("/tools/translation-language")
-        assert False, f"stub category returned {s}"
-    except urllib.error.HTTPError as e:
-        assert e.code == 404, e.code
+    """The sitemap must never advertise a page that 404s.
+
+    This used to pin `translation-language` as the example of a category below
+    the threshold. It crossed it: indexing the OpenAPI corpus took it to 143
+    qualifying tools against a threshold of 60, and every one of the 26
+    categories now qualifies. Publishing it is correct, so the old assertion was
+    testing a fact about the data rather than the rule.
+
+    The rule is what matters and is asserted directly: every capability page the
+    sitemap advertises must render, and a slug that is not a category must 404.
+    If a future category falls below the threshold, the first half catches it.
+    """
     r = urllib.request.urlopen(urllib.request.Request(
         BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
     sm = r.read().decode()
-    assert "translation-language" not in sm, "sitemap advertises a 404 page"
     assert "/tools/pdf-documents" in sm, "sitemap missing a real capability page"
+
+    import re as _re
+    slugs = _re.findall(r"<loc>[^<]*/tools/([a-z0-9-]+)</loc>", sm)
+    assert slugs, "sitemap advertises no capability pages at all"
+    for slug in slugs:
+        st, _h = _html(f"/tools/{slug}")
+        assert st == 200, f"sitemap advertises /tools/{slug} which returned {st}"
+
+    try:
+        st, _ = _html("/tools/not-a-real-category-zzzz")
+        assert False, f"unknown category returned {st}"
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
 
 
 def t_bench_and_adoption_negotiate_content():

@@ -111,6 +111,14 @@ async def build(conn, limit: int = 2000, only_missing: bool = True) -> dict:
     if not rows:
         return {"embedded": 0}
 
+    # Release the read snapshot before writing. A connection that SELECTs, then
+    # goes to the network, then INSERTs is asking SQLite to upgrade a snapshot
+    # that is now stale, and WAL answers SQLITE_BUSY *immediately* for that:
+    # the busy handler is skipped entirely, because waiting cannot make a stale
+    # snapshot fresh. The 45-second timeout on this connection never applies and
+    # the batch dies instantly the moment any other writer has committed.
+    conn.commit()
+
     done = 0
     B = config.EMBED_BATCH
     for i in range(0, len(rows), B):
@@ -132,6 +140,96 @@ async def build(conn, limit: int = 2000, only_missing: bool = True) -> dict:
     return {"embedded": done, "model": config.EMBED_MODEL}
 
 
+# How much tool text one entry contributes. The cap exists because a handful of
+# giant catalogues would otherwise dominate the embedding budget, and because
+# similarity over a 4,000-character bag of 790 operations is mush: past a point,
+# adding operations makes the vector LESS discriminating, not more.
+TOOL_TEXT_CAP = 4000
+
+
+def tool_text_for(rows) -> str:
+    """One capability document for an entry, distilled from its tools.
+
+    Deduplicated on purpose. An OpenAPI document with 790 operations repeats
+    "Retrieve a Message resource" style phrasing dozens of times, and the
+    repetition buys nothing while eating the whole budget. Distinct lines, in
+    the order the server listed them, is a better description of what the thing
+    can do than a verbatim concatenation.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    size = 0
+    for name, desc in rows:
+        line = " ".join(x for x in ((name or "").strip(),
+                                    (desc or "").strip()) if x)
+        if not line:
+            continue
+        norm = " ".join(line.lower().split())[:160]
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(line[:300])
+        size += len(out[-1]) + 1
+        if size >= TOOL_TEXT_CAP:
+            break
+    return "\n".join(out)[:TOOL_TEXT_CAP]
+
+
+async def build_tools(conn, limit: int = 2000, only_missing: bool = True) -> dict:
+    """Embed the tool surface of entries that have one.
+
+    Additive: it creates a second ranking signal and changes no existing vector,
+    so if it turns out to help nothing, deleting the table restores exactly the
+    previous behaviour.
+    """
+    if not config.EMBED_API_KEY:
+        return {"embedded": 0, "skipped": "no embedding key configured"}
+    join = ("LEFT JOIN tool_vectors tv ON tv.key = e.key WHERE tv.key IS NULL"
+            if only_missing else "LEFT JOIN tool_vectors tv ON tv.key = e.key WHERE 1=1")
+    keys = [r["key"] for r in conn.execute(
+        f"""SELECT e.key FROM entries e {join}
+              AND EXISTS (SELECT 1 FROM tools t WHERE t.entry_key = e.key)
+            LIMIT ?""", (limit,)).fetchall()]
+    if not keys:
+        return {"embedded": 0}
+
+    # Release the read snapshot before writing. A connection that SELECTs, then
+    # goes to the network, then INSERTs is asking SQLite to upgrade a snapshot
+    # that is now stale, and WAL answers SQLITE_BUSY *immediately* for that:
+    # the busy handler is skipped entirely, because waiting cannot make a stale
+    # snapshot fresh. The 45-second timeout on this connection never applies and
+    # the batch dies instantly the moment any other writer has committed.
+    conn.commit()
+
+    done = 0
+    B = config.EMBED_BATCH
+    for i in range(0, len(keys), B):
+        chunk = keys[i:i + B]
+        docs, counts = [], []
+        for k in chunk:
+            rows = conn.execute(
+                "SELECT name, description FROM tools WHERE entry_key=? LIMIT 2000",
+                (k,)).fetchall()
+            docs.append(tool_text_for([(r["name"], r["description"]) for r in rows]))
+            counts.append(len(rows))
+        conn.commit()      # same reason: these reads must not be held over the network
+        vecs = await embed_texts(docs)
+        if vecs is None:
+            break
+        now = int(time.time())
+        for k, v, n in zip(chunk, vecs, counts):
+            conn.execute("""INSERT INTO tool_vectors(key,model,dim,vec,n,ts)
+                            VALUES(?,?,?,?,?,?)
+                            ON CONFLICT(key) DO UPDATE SET
+                              model=excluded.model, dim=excluded.dim,
+                              vec=excluded.vec, n=excluded.n, ts=excluded.ts""",
+                         (k, config.EMBED_MODEL, len(v), pack(v), n, now))
+            done += 1
+        conn.commit()
+    invalidate()
+    return {"embedded": done, "model": config.EMBED_MODEL}
+
+
 def invalidate() -> None:
     global _matrix, _loaded_at
     _matrix = None
@@ -147,7 +245,13 @@ def load(conn, force: bool = False):
         np = _np()
     except Exception:
         return None
-    rows = conn.execute("SELECT key, vec, dim FROM vectors").fetchall()
+    # Both vectors of every entry, in one matrix. `_keys` therefore holds an
+    # entry key twice, once for its prose and once for its tools, and
+    # `dense_ranking` collapses them keeping the better rank. Fusing here rather
+    # than running two matmuls keeps the query path a single matrix multiply.
+    rows = conn.execute(
+        "SELECT key, vec, dim FROM vectors "
+        "UNION ALL SELECT key, vec, dim FROM tool_vectors").fetchall()
     if not rows:
         _matrix, _keys, _loaded_at = None, [], time.time()
         return None
@@ -186,10 +290,21 @@ async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
             return []          # model changed under us; ignore until rebuilt
         n = float(np.linalg.norm(q)) or 1.0
         sims = m @ (q / n)
-        k = min(limit, sims.shape[0])
+        # Over-fetch, because an entry now occupies up to two rows and the two
+        # may both land in the top k, which would otherwise halve the leg.
+        k = min(limit * 2, sims.shape[0])
         idx = np.argpartition(-sims, k - 1)[:k]
         idx = idx[np.argsort(-sims[idx])]
-        return [_keys[i] for i in idx]
+        out, seen = [], set()
+        for i in idx:
+            key = _keys[i]
+            if key in seen:
+                continue      # already ranked, by whichever vector matched better
+            seen.add(key)
+            out.append(key)
+            if len(out) >= limit:
+                break
+        return out
     except Exception:
         return []
 
@@ -197,6 +312,9 @@ async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
 def status(conn) -> dict:
     row = conn.execute("SELECT COUNT(*) n, MAX(ts) t FROM vectors").fetchone()
     total = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    tv = conn.execute("SELECT COUNT(*) n, MAX(ts) t FROM tool_vectors").fetchone()
+    with_tools = conn.execute(
+        "SELECT COUNT(DISTINCT entry_key) FROM tools").fetchone()[0]
     return {
         "configured": bool(config.EMBED_API_KEY),
         "model": config.EMBED_MODEL if config.EMBED_API_KEY else None,
@@ -204,4 +322,12 @@ def status(conn) -> dict:
         "entries": total,
         "coverage": round((row["n"] or 0) / total, 4) if total else 0.0,
         "last_built": row["t"],
+        "tool_vectors": {
+            "vectors": tv["n"] or 0,
+            "entries_with_tools": with_tools,
+            "coverage": (round((tv["n"] or 0) / with_tools, 4) if with_tools else 0.0),
+            "last_built": tv["t"],
+            "what_it_is": ("a second vector per entry, embedded from its tools alone, "
+                           "so a server's verbs are not truncated out of its prose"),
+        },
     }

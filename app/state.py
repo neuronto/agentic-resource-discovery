@@ -119,4 +119,15 @@ def report(conn: sqlite3.Connection) -> dict:
             "Nothing here is a trust, safety or quality rating, and it must not be "
             "presented as one.",
         ],
+        # The two questions this report deliberately does not answer, and where
+        # they are answered. Reachability here is a single instant; `/reliability`
+        # is the same endpoints over time. Nothing here reads the tool text at
+        # all; `/tool-safety` does.
+        "see_also": {
+            "/reliability": ("what share of probes each endpoint has answered, over "
+                             "time, with rates withheld below a minimum sample"),
+            "/tool-safety": ("what tool descriptions in the index instruct the model "
+                             "to do; counts and excerpts, never a score"),
+            "/liveness": "the raw per-endpoint feed, free and unattributed",
+        },
     }
