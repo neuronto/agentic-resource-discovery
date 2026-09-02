@@ -184,6 +184,40 @@ def fetch_spec(url: str, timeout: int = 60) -> dict | None:
         return None
 
 
+def _bases(spec: dict) -> list[str]:
+    """Where the API actually lives, so a result can be acted on.
+
+    OpenAPI 3 puts it in `servers`, Swagger 2 splits it across host, basePath
+    and schemes. Without this a caller gets a verb and a path and still cannot
+    make the request, which is the difference between a directory entry and
+    something an agent can use.
+    """
+    out = []
+    for srv in (spec.get("servers") or []):
+        u = (srv or {}).get("url")
+        if isinstance(u, str) and u.startswith("http"):
+            out.append(u.rstrip("/"))
+    if not out and spec.get("host"):
+        scheme = (spec.get("schemes") or ["https"])[0]
+        out.append(f"{scheme}://{spec['host']}{spec.get('basePath', '')}".rstrip("/"))
+    return out[:3]
+
+
+def _auth(spec: dict) -> str | None:
+    """How the API expects to be authenticated, named not guessed."""
+    comp = (spec.get("components") or {}).get("securitySchemes") or spec.get("securityDefinitions") or {}
+    kinds = []
+    for v in comp.values():
+        if not isinstance(v, dict):
+            continue
+        t = (v.get("type") or "").lower()
+        if t == "http":
+            kinds.append((v.get("scheme") or "http").lower())
+        elif t:
+            kinds.append(t)
+    return ", ".join(sorted(set(kinds))[:3]) or None
+
+
 def operations(spec: dict, cap: int = 400) -> list[dict]:
     """Every callable operation, as a tool.
 
@@ -200,6 +234,8 @@ def operations(spec: dict, cap: int = 400) -> list[dict]:
     retrieval, and the box is small.
     """
     out: list[dict] = []
+    bases = _bases(spec)
+    auth = _auth(spec)
     methods = ("get", "post", "put", "patch", "delete")
     for path, item in (spec.get("paths") or {}).items():
         if not isinstance(item, dict):
@@ -216,9 +252,25 @@ def operations(spec: dict, cap: int = 400) -> list[dict]:
             title = summary or name
             if not (summary or desc):
                 continue          # an operation that describes nothing is noise
+            params = [
+                {"name": pr.get("name"), "in": pr.get("in"), "required": bool(pr.get("required"))}
+                for pr in (op.get("parameters") or [])[:12]
+                if isinstance(pr, dict) and pr.get("name")
+            ]
             tags = " ".join(str(t) for t in (op.get("tags") or [])[:4])
             body = " ".join(x for x in (summary, desc, tags) if x).strip()
-            out.append({"name": name[:200], "title": title[:200], "description": body})
+            # The invocation detail rides in `input_schema`, which is the field
+            # for "how do I call this". An agent that finds the operation can
+            # now issue the request itself against the vendor, with no proxy in
+            # the middle: we are the map, not a toll road.
+            out.append({
+                "name": name[:200], "title": title[:200], "description": body,
+                "inputSchema": {
+                    "invoke": {"method": m.upper(), "path": path, "servers": bases},
+                    **({"auth": auth} if auth else {}),
+                    **({"parameters": params} if params else {}),
+                },
+            })
             if len(out) >= cap:
                 return out
     return out
