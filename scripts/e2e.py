@@ -923,13 +923,29 @@ def t_submit_accepts_a_bare_mcp_endpoint():
 
 
 def t_submit_rejects_a_url_that_is_not_mcp():
+    """A settled refusal is terminal, and says so.
+
+    This used to expect 202 pending: every refusal went into the retry queue.
+    A 405 to our POST is not a transient failure, it is the server saying it
+    does not accept POST, and no amount of waiting changes that. We were
+    re-probing example.com more than twenty times over days, and telling a
+    publisher who submitted the wrong URL to wait 2.7 days for an attempt that
+    could not succeed. Transient failures are still queued, which is what
+    `t_a_submission_is_never_lost` holds.
+    """
     s, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/"}, timeout=60))
-    assert s == 202, f"{s} {d}"
-    assert d["status"] == "pending" and d["refusal"] == "not_an_mcp_server", d
+    assert s == 404, f"{s} {d}"
+    assert d["status"] == "rejected" and d["refusal"] == "not_an_mcp_server", d
     assert "handshake" in d["detail"].lower()
+    assert "retry" not in d, f"a settled refusal must not be queued for retry: {d}"
     ev = d.get("evidence") or {}
     assert ev.get("http") and ev.get("content_type"), \
         f"the refusal does not carry what the endpoint returned: {ev}"
+    sub = d.get("submission") or {}
+    assert sub.get("id"), "the submission row must still be kept as a record of intent"
+    assert "no retry" in (sub.get("note") or "").lower() or \
+           "not queued" in (sub.get("note") or "").lower(), \
+        f"the note must say plainly that nothing will be retried: {sub.get('note')}"
 
 
 def t_submitted_server_becomes_searchable():
@@ -1258,12 +1274,13 @@ def t_publish_resource_verifies_before_indexing():
     err, _ = call({})
     assert err, "accepted a submission with no endpoint and no domain"
     err, body = call({"endpoint": "https://example.com/definitely-not-mcp"})
-    # Not indexed, and not an error either: the submission is accepted into
-    # the retry queue, and the agent is told so instead of being sent away
-    # to try again by itself.
-    assert body.get("status") == "pending" and body.get("indexed") is False, \
-        f"a non-MCP URL was neither indexed-false nor pending: {body}"
-    assert not err and body.get("next_step"), f"a queued submission should not be an error: {body}"
+    # Not indexed, and the agent is told the outcome rather than being sent
+    # away to work it out. A URL that answers 405 to our POST is refused
+    # outright (`rejected`); one that is merely unreachable is queued
+    # (`pending`). Either way the agent gets a status, not an exception.
+    assert body.get("status") in ("rejected", "pending") and body.get("indexed") is False, \
+        f"a non-MCP URL was neither indexed-false nor a known status: {body}"
+    assert not err, f"a refusal with a clear reason should not be an MCP error: {body}"
     err, body = call({"endpoint": "https://mcp.deepwiki.com/mcp"})
     if err and "timeout" in json.dumps(body).lower():
         # The negative assertions above are the ones that protect us. The
@@ -2111,7 +2128,9 @@ def t_a_refused_submission_says_whose_fault_it_is():
     tried four times, got three failures, and gave up. The response carries a
     machine-readable reason and says plainly which side it came from."""
     code, d = not_rate_limited(*post("/submit", {"endpoint": "https://example.com/definitely-not-mcp"}))
-    assert code == 202 and d.get("refusal") == "not_an_mcp_server", (code, d)
+    assert code == 404 and d.get("refusal") == "not_an_mcp_server", (code, d)
+    assert d.get("status") == "rejected", \
+        f"a server that answers 405 to our POST is settled, not pending: {d}"
     assert d.get("reason", "").startswith("error:"), \
         f"no machine-readable reason on a refusal: {d}"
     assert "what your endpoint returned" in (d.get("detail") or ""), \

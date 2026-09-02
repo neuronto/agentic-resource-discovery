@@ -1971,6 +1971,32 @@ def feed():
 # added, and one with a manifest was always going to be legitimate to index.
 # ---------------------------------------------------------------------------
 
+def _known_mcp_on_host(endpoint: str) -> str | None:
+    """A verified MCP endpoint we already hold on the same host, if any.
+
+    Only ever a suggestion. We do not index a URL the caller did not submit:
+    naming their own endpoint back to them is help, indexing something else on
+    their behalf is a decision that is theirs to make.
+    """
+    try:
+        host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
+        if not host:
+            return None
+        rows = db().execute(
+            """SELECT url FROM entries
+               WHERE type_family='mcp-server' AND url IS NOT NULL AND url != ''
+                 AND COALESCE(mcp_tools,0) > 0
+                 AND (lower(publisher)=? OR lower(url) LIKE ? OR lower(url) LIKE ?)
+               ORDER BY mcp_tools DESC LIMIT 1""",
+            (host, f"https://{host}/%", f"http://{host}/%")).fetchall()
+        for r in rows:
+            if (r["url"] or "").rstrip("/").lower() != endpoint.rstrip("/").lower():
+                return r["url"]
+    except Exception:
+        pass
+    return None
+
+
 @app.post("/submit", responses={
     200: {"description": "verified and indexed; `submission.id` is the receipt"},
     202: {"description": "kept and retried: not verified at this moment, `evidence` says "
@@ -2037,9 +2063,23 @@ def _emit_submit(b: dict, code: int, d: dict, probe: bool = False,
                 b=target, n=d.get("verified_tools"), ok=ok, probe=probe, source=source,
                 attempt=sub.get("attempts"), submission=sub.get("id"),
                 final=(d.get("status") == "gave_up"),
+                status=d.get("status"),
                 detail=None if ok and (sub.get("attempts") or 1) == 1 else
                 f"{code} {d.get('status') or '?'} {d.get('reason') or ''}: "
-                f"{str(d.get('detail') or '')[:100]}")
+                f"{_clip(str(d.get('detail') or ''), 160)}")
+
+
+def _clip(text: str, n: int) -> str:
+    """Cut at a word boundary. A hard slice produced an alert reading
+    "Nothing was indexed yet. `evi." which reads as a broken service rather
+    than a truncated sentence, and these alerts are how we find out we are
+    broken."""
+    t = " ".join((text or "").split())
+    if len(t) <= n:
+        return t
+    cut = t[:n]
+    sp = cut.rfind(" ")
+    return (cut[:sp] if sp > n * 0.6 else cut).rstrip(" .,;:`") + "..."
 
 
 SUBMIT_RETRY_EVERY_S = int(os.getenv("NEURONTO_SUBMIT_RETRY_EVERY", "60"))
@@ -2154,12 +2194,24 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             detail = ("this URL did not complete an MCP initialize handshake "
                       f"({res['status']}). Nothing was indexed yet. `evidence` is exactly "
                       "what your endpoint returned to us.")
+            # Before saying no, check whether we already know the answer. Our
+            # first verified publisher submitted their homepage as an MCP
+            # endpoint, got a 405 from their own web server (correctly: you
+            # cannot POST to a homepage), and was rejected and queued for two
+            # days of retries -- while `https://www.ikeytz.com/mcp`, with 45
+            # tools, had been sitting in this index since that morning. We held
+            # the answer and made them guess it.
+            known = _known_mcp_on_host(endpoint)
+            if known:
+                detail += (f" We already have a working MCP endpoint on this host: "
+                           f"{known}. Submit that URL instead.")
             row = submissions.record(sid, indexed=False, reason=res["status"], detail=detail,
                                      evidence=res.get("evidence"),
                                      scheduled=(source == "retry"))
             return _not_indexed("not_an_mcp_server", row, endpoint=endpoint,
                                 reason=res["status"], detail=detail,
-                                evidence=res.get("evidence"))
+                                evidence=res.get("evidence"),
+                                **({"try_instead": known} if known else {}))
         host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
         name = res.get("server_name") or host
         entry = {
@@ -2320,8 +2372,12 @@ def _not_indexed(why: str, row: dict | None, **fields) -> JSONResponse:
     """
     pub = submissions.public(row)
     still = bool(pub and pub.get("status") == "pending")
+    # Report the queue's own status rather than assuming anything that is not
+    # pending was given up on. A `rejected` row was never retried at all: the
+    # endpoint gave a settled answer, and calling that "gave_up" would tell a
+    # publisher we had tried for days when we had tried once and stopped.
     body = {
-        "status": "pending" if still else ("gave_up" if pub else why),
+        "status": "pending" if still else ((pub.get("status") if pub else None) or why),
         "indexed": False,
         "refusal": why,
         **{k: v for k, v in fields.items() if v is not None or k in ("evidence",)},

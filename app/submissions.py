@@ -131,6 +131,32 @@ def open(kind: str, target: str, source: str, probe: bool = False) -> str | None
         return None
 
 
+# Outcomes that will never change on their own. A retry schedule exists for
+# things that are temporarily broken: a connection refused, a timeout, a 5xx, a
+# host mid-deploy. It is the wrong instrument for an answer the server has
+# already given definitively.
+#
+# A 405 to our POST means this URL does not accept POST and never will, so it is
+# not an MCP endpoint. (Note the direction: 405 to a *GET* on our own /mcp means
+# the opposite, that the endpoint exists and we used the wrong verb. Same status
+# code, opposite meaning, because there the verb was wrong and here the verb is
+# the whole point.) 404, 410 and 501 are the same kind of settled answer.
+#
+# We were retrying these for days. `https://example.com/definitely-not-mcp` was
+# probed 28 times and `https://example.com/` 20 times, which is pointless for us
+# and rude to them, and it meant a real publisher who submitted the wrong URL was
+# told to wait 2.7 days for an attempt that could not succeed.
+#
+# 401, 403, 408 and 429 are deliberately NOT here: the first two mean a server is
+# there and wants credentials, and the last two are explicitly "try again".
+PERMANENT = {"http400", "http404", "http405", "http410", "http501"}
+
+
+def is_permanent(reason: str) -> bool:
+    r = (reason or "").strip().lower()
+    return r.startswith("error:") and r.split("error:", 1)[1] in PERMANENT
+
+
 def record(sid: str | None, *, indexed: bool, reason: str, detail: str = "",
            evidence: dict | None = None, entry_key: str | None = None,
            tools: int | None = None, busy: bool = False,
@@ -168,6 +194,11 @@ def record(sid: str | None, *, indexed: bool, reason: str, detail: str = "",
             status, next_at = "indexed", None
         elif busy:
             status, next_at = "pending", now + BUSY_RETRY_S
+        elif is_permanent(reason):
+            # Keep the row: the submission is still a record of intent, and a
+            # re-submit after a fix starts a fresh set of attempts. We simply
+            # stop asking a question that has been answered.
+            status, next_at = "rejected", None
         elif spent <= len(BACKOFF_S):
             status, next_at = "pending", now + BACKOFF_S[max(0, spent - 1)]
         else:
@@ -275,6 +306,12 @@ def public(row: dict | None) -> dict | None:
         out["entry_key"] = row.get("entry_key")
         out["verified_tools"] = row.get("tools")
         out["note"] = ("indexed" + (f" on attempt {row['attempts']}" if row["attempts"] > 1 else ""))
+    elif row["status"] == "rejected":
+        out["note"] = ("not indexed, and not queued for retry: the endpoint gave a "
+                       "settled answer rather than a temporary failure, so waiting "
+                       "would change nothing. The evidence above is exactly what it "
+                       "returned. Fix it, or submit the correct URL, and this starts "
+                       "a fresh set of attempts.")
     elif row["status"] == "gave_up":
         out["note"] = (f"we tried {row['attempts']} times over "
                        f"{_human(sum(BACKOFF_S))} and it never verified. The last evidence "
