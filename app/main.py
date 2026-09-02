@@ -472,12 +472,22 @@ def _manifest() -> dict:
                             "public ARD registry, normalises the competing MCP media types and "
                             "URN prefixes so filters do not silently miss, and probes endpoints "
                             "so dead resources are demoted rather than served."),
+            # What this resource is genuinely a good ANSWER to, which is not the
+            # same as what gets searched most. "find an MCP server for a task"
+            # is high demand and the wrong claim: the right answer to it is an
+            # actual server, not a registry. Our own /audit caught us returning
+            # ourselves for 1 of 5 of these when they were written for demand,
+            # while two other registries returned us for 4 of 5. A representative
+            # query is a promise about fitness, not a keyword slot.
             "representativeQueries": [
-                "find an MCP server, skill or agent for a task",
-                "search every ARD registry at once",
-                "which tools can an agent call for this",
+                "which ARD registries exist",
+                "a registry that federates other MCP registries",
+                "search every MCP and ARD registry at once",
+                "where can I search for MCP servers, skills and agents",
+                "how do AI agents discover MCP servers",
             ],
-            "tags": ["registry", "discovery", "ard", "federation", "index", "mcp"],
+            "tags": ["registry", "discovery", "ard", "federation", "index", "mcp",
+                     "mcp-server", "search", "tool-discovery", "agents"],
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:tool:ard-publish",
@@ -488,11 +498,15 @@ def _manifest() -> dict:
                             "Resource Discovery manifest, then checks which registries actually "
                             "return your domain. pip install ard-publish."),
             "representativeQueries": [
+                "how to make my MCP server discoverable",
+                "publish my MCP server to a registry",
                 "how do I publish an ARD manifest",
                 "make my API discoverable by AI agents",
+                "which registries actually return my domain",
                 "validate my ai-catalog.json",
             ],
-            "tags": ["ard", "sdk", "publishing", "validation", "python", "open-source"],
+            "tags": ["ard", "sdk", "publishing", "validation", "python", "open-source",
+                     "mcp-server", "discoverability", "manifest"],
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }, {
             "identifier": "urn:air:neuronto.com:mcp:discovery",
@@ -502,12 +516,16 @@ def _manifest() -> dict:
             "description": ("The same federated discovery as an MCP server, so an agent can "
                             "search every ARD registry from the tool interface it already speaks."),
             "capabilities": ["find_resource", "registry_stats"],
+            # This entry IS a callable tool, so its queries describe the tool a
+            # client is looking for, not the resources it will go and find.
             "representativeQueries": [
-                "find me an MCP server for this task",
-                "what skills exist for this job",
-                "search the agent-readable web",
+                "an MCP server that finds other MCP servers",
+                "a tool to search every ARD registry at once",
+                "give my agent the ability to discover tools at runtime",
+                "search the agent-readable web from one MCP tool",
             ],
-            "tags": ["mcp", "discovery", "search", "ard"],
+            "tags": ["mcp", "discovery", "search", "ard", "mcp-server",
+                     "tool-discovery", "registry", "agents"],
             "trustManifest": {"identity": "did:web:neuronto.com"},
         }],
     }
@@ -1007,8 +1025,31 @@ async def audit_endpoint(body: dict) -> JSONResponse:
     # Run here rather than inside `audit.run` because it reads our index, and
     # `run` is deliberately network-only so it can be pointed at any domain.
     try:
-        comp = audit.competition(conn, report["domain"], (report.get("_manifest") or None))
+        man_ = report.get("_manifest") or None
+        qs_ = audit.queries_for(man_, report["domain"])
+        comp = audit.competition(conn, report["domain"], man_, queries=qs_)
         report["competition"] = comp
+        # Our own row in `coverage` was a presence flag (0 or 1) sitting in a
+        # column where every other registry reports how many of the same queries
+        # returned the domain. That understated the home index against every
+        # upstream, in the one report a publisher reads to decide who is worth
+        # publishing to. Measured on the same queries, it is comparable now.
+        appears = int((comp.get("summary") or {}).get("you_appear_in") or 0)
+        for row in report.get("coverage") or []:
+            if row.get("registry") == "Neuronto":
+                row["queries"] = int((comp.get("summary") or {}).get("tested") or len(qs_))
+                row["returned_for"] = appears
+                row["indexed"] = bool(hits)
+                break
+        report["coverage_note"] = (
+            "Every row is scored over the same five queries, taken from this "
+            "domain's own representativeQueries. The matching rule is not "
+            "identical on both sides and the difference favours the upstreams: "
+            "an upstream counts as returning you if your domain appears anywhere "
+            "in its response, which includes a mention inside another entry, "
+            "while this index counts only your own entry appearing in the top "
+            "ten. Read a low number here against a high one there as a question "
+            "to check rather than a verdict.")
         report["recommendations"] = (report.get("recommendations") or []) \
             + audit.competition_advice(comp)
         if hits:
