@@ -1183,3 +1183,136 @@ function cp(id,btn){{
         "A monochrome badge stating how many tools your MCP server returned to tools/list "
         "and whether the endpoint answers. Evidence, not a score. Free, and it updates itself.",
         body, f"{B}/badge")
+
+
+def render_connect_page() -> str:
+    """Every way to point a client at this index, as something to copy.
+
+    The distribution problem is not that people disagree with the idea, it is
+    that every client wants its config in a slightly different shape and each
+    difference is a step where someone stops. So: one page, one block per
+    client, nothing to fill in. The MCP endpoint is the same URL in all of them.
+    """
+    B = config.PUBLIC_BASE
+    mcp = f"{B}/mcp"
+
+    def snip(idx: str, label: str, code: str, note: str = "") -> str:
+        n = f'<p class="cnote">{note}</p>' if note else ""
+        return (f'<div class="snip"><div class="lbl"><span>{label}</span>'
+                f'<button type="button" onclick="cp(\'{idx}\',this)">Copy</button></div>'
+                f'<pre id="{idx}">{esc(code)}</pre></div>{n}')
+
+    claude_code = ("/plugin marketplace add neuronto/ard-connectors\n"
+                   "/plugin install agentfinder@ard-connectors")
+    claude_desktop = json.dumps({"mcpServers": {"neuronto": {
+        "command": "npx", "args": ["-y", "mcp-remote", mcp]}}}, indent=2)
+    cursor = json.dumps({"mcpServers": {"neuronto": {"url": mcp}}}, indent=2)
+    vscode = json.dumps({"servers": {"neuronto": {"type": "http", "url": mcp}}}, indent=2)
+    gemini = json.dumps({"mcpServers": {"neuronto": {"httpUrl": mcp}}}, indent=2)
+    rest = ('curl -s -X POST ' + B + '/search \\\n'
+            '  -H "Content-Type: application/json" \\\n'
+            '  -d \'{"query":{"text":"read a PDF and extract tables"}}\'')
+    a2a = ('curl -s -X POST ' + B + '/a2a \\\n'
+           '  -H "Content-Type: application/json" \\\n'
+           '  -d \'{"jsonrpc":"2.0","id":1,"method":"message/send","params":'
+           '{"message":{"messageId":"1","role":"user","parts":'
+           '[{"kind":"text","text":"read a PDF"}]}}}\'')
+
+    body = f"""
+<style>
+.cwrap{{max-width:70ch}}
+.cnote{{color:var(--fg2);font-size:13px;line-height:1.6;margin:8px 0 0}}
+.snip{{margin:16px 0 0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}}
+.snip .lbl{{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:8px 12px;background:var(--panel2);border-bottom:1px solid var(--line);
+  font-size:13px;color:var(--fg2)}}
+.snip .lbl button{{background:none;border:1px solid var(--line2);border-radius:6px;
+  color:var(--fg2);padding:3px 10px;font-size:12px;cursor:pointer}}
+.snip .lbl button:hover{{color:var(--fg);border-color:var(--fg2)}}
+.snip pre{{margin:0;padding:12px;overflow-x:auto;font-family:var(--mono);font-size:13px;
+  line-height:1.55;white-space:pre}}
+.ctabs{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0;
+  margin:26px 0 0;max-width:none}}
+h2.csec{{margin:44px 0 0;font-size:20px}}
+</style>
+
+<div class="cwrap">
+  <p class="lede">One endpoint, <code>{esc(mcp)}</code>, answers every client below. It
+  searches this index and every other public ARD registry at once and fuses the rankings,
+  so a single connector covers the federation rather than one catalogue.</p>
+  <p class="lede" style="margin-top:14px">Nothing here needs an account, a key or a signup.
+  Anonymous callers get 60 requests an hour; <a href="/console">proving a domain</a> raises
+  that to 300.</p>
+</div>
+
+<h2 class="csec">Claude Code</h2>
+<div class="cwrap">
+  <p class="lede">Installs a skill, so asking for a tool in plain language searches ARD
+  without you naming a registry. It shows the finder menu once, remembers the choice, and
+  never installs anything it finds.</p>
+  {snip('c1', 'Two commands, in Claude Code', claude_code)}
+  <p class="cnote">Then: <code>/agentfinder a tool that can read PDFs</code>. The
+  marketplace lists every public Agent Finder, not only this one. Source:
+  <a href="https://github.com/neuronto/ard-connectors">neuronto/ard-connectors</a>.</p>
+</div>
+
+<h2 class="csec">Claude Desktop</h2>
+<div class="cwrap">
+  {snip('c2', 'claude_desktop_config.json', claude_desktop)}
+  <p class="cnote">Settings, Developer, Edit Config. Restart Claude after saving.</p>
+</div>
+
+<h2 class="csec">Cursor</h2>
+<div class="cwrap">
+  {snip('c3', '~/.cursor/mcp.json, or .cursor/mcp.json in a project', cursor)}
+</div>
+
+<h2 class="csec">VS Code and GitHub Copilot</h2>
+<div class="cwrap">
+  {snip('c4', '.vscode/mcp.json', vscode)}
+  <p class="cnote">Workspace file, or run <code>MCP: Add Server</code> from the command
+  palette and choose HTTP.</p>
+</div>
+
+<h2 class="csec">Gemini CLI</h2>
+<div class="cwrap">
+  {snip('c5', '~/.gemini/settings.json', gemini)}
+</div>
+
+<h2 class="csec">Anything else</h2>
+<div class="cwrap">
+  <p class="lede">The index answers on three interfaces and they share one search path, so
+  they cannot disagree about what it holds.</p>
+  {snip('c6', 'REST, the ARD interface', rest)}
+  {snip('c7', 'A2A, for agent-to-agent clients', a2a)}
+  <p class="cnote">The A2A agent card is at
+  <code>/.well-known/agent-card.json</code>. The MCP endpoint is POST only and answers
+  <code>405</code> to GET: there is no server-initiated stream, because every tool answers
+  inside the request that asked. Full reference at <a href="/api-docs">/api-docs</a>, and
+  <a href="/agents.md">/agents.md</a> if you are an agent reading this yourself.</p>
+</div>
+
+<h2 class="csec">What you get back</h2>
+<div class="cwrap">
+  <p class="lede">Ranked matches with the endpoint to connect to, which registries carried
+  each one, and what we verified by fetching it: whether it answered, and the tools its own
+  <code>tools/list</code> returned. The <code>score</code> is semantic relevance only. It is
+  not a trust, safety or quality rating and must not be shown to anyone as one.</p>
+</div>
+
+<script>
+function cp(id,btn){{
+  const t=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>{{
+    const o=btn.textContent; btn.textContent='Copied';
+    setTimeout(()=>{{btn.textContent=o;}},1400);
+  }});
+}}
+</script>
+"""
+    return render.page(
+        "Connect a client to the index",
+        "Copy-paste setup for Claude Code, Claude Desktop, Cursor, VS Code, Copilot and "
+        "Gemini, plus the REST and A2A interfaces. One endpoint searches every public ARD "
+        "registry at once. No key, no signup.",
+        body, f"{B}/connect")
