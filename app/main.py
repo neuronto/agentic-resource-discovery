@@ -1341,12 +1341,27 @@ async def claim_verify(body: dict) -> JSONResponse:
             raise
         return _busy_response("your key", domain=host, verified=True,
                               note="the DNS proof is verified; no change needed on your side")
+    # Ask for the badge here, at the one moment it is unambiguously earned. This
+    # response used to hand back a key, a scope note and a curl line, and stop.
+    # Our first verified third-party publisher published a DNS TXT record to
+    # prove they owned their domain, which is close to the highest-friction
+    # thing anyone can be asked for short of payment, and we never asked them
+    # for an img tag. The badge is also the only distribution mechanism in this
+    # ecosystem with evidence behind it, so not asking was the expensive half.
     return JSONResponse({
         "domain": host, "verified": True, "api_key": key,
         "grants": [f"read and write private entries for {host}",
                    "nothing else; the key is scoped to this domain alone"],
         "usage": f"curl -H 'authorization: Bearer {key}' {config.PUBLIC_BASE}/search ...",
         "warning": "this key is shown once and is not recoverable",
+        "badge": {
+            **badge.snippet(host),
+            "says": ("only what we observed: whether your endpoint answers and how "
+                     "many tools it listed. It is not an endorsement or a rating, and "
+                     "it changes on its own if your endpoint stops answering."),
+            "links_to": ("your own page on this index, so it sends your reader "
+                         "somewhere about you rather than to us"),
+        },
     })
 
 
