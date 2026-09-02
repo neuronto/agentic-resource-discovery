@@ -34,7 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
-from . import (adoption, audit, badge, bench, catalog, config, embed, events,
+from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, render, search,
                store, submissions, tools_index)
 from .normalize import media_family
@@ -582,6 +582,64 @@ def sitemap():
             + "\n</urlset>\n")
     return Response(body, media_type="application/xml")
 
+@app.get("/agents.md", include_in_schema=False)
+def agents_md():
+    """Operating instructions for an agent that has landed here.
+
+    llms.txt describes what this site *is*, at length, for a reader assembling
+    context. This is the other question: an agent is already here and wants to
+    know what to call and how. Short on purpose. It is also the third of the
+    three artifacts every preflight and audit tool in this ecosystem checks
+    (ard.json, llms.txt, agents.md), and we were failing that check on our own
+    domain while telling other people to pass it.
+    """
+    B = config.PUBLIC_BASE
+    c = store.counts(db())
+    return PlainTextResponse(f"""# Neuronto ARD Registry, for agents
+
+Neuronto is an Agentic Resource Discovery (ARD) registry and index. Ask it what
+can do a task and it answers from its own index and every other public ARD
+registry at once, fused into one ranking.
+
+{c["entries"]} resources from {c["publishers"]} publishers. No key, no signup.
+
+## Call it
+
+Three interfaces, same index. Pick whichever you already speak.
+
+- MCP (streamable HTTP): POST {B}/mcp
+  Tools: find_resource, find_tool, registry_stats, publish_resource.
+  GET on this endpoint answers 405: there is no server-initiated stream,
+  every tool answers inside the request that asked.
+- A2A (JSON-RPC): POST {B}/a2a, card at {B}/.well-known/agent-card.json
+  Method message/send, returns a Message. No tasks, no streaming.
+- REST (ARD v0.91): POST {B}/search with {{"query": {{"text": "..."}}}}
+
+## Publish yourself
+
+- Build a manifest from what your domain already serves: POST {B}/manifest/build
+- Get indexed: POST {B}/submit with an MCP endpoint or a domain.
+  Verified, not trusted: your endpoint has to complete a handshake, or your
+  domain has to serve a manifest that parses. A busy index answers 202 with a
+  queue id and retries on its own, so a failure costs you nothing.
+- Or pip install ard-publish and run it yourself.
+
+## Rules of the road
+
+- Anonymous: 60 requests an hour. With a domain key: 300. Prove a domain with
+  a DNS TXT record at {B}/claim to get one.
+- `score` is semantic relevance only. It is not a trust, safety or quality
+  rating, and must not be presented to a user as one.
+- `verified` reports what we fetched: whether the endpoint answered and what
+  its own tools/list returned. Nothing here is inferred from a name.
+- Results carry `found_in` so you can tell our index from a federated one.
+
+## Full documentation
+
+{B}/api-docs, {B}/llms.txt, {B}/.well-known/ard.json
+""", headers={"Cache-Control": "public, max-age=900"})
+
+
 @app.get("/llms.txt", include_in_schema=False)
 def llms_txt():
     B = config.PUBLIC_BASE
@@ -840,6 +898,64 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
     if payload is None:
         return Response(status_code=status)
     return JSONResponse(payload, status_code=status)
+
+
+# The transport lets a client open an SSE stream with GET so the server can push
+# messages it did not solicit. We have nothing to push: every tool answers inside
+# the POST that asked. The spec is explicit that a server which does not offer
+# that stream MUST answer 405, and 405 is the answer the client SDKs treat as
+# "fine, carry on". We were answering 404, which means "no such endpoint", and
+# 88 requests from `node` clients took it at its word before this was noticed.
+_MCP_NO_STREAM = {
+    "jsonrpc": "2.0", "id": None,
+    "error": {"code": -32000,
+              "message": "this endpoint does not offer a server-initiated SSE stream",
+              "data": {"use": "POST /mcp with a JSON-RPC message",
+                       "reason": "every tool answers inside the request that asked"}}}
+
+
+@app.get("/mcp", include_in_schema=False)
+@app.delete("/mcp", include_in_schema=False)
+def mcp_no_stream() -> Response:
+    return JSONResponse(_MCP_NO_STREAM, status_code=405,
+                        headers={"Allow": "POST", "Cache-Control": "no-store"})
+
+
+# ─────────────────────────────── A2A binding ────────────────────────────────
+# The other half of the discovery world asks for an Agent Card by convention and
+# reads a 404 as "not an agent". Trust and reputation crawlers asked 108 times
+# before this existed. The card is only honest because this endpoint answers.
+
+@app.get("/.well-known/agent-card.json", include_in_schema=False)
+@app.get("/.well-known/agent.json", include_in_schema=False)
+def agent_card():
+    return JSONResponse(a2a.card(), headers=CACHE)
+
+
+@app.post("/a2a", include_in_schema=False)
+async def a2a_endpoint(body: dict, request: Request) -> Response:
+    tok = _PROBE.set(_is_probe(request))
+    try:
+        status, payload = await a2a.handle(db(), body)
+    finally:
+        _PROBE.reset(tok)
+    if (body or {}).get("method") in ("message/send", "SendMessage"):
+        events.emit("a2a_call", a="message/send",
+                    ok=not (payload or {}).get("error"))
+    if payload is None:
+        return Response(status_code=status)
+    return JSONResponse(payload, status_code=status)
+
+
+@app.get("/a2a", include_in_schema=False)
+@app.delete("/a2a", include_in_schema=False)
+def a2a_no_stream() -> Response:
+    return JSONResponse({"jsonrpc": "2.0", "id": None,
+                         "error": {"code": -32000,
+                                   "message": "POST a JSON-RPC message/send here",
+                                   "data": {"card": "/.well-known/agent-card.json"}}},
+                        status_code=405,
+                        headers={"Allow": "POST", "Cache-Control": "no-store"})
 
 
 # ─────────────────────────── brand assets ──────────────────────────────────
@@ -1419,6 +1535,13 @@ def bench_endpoint(request: Request):
 # ARD adoption. Who publishes a manifest and who does not, including the
 # organisations associated with the working group.
 # ---------------------------------------------------------------------------
+
+@app.get("/ard-adoption", include_in_schema=False)
+def adoption_alias():
+    # Guessed by an assistant walking /ard-publishers and /ard-registries.
+    # A model that guesses a pattern once will guess it again.
+    return Response(status_code=301, headers={"Location": "/adoption"})
+
 
 @app.get("/adoption")
 def adoption_endpoint(request: Request):
