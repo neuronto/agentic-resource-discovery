@@ -49,6 +49,11 @@ async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
     if not rows:
         return {"probed": 0, "alive": 0, "dead": 0}
 
+    # Same shape as the embed loop, and the same trap: read, network, write.
+    # Ending the read transaction here means the writes below open a fresh one
+    # and get the busy handler, instead of an instant BUSY on a stale snapshot.
+    conn.commit()
+
     sem = asyncio.Semaphore(config.LIVENESS_CONCURRENCY)
     alive = dead = 0
 

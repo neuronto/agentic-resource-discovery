@@ -35,8 +35,8 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
 from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
-               federation, ingest, liveness, limits, publisher, render, search,
-               state, store, submissions, tools_index)
+               federation, ingest, liveness, limits, publisher, reliability,
+               render, safety, search, state, store, submissions, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
@@ -260,6 +260,18 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     """
     request_key = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
     q = body.get("query") or {}
+    # `query` as a bare string is the commonest thing a hand-written client
+    # sends, and it used to raise AttributeError and answer 500. A 500 tells a
+    # caller our service is broken, so they retry rather than fix the payload;
+    # the same confusion in the transport layer cost this project two days. Take
+    # the obvious meaning, and say what the spec wanted, rather than crashing.
+    if isinstance(q, str):
+        q = {"text": q}
+    elif not isinstance(q, dict):
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": "query must be an object with a `text` field (spec 5.3.2), "
+                      "for example {\"query\": {\"text\": \"read a pdf\"}}."})
     text = (q.get("text") or "").strip()
     if not text:
         return JSONResponse(status_code=400, content={
@@ -1677,6 +1689,50 @@ def state_of_mcp(request: Request):
                                             "Vary": "Accept"})
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=900",
                                       "Vary": "Accept"})
+
+
+@app.get("/reliability")
+def reliability_report(request: Request, entry: str = Query("", max_length=400)):
+    """How reliably endpoints answer, over time rather than at one instant.
+
+    `/state-of-mcp` says what share of the index answers right now. This says
+    what share of *probes* an endpoint has answered, which is the question a
+    consumer actually has, and it is only answerable by something that has been
+    probing on a timer and counting.
+
+    Rates are withheld below a minimum number of probes. A single successful
+    probe is not 100% uptime, and publishing it as one would be the most quotable
+    wrong number on the site.
+    """
+    if entry:
+        r = reliability.for_entry(db(), entry)
+        if r is None:
+            return JSONResponse(status_code=404, content={
+                "error": "not_found",
+                "detail": "no entry with that key. Keys come from /search results."})
+        return JSONResponse({"entry": entry, **r})
+    rep = render.cached("reliability", 900, lambda: reliability.corpus(db()))
+    return JSONResponse(rep, headers={"Cache-Control": "public, max-age=900"})
+
+
+@app.get("/tool-safety")
+def tool_safety(request: Request, entry: str = Query("", max_length=400)):
+    """What tool descriptions in the index tell the model to do.
+
+    A tool description is text that enters the model's context and is read as
+    instruction, so it is the one part of a third-party server that acts on an
+    agent before the agent calls anything.
+
+    The measurement is published because the answer is a surprise: the corpus is
+    close to clean. It is deliberately NOT a score, a badge or a ranking signal.
+    Findings are counts and excerpts for a human to read, and the classes the
+    detectors refuse to match are published alongside the ones they do, because
+    an earlier draft of this scan was wrong about four legitimate publishers.
+    """
+    if entry:
+        return JSONResponse(safety.for_entry(db(), entry))
+    rep = render.cached("tool-safety", 3600, lambda: safety.scan_corpus(db()))
+    return JSONResponse(rep, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/liveness")

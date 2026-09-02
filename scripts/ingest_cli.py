@@ -6,7 +6,7 @@
   python -m scripts.ingest_cli crawl f.txt  # well-known paths on a domain list
   python -m scripts.ingest_cli liveness [n] # probe a batch of endpoints
   python -m scripts.ingest_cli introspect [n]  # tools/list on MCP endpoints
-  python -m scripts.ingest_cli embed [n]    # build dense vectors
+  python -m scripts.ingest_cli embed [n]    # build dense vectors (prose + tools)
   python -m scripts.ingest_cli adoption     # re-probe the adoption watchlist
   python -m scripts.ingest_cli bench [k] [n]# run ARD-Bench
   python -m scripts.ingest_cli reindex      # rebuild the FTS table
@@ -49,6 +49,11 @@ async def main() -> None:
         print("introspect:", await tools_index.sweep(conn, limit=_num(2, 400)), flush=True)
     if cmd in ("embed", "all"):
         print("embed:", await embed.build(conn, limit=_num(2, 2000)), flush=True)
+        # The tool surface gets its own vector. Runs after introspection for the
+        # same reason the prose vector does: there is nothing to embed until the
+        # tools have been read.
+        print("embed-tools:", await embed.build_tools(conn, limit=_num(2, 2000)),
+              flush=True)
     if cmd in ("adoption", "all"):
         print("adoption:", await adoption.refresh_watchlist(conn), flush=True)
     if cmd == "bench":
