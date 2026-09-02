@@ -348,7 +348,7 @@ def render_category(conn: sqlite3.Connection, slug: str) -> str | None:
 
     page_title = f"{title}: {fmt(st['tools'])} verified MCP tools"
     desc = (f"{fmt(st['tools'])} verified tools across {fmt(st['servers'])} MCP servers for "
-            f"{title.lower()}. Every tool read from the server's own tools/list, with its "
+            f"{title.lower()}. Every tool read from the server's own tools/list or its published OpenAPI document, with its "
             f"arguments, whether the endpoint answers, and whether it needs credentials.")
 
     body = f"""

@@ -243,7 +243,7 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 hits = [{k: v for k, v in h.items() if k != "inputSchema"} for h in hits]
             return 200, {"jsonrpc": "2.0", "id": rid, "result": _text({
                 "query": q, "tools": hits,
-                "note": ("every tool listed was read from the server's own tools/list; "
+                "note": ("every tool listed was read from the server's own tools/list or its published OpenAPI document; "
                          "score is semantic relevance only, not a trust or safety rating")})}
 
         if name == "find_resource":
