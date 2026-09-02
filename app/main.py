@@ -564,7 +564,7 @@ def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
             "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
-            "/badge", "/console", "/blog",
+            "/badge", "/connect", "/console", "/blog",
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
@@ -1577,6 +1577,32 @@ def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|d
                              # cache headers; an hour keeps badge fetches from
                              # ever being load while staying fresh enough.
                              "ETag": f'W/"{hash(svg) & 0xffffffff:x}"'})
+
+
+@app.get("/connect", include_in_schema=False)
+def connect_page(request: Request):
+    """Copy-paste setup for every client. See catalog.render_connect_page."""
+    if _wants_html(request):
+        html_ = render.cached("connect-html", 3600, catalog.render_connect_page)
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
+                                            "Vary": "Accept"})
+    B = config.PUBLIC_BASE
+    return JSONResponse({
+        "endpoint": f"{B}/mcp",
+        "transport": "streamable-http, POST only; GET and DELETE answer 405",
+        "a2a": {"endpoint": f"{B}/a2a", "card": f"{B}/.well-known/agent-card.json"},
+        "rest": f"{B}/search",
+        "claude_code": ["/plugin marketplace add neuronto/ard-connectors",
+                        "/plugin install agentfinder@ard-connectors"],
+        "clients": {
+            "claude_desktop": {"mcpServers": {"neuronto": {
+                "command": "npx", "args": ["-y", "mcp-remote", f"{B}/mcp"]}}},
+            "cursor": {"mcpServers": {"neuronto": {"url": f"{B}/mcp"}}},
+            "vscode": {"servers": {"neuronto": {"type": "http", "url": f"{B}/mcp"}}},
+            "gemini": {"mcpServers": {"neuronto": {"httpUrl": f"{B}/mcp"}}},
+        },
+        "auth": "none. 60 requests an hour anonymous, 300 with a verified domain key",
+    }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
 
 
 @app.get("/badge", include_in_schema=False)
