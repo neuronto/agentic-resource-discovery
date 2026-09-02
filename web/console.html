@@ -606,9 +606,42 @@ async function audit(){
         <div class="shead" style="margin-top:34px"><h2>What to do next</h2></div>
         <div>${j.recommendations.map((r,i)=>`<div class="rec"><span class="i">${i+1}</span>
           <span>${esc(r)}</span></div>`).join("")}</div>
+
+        ${j.badge ? `
+        <div class="shead" style="margin-top:34px"><h2>Show what was verified</h2></div>
+        <div class="card">
+          <p class="src" style="margin-bottom:14px">This is your badge, drawn from what we
+          actually observed. It corrects itself if your endpoint stops answering, and
+          displaying it changes nothing about your indexing or your ranking.</p>
+          <p style="margin:0 0 16px"><img src="${esc(j.badge.image)}" alt="${esc(j.badge.alt)}" height="20"></p>
+          <pre id="bsnip" style="white-space:pre-wrap;margin:0 0 12px">${esc(j.badge.html)}</pre>
+          <button class="btn btn--w" onclick="copyBadge('html',this)">Copy HTML</button>
+          <button class="btn btn--w" onclick="copyBadge('markdown',this)">Copy Markdown</button>
+        </div>` : ""}
       </section>`;
+    window.__badge = j.badge || null;
   }catch(e){$("#rep").innerHTML='<div class="empty">Audit failed. Try again.</div>'}
   finally{busy=false;$("#ab").disabled=false}
+}
+function copyBadge(kind, btn){
+  // The snippet is the product here. Asking someone to navigate to another page
+  // to fetch it is the friction that kept the badge at zero installs: it was
+  // offered as a sentence with a URL, never as the thing itself.
+  const b = window.__badge; if(!b) return;
+  const text = kind === "markdown" ? b.markdown : b.html;
+  const done = () => { const t = btn.textContent; btn.textContent = "Copied";
+                       setTimeout(()=>{btn.textContent=t}, 1400); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, ()=>fallback(text, done));
+  } else { fallback(text, done); }
+  function fallback(t, cb){
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.setAttribute("readonly","");
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); cb(); } catch(e) {}
+    document.body.removeChild(ta);
+  }
 }
 async function indexNow(domain){
   const b=$("#ixbtn"), o=$("#ixout");
