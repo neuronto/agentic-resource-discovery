@@ -36,7 +36,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 
 from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, render, search,
-               store, submissions, tools_index)
+               state, store, submissions, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
@@ -583,7 +583,7 @@ def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
             "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
-            "/badge", "/connect", "/privacy", "/console", "/blog",
+            "/badge", "/connect", "/privacy", "/state-of-mcp", "/console", "/blog",
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
@@ -1641,6 +1641,80 @@ def connect_client_page(slug: str, request: Request):
         "docs": c["doc"],
         "all_clients": f"{B}/connect",
     }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
+
+
+@app.get("/state-of-mcp")
+def state_of_mcp(request: Request):
+    """What share of the agentic web actually answers, measured not asserted.
+
+    Published because nobody else can: a directory knows what it lists, and only
+    something that probes knows what responds. JSON to a machine, HTML to a
+    browser, and the limitations travel inside the payload rather than in a
+    footnote, so a reader who quotes the number also gets its caveats.
+    """
+    rep = render.cached("state-of-mcp", 900, lambda: state.report(db()))
+    if _wants_html(request):
+        html_ = render.cached("state-of-mcp-html", 900,
+                              lambda: catalog.render_state_page(rep))
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=900",
+                                            "Vary": "Accept"})
+    return JSONResponse(rep, headers={"Cache-Control": "public, max-age=900",
+                                      "Vary": "Accept"})
+
+
+@app.get("/liveness")
+def liveness_feed(dead: int = Query(0, ge=0, le=1),
+                  since: int = Query(0, ge=0),
+                  limit: int = Query(500, ge=1, le=5000),
+                  cursor: int = Query(0, ge=0)):
+    """Which endpoints answer, as a feed anyone may consume, including rivals.
+
+    We probe every endpoint we index and keep the transitions. Other registries
+    do not, which means they list servers that stopped answering months ago and
+    have no way to know. Publishing this costs us nothing we would otherwise
+    sell and makes the whole ecosystem less wrong, which is worth more to us
+    than the small advantage of being the only ones who can tell.
+
+    No key, no attribution required, no rate limit beyond the shared one.
+    `dead=1` is the useful half: the entries worth re-checking on your side.
+    """
+    conn = db()
+    where = ["url <> ''"]
+    args: list = []
+    if dead:
+        where.append("live = 0")
+    else:
+        where.append("live IS NOT NULL")
+    if since:
+        where.append("live_checked >= ?")
+        args.append(since)
+    if cursor:
+        where.append("rowid > ?")
+        args.append(cursor)
+    sql = ("SELECT rowid, identifier, url, live, live_status, live_ms, live_checked "
+           "FROM entries WHERE " + " AND ".join(where) + " ORDER BY rowid LIMIT ?")
+    rows = conn.execute(sql, (*args, limit)).fetchall()
+    items = [{
+        "identifier": r["identifier"],
+        "url": r["url"],
+        "answering": bool(r["live"]),
+        "http_status": r["live_status"],
+        "ms": r["live_ms"],
+        "checked": r["live_checked"],
+    } for r in rows]
+    body = {
+        "items": items,
+        "count": len(items),
+        "what": ("liveness observations from probing each endpoint. `answering` means it "
+                 "responded, not that it is correct, safe or good"),
+        "licence": "free to use, redistribute and build on. No attribution required.",
+        "params": {"dead": "1 for endpoints that stopped answering",
+                   "since": "unix seconds, only entries checked since then",
+                   "cursor": "pass the last nextCursor to continue"},
+    }
+    if len(items) == limit and rows:
+        body["nextCursor"] = rows[-1]["rowid"]
+    return JSONResponse(body, headers={"Cache-Control": "public, max-age=600"})
 
 
 @app.get("/privacy", include_in_schema=False)

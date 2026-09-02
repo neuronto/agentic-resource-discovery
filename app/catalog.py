@@ -1718,3 +1718,87 @@ function cp(btn){{
         f"the MCP servers, skills, agents and APIs for a task across every public ARD "
         f"registry at once. Copy-paste config, no key, no signup.",
         body, f"{B}/connect/{slug}")
+
+
+def render_state_page(rep: dict) -> str:
+    """The measured state of the agentic web, as a page.
+
+    Numbers first, method second, limitations in the same visual weight as the
+    findings. The temptation with a dataset nobody else has is to present it as
+    a verdict; the reason it is worth anything is that it is presented as
+    evidence, with the window it came from attached.
+    """
+    B = config.PUBLIC_BASE
+    w, ix = rep["window"], rep["index"]
+    reach, tools, churn = rep["reachability"], rep["tools"], rep["churn"]
+    n = lambda v: f"{v:,}" if isinstance(v, int) else v
+
+    def stat(big, label, sub=""):
+        s = f'<div class="sub">{sub}</div>' if sub else ""
+        return (f'<div class="stat"><div class="big">{big}</div>'
+                f'<div class="lab">{label}</div>{s}</div>')
+
+    lims = "".join(f"<li>{esc(x)}</li>" for x in rep["limitations"])
+    body = f"""
+<style>
+.swrap{{max-width:70ch}}
+.stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
+  margin:26px 0 0;max-width:none}}
+.stat{{border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}}
+.stat .big{{font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}}
+.stat .lab{{color:var(--fg2);font-size:13px;margin-top:6px;line-height:1.45}}
+.stat .sub{{color:var(--mut);font-size:12px;margin-top:4px}}
+.swrap h2{{margin:44px 0 0;font-size:20px}}
+.swrap p{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0}}
+.swrap ul{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0;padding-left:20px}}
+.swrap li{{margin:7px 0}}
+.meth{{border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin:22px 0 0;
+  color:var(--fg2);font-size:14px;line-height:1.65}}
+</style>
+
+<div class="swrap">
+  <p class="lede">Every directory can tell you how many servers it lists. Listing is free;
+  answering is not. These numbers come from fetching each endpoint on a schedule and
+  keeping the changes, so they describe what responds rather than what was submitted.</p>
+</div>
+
+<div class="stats">
+  {stat(n(ix['entries']), 'resources indexed', f"from {n(ix['publishers'])} publishers")}
+  {stat(f"{reach['share_answering_pct']}%", 'of probed endpoints answer',
+        f"{n(reach['answering'])} answering, {n(reach['not_answering'])} not")}
+  {stat(f"{tools['share_exposing_tools_pct']}%", 'of introspected servers expose tools',
+        f"{n(tools['servers_requiring_auth'])} require credentials")}
+  {stat(n(tools['verified_tools_total']), 'verified tools',
+        f"median {tools['median_tools_per_server']} per server that answers")}
+  {stat(n(reach['median_response_ms']) + ' ms', 'median response', 'of endpoints that answer')}
+  {stat(n(w['observations']), 'recorded changes',
+        f"across {n(w['endpoints_watched'])} endpoints in {w['days']} days")}
+</div>
+
+<div class="swrap">
+  <h2>Churn</h2>
+  <p><b>{n(churn['stopped_answering'])}</b> endpoints stopped answering and
+  <b>{n(churn['started_answering_again'])}</b> started again, within the
+  {w['days']}-day window above. {esc(churn['note'])}</p>
+
+  <h2>How this is measured</h2>
+  <div class="meth">{esc(rep['how_this_is_measured'])}</div>
+
+  <h2>What these numbers are not</h2>
+  <ul>{lims}</ul>
+
+  <h2>Take the data</h2>
+  <p>This page as JSON: <code>{B}/state-of-mcp</code> with
+  <code>Accept: application/json</code>. The underlying liveness observations, including
+  the list of endpoints that stopped answering, are at <code>{B}/liveness</code> and
+  <code>{B}/liveness?dead=1</code>. Free to use, redistribute and build on, no attribution
+  required, no key. If you run a registry, the dead list is the useful half.</p>
+  <p>Changes as they happen: <a href="/feed">/feed</a>.</p>
+</div>
+"""
+    return render.page(
+        "The state of MCP, measured",
+        "What share of listed MCP servers actually answer, how many expose the tools they "
+        "claim, and how fast the set changes. Measured by probing every endpoint, with the "
+        "window and the limitations attached. Free to reuse.",
+        body, f"{B}/state-of-mcp")

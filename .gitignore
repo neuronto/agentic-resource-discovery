@@ -47,3 +47,6 @@ analytics/
 dataset/
 sdk/**/dist/
 sdk/**/*.egg-info/
+
+# Distribution and rank tracking: names competitors, never published.
+presence/
