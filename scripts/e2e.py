@@ -2282,6 +2282,49 @@ def t_stranger_dry_run_leaves_no_trace():
     assert not sub.get("id"), f"dry run created a submission row: {sub}"
 
 
+def t_vendor_page_exists_and_carries_only_observed_facts():
+    """A vendor page is the one thing a stranger asked for by URL, five ways
+    in one session (/api/stripe.com, /apis/stripe.com, /resource/stripe.com...).
+    It must render for a vendor that clears the operation threshold, carry the
+    operations we actually indexed and the vendor's own description, and never
+    invent prose, testimonials or a rating."""
+    s, h = _html("/api/stripe.com")
+    assert s == 200, s
+    low = h.lower()
+    assert "stripe" in low and "/v1/" in h, "must list the vendor's real operations"
+    assert "ard registry" in low, "title must carry the strategic phrase"
+    for banned in ("testimonial", "rated ", "stars", "trusted by", "best "):
+        assert banned not in low, f"invented proof on a vendor page: {banned!r}"
+    assert "\u2014" not in h and "\u2013" not in h, "em/en dash on a public page"
+    assert "apis.guru" in low or "specification" in low, \
+        "must state where the spec came from and how fresh it is"
+
+
+def t_vendor_page_404s_below_threshold_and_for_unknown():
+    """Below the operation threshold there is no page, and the sitemap must
+    not advertise one. An unknown host 404s outright."""
+    try:
+        s, _ = _html("/api/definitely-not-a-vendor-zzzz.example")
+        assert False, f"unknown vendor returned {s}"
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, e.code
+    r = urllib.request.urlopen(urllib.request.Request(
+        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
+    sm = r.read().decode()
+    import re as _re
+    hosts = _re.findall(r"<loc>[^<]*/api/([^<]+)</loc>", sm)
+    assert len(hosts) >= 100, f"expected hundreds of vendor pages in the sitemap, got {len(hosts)}"
+    for host in hosts[:12]:                       # every advertised page renders
+        st, _h = _html(f"/api/{host}")
+        assert st == 200, f"sitemap advertises /api/{host} which returned {st}"
+
+
+def t_vendor_index_lists_and_links():
+    s, h = _html("/api/")
+    assert s == 200, s
+    assert 'href="/api/stripe.com"' in h, "index must link the vendor pages it lists"
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

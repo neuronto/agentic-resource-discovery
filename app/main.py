@@ -620,6 +620,7 @@ def sitemap():
             "/tools/", "/bench", "/adoption", "/submit", "/published"]
     urls += [f"/connect/{s_}" for s_ in catalog.CLIENTS] + ["/connect/frameworks"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
+    urls += ["/api/"] + [f"/api/{v['host']}" for v in catalog.vendor_hosts(db())]
     urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
                                    for p in catalog.publisher_list(db())]
     blog = WEB / "blog"
@@ -1582,6 +1583,36 @@ def tools_category(slug: str):
         return JSONResponse(status_code=404, content={"error": "not_found"})
     html_ = render.cached(f"cat-{slug}", 1800,
                           lambda: catalog.render_category(db(), slug))
+    if not html_:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/api", include_in_schema=False)
+@app.get("/api/", include_in_schema=False)
+def vendor_index():
+    """Every API vendor with a page. Registered above the /{slug} catch-all so
+    the bare /api is ours and not a guide lookup for a page called "api"."""
+    html_ = render.cached("api-index", 1800, lambda: catalog.render_vendor_index(db()))
+    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/api/{host}", include_in_schema=False)
+def vendor_page(host: str):
+    """One vendor's indexed API surface.
+
+    The URL a stranger guessed five ways before this existed. Gated on
+    `catalog.MIN_OPS` so it is a page about something, never a doorway, and it
+    carries only what the vendor wrote or a probe observed.
+    """
+    h = _host_arg(host)
+    if not h or not catalog._vendor_ok(db(), h):
+        return JSONResponse(status_code=404, content={
+            "error": "not_found",
+            "detail": f"no API page for {host!r}. Pages exist for vendors with at least "
+                      f"{catalog.MIN_OPS} documented operations indexed; the list is at /api/. "
+                      "To search every indexed operation: POST /search."})
+    html_ = render.cached(f"api-{h}", 1800, lambda: catalog.render_vendor(db(), h))
     if not html_:
         return JSONResponse(status_code=404, content={"error": "not_found"})
     return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
