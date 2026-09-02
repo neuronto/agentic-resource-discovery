@@ -1951,3 +1951,225 @@ function cp(id,btn){{
         "MCP-capable framework to an index that searches every public ARD registry at "
         "once, so an agent can discover tools at runtime instead of at build time.",
         body, f"{B}/connect/frameworks")
+
+
+# ---------------------------------------------------------------------------
+# Vendor pages: /api/{host}
+#
+# A stranger asked for these by URL, five ways in one session (/api/stripe.com,
+# /apis/stripe.com, /resource/stripe.com, /entry/urn:air:stripe.com:...), which
+# is a stronger signal than any plan we could have written for them. They exist
+# for the 2,509 API vendors whose indexing produced zero crawlable pages.
+#
+# The doorway objection, and the gate that answers it. 2,509 templated pages
+# built from a 2023 corpus is the pattern our own LP rules forbid. So: a page
+# only for a host with at least MIN_OPS documented operations (325 hosts; the
+# same discipline as MIN_TOOLS for categories), and a page carries ONLY what was
+# observed or what the vendor wrote: their own description, their operations
+# with method, path, base URL and auth, whether the endpoint answered our
+# probes, and where the specification came from and how old that corpus is,
+# stated plainly. No prose of ours describing the vendor, no rating, no proof.
+# ---------------------------------------------------------------------------
+
+MIN_OPS = 20
+_SHOW_SPECS = 12      # specifications rendered per host (azure.com has 653)
+_SHOW_OPS = 40        # operations rendered per specification
+_SHOW_OPS_TOTAL = 240 # operations rendered per page (amazonaws.com has 11,829)
+_CORPUS_NEWEST = "2023-04-21"
+
+
+def vendor_hosts(conn: sqlite3.Connection) -> list[dict]:
+    """Hosts that clear MIN_OPS, with counts. Cached: 325 rows from a join over
+    95k tools is not request-path work."""
+    from . import render as _r
+
+    def build():
+        rows = conn.execute(
+            """SELECT e.publisher AS host,
+                      COUNT(t.id) AS ops,
+                      COUNT(DISTINCT e.key) AS specs,
+                      MAX(CASE WHEN e.live=1 THEN 1 ELSE 0 END) AS live,
+                      MAX(COALESCE(e.probe_n,0)) AS probes,
+                      MAX(e.display_name) AS name
+               FROM entries e JOIN tools t ON t.entry_key = e.key
+               WHERE e.type_family='openapi' AND e.publisher IS NOT NULL AND e.publisher != ''
+               GROUP BY e.publisher HAVING ops >= ?
+               ORDER BY ops DESC""", (MIN_OPS,)).fetchall()
+        return [dict(r) for r in rows]
+    return _r.cached_value("vendor-hosts", 1800, build)
+
+
+def _vendor_ok(conn: sqlite3.Connection, host: str) -> bool:
+    h = (host or "").lower().strip()
+    return bool(h) and any(v["host"] == h for v in vendor_hosts(conn))
+
+
+def _op_rows(conn: sqlite3.Connection, key: str, limit: int) -> list[dict]:
+    out = []
+    for r in conn.execute(
+            "SELECT name, description, input_schema FROM tools WHERE entry_key=? LIMIT ?",
+            (key, limit)):
+        inv, auth = {}, []
+        try:
+            sch = json.loads(r["input_schema"] or "{}")
+            inv = sch.get("invoke") or {}
+            auth = sch.get("auth") or []
+        except Exception:
+            pass
+        out.append({"name": r["name"], "summary": (r["description"] or "").strip(),
+                    "method": str(inv.get("method") or "").upper(),
+                    "path": inv.get("path") or "", "servers": inv.get("servers") or [],
+                    "auth": auth})
+    return out
+
+
+def _strip_html(s: str) -> str:
+    return re.sub(r"<[^>]+>", "", s or "").strip()
+
+
+def render_vendor(conn: sqlite3.Connection, host: str) -> str | None:
+    """One vendor's indexed API surface: what we hold, how to call it, whether
+    it answered. Nothing said about the vendor that the vendor or a probe did
+    not say first."""
+    from . import reliability, render as _r
+    host = (host or "").lower().strip()
+    if not _vendor_ok(conn, host):
+        return None
+    specs = conn.execute(
+        """SELECT e.key, e.display_name, e.description, e.url, e.tags, e.version,
+                  e.live, e.live_checked, e.probe_n, e.probe_ok, e.probe_first, e.probe_ms_sum,
+                  (SELECT COUNT(*) FROM tools t WHERE t.entry_key=e.key) AS ops
+           FROM entries e
+           WHERE e.type_family='openapi' AND lower(e.publisher)=?
+           ORDER BY ops DESC, e.display_name""", (host,)).fetchall()
+    if not specs:
+        return None
+
+    total_ops = sum(int(s["ops"] or 0) for s in specs)
+    name = _strip_html(specs[0]["display_name"] or host)
+    desc = _strip_html(specs[0]["description"] or "")
+    stale = any("spec-not-recently-updated" in (s["tags"] or "") for s in specs)
+    best = max(specs, key=lambda s: int(s["probe_n"] or 0))
+    rel = reliability.summarise(best)
+
+    # Reachability sentence, from the probe counters and nothing else.
+    if rel.get("observed_uptime_pct") is not None:
+        reach = (f"answered {rel['answered']} of {rel['probes']} probes "
+                 f"({rel['observed_uptime_pct']}% observed, lower bound {rel['lower_bound_pct']}%)")
+    elif rel.get("probes"):
+        reach = (f"answered {rel['answered']} of {rel['probes']} probe(s); a rate is "
+                 f"withheld below {reliability.MIN_PROBES}")
+    else:
+        reach = "not yet probed"
+
+    # Base URLs and auth, collected from the operations themselves.
+    bases: list[str] = []
+    auths: list[str] = []
+    shown_total = 0
+    sections = []
+    for s in specs[:_SHOW_SPECS]:
+        room = min(_SHOW_OPS, _SHOW_OPS_TOTAL - shown_total)
+        ops = _op_rows(conn, s["key"], max(room, 0)) if room > 0 else []
+        shown_total += len(ops)
+        for o in ops:
+            for b in o["servers"]:
+                if b and b not in bases:
+                    bases.append(b)
+            for a in o["auth"]:
+                if a and a not in auths:
+                    auths.append(a)
+        rows_html = "".join(
+            f'<tr><td><code>{esc(o["method"] or "?")}</code></td>'
+            f'<td><code>{esc(o["path"] or o["name"])}</code></td>'
+            f'<td>{esc(_strip_html(o["summary"])[:110])}</td></tr>'
+            for o in ops)
+        more = int(s["ops"] or 0) - len(ops)
+        sections.append(f"""
+<h2>{esc(_strip_html(s["display_name"] or name))}{f' <span class="tag">v{esc(str(s["version"]))}</span>' if s["version"] else ""}</h2>
+{f'<p class="dsc">{esc(_strip_html(s["description"])[:400])}</p>' if s["description"] else ""}
+<div style="overflow-x:auto"><table class="tl"><thead><tr><th>method</th><th>path</th><th>what the vendor says it does</th></tr></thead>
+<tbody>{rows_html}</tbody></table></div>
+{f'<p class="src">and {more:,} more operation(s) in this specification, all searchable.</p>' if more > 0 else ""}
+<p class="src">specification origin: <a href="{esc(s["url"] or "")}" rel="nofollow noopener">{esc((s["url"] or "")[:90])}</a></p>""")
+    more_specs = len(specs) - len(specs[:_SHOW_SPECS])
+
+    freshness = (f"Specifications as held by the APIs.guru corpus, whose newest record is "
+                 f"{_CORPUS_NEWEST}. Operations the vendor has added since are not listed here; "
+                 f"the origin links above are the vendor's own current documents."
+                 if stale else "Specification as published by the vendor.")
+
+    title = f"{name} API"
+    description = (f"{total_ops:,} documented operations of the {name} API, indexed and callable: "
+                   f"method, path, base URL and auth for each, with reachability observed by "
+                   f"the Neuronto ARD Registry.")
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / <a href="/api/">APIs</a> / {esc(host)}</div>
+  <h1>{esc(title)}</h1>
+  {f'<p class="lede">{esc(desc[:300])}</p>' if desc else ""}
+  <ul class="statline">
+    <li><b>{total_ops:,}</b> documented operations</li>
+    <li><b>{len(specs)}</b> specification(s)</li>
+    <li><b>{len(bases)}</b> base URL(s)</li>
+    <li>{esc(reach)}</li>
+  </ul>
+</div>
+<div class="note">
+  <p>Every row below was read from the vendor's own OpenAPI document. The summary text is
+  theirs. What this registry adds is that each operation is indexed with its method, path,
+  base URL and auth scheme, so a search for a capability can answer with a call rather than
+  a name, and that the endpoint is probed on a schedule.</p>
+  <p>{esc(freshness)}</p>
+  {f'<p>base URLs: {" ".join(f"<code>{esc(b)}</code>" for b in bases[:6])}</p>' if bases else ""}
+  {f'<p>auth: {" ".join(f"<span class=tag>{esc(a)}</span>" for a in auths[:6])}</p>' if auths else ""}
+  <p>find it by capability: <code>POST /search {{"query":{{"text":"..."}}}}</code> returns these
+  operations with their invocation detail. <a href="/connect">Connect any agent client</a>.</p>
+</div>
+{"".join(sections)}
+{f'<p class="src">and {more_specs} more specification(s) from {esc(host)}, all indexed.</p>' if more_specs else ""}
+<p class="src">nothing on this page is a rating, an endorsement or a claim about quality. Reachability
+is what our probes observed from one network; answering is a floor under usefulness, not a measure
+of it.</p>
+"""
+    jsonld = json.dumps({
+        "@context": "https://schema.org", "@type": "WebAPI",
+        "name": title, "description": desc[:300] or description,
+        "provider": {"@type": "Organization", "name": host},
+        **({"documentation": specs[0]["url"]} if specs[0]["url"] else {}),
+    }, ensure_ascii=False)
+    return _r.page(title, description, body,
+                   f"{config.PUBLIC_BASE}/api/{host}", jsonld=jsonld)
+
+
+def render_vendor_index(conn: sqlite3.Connection) -> str:
+    from . import render as _r
+    hosts = vendor_hosts(conn)
+    total_ops = sum(int(h["ops"]) for h in hosts)
+    def _probe_tag(h: dict) -> str:
+        if h["live"]:
+            return '<span class="tag ok">answers</span>'
+        if not h["probes"]:
+            return '<span class="tag">not yet probed</span>'
+        return '<span class="tag">no response</span>'
+    rows = "".join(
+        f'<tr><td><a href="/api/{esc(h["host"])}">{esc(_strip_html(h["name"] or h["host"]))}</a></td>'
+        f'<td><code>{esc(h["host"])}</code></td><td>{int(h["ops"]):,}</td><td>{int(h["specs"])}</td>'
+        f'<td>{_probe_tag(h)}</td></tr>'
+        for h in hosts)
+    title = "APIs indexed by capability"
+    description = (f"{len(hosts)} API vendors with {total_ops:,} documented operations, each "
+                   f"indexed with method, path, base URL and auth so a capability search "
+                   f"answers with a call. Neuronto ARD Registry.")
+    body = f"""
+<div class="pgh">
+  <div class="crumb"><a href="/">Index</a> / APIs</div>
+  <h1>{esc(title)}</h1>
+  <p class="lede">Every vendor here has at least {MIN_OPS} documented operations indexed from its own
+  OpenAPI document. A page lists what we hold and whether the endpoint answered; it says nothing
+  about the vendor that the vendor or a probe did not say first.</p>
+  <ul class="statline"><li><b>{len(hosts)}</b> vendors</li><li><b>{total_ops:,}</b> operations</li></ul>
+</div>
+<div style="overflow-x:auto"><table class="tl"><thead><tr><th>API</th><th>host</th><th>operations</th><th>specs</th><th>probe</th></tr></thead>
+<tbody>{rows}</tbody></table></div>
+"""
+    return _r.page(title, description, body, f"{config.PUBLIC_BASE}/api/")
