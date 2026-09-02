@@ -1316,3 +1316,107 @@ function cp(id,btn){{
         "Gemini, plus the REST and A2A interfaces. One endpoint searches every public ARD "
         "registry at once. No key, no signup.",
         body, f"{B}/connect")
+
+
+def render_privacy_page() -> str:
+    """What this service receives, what it keeps, and what leaves it.
+
+    Written from the code rather than from a template, because a policy that
+    describes a system nobody built is worse than none: it teaches the reader to
+    discount the next one. Every claim here has a mechanism behind it, and the
+    two places query text genuinely leaves this machine are stated rather than
+    buried under "third-party service providers".
+    """
+    B = config.PUBLIC_BASE
+    body = f"""
+<style>
+.pw{{max-width:70ch}}
+.pw h2{{margin:40px 0 0;font-size:20px}}
+.pw h3{{margin:26px 0 0;font-size:16px;color:var(--fg)}}
+.pw p{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0}}
+.pw ul{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0;padding-left:20px}}
+.pw li{{margin:6px 0}}
+.pw code{{font-family:var(--mono);font-size:13px}}
+.pw .note{{border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;
+  margin:20px 0 0;color:var(--fg2);font-size:14px;line-height:1.6}}
+</style>
+
+<div class="pw">
+<p class="lede">Neuronto is a public discovery index. There is no account, no signup and
+no payment, so there is no customer record to describe. What follows is what the running
+code does.</p>
+
+<h2>Search queries</h2>
+<p>An anonymous search is recorded: the query text truncated to 200 characters, which
+mode it ran in, how many results it returned, how long it took, and the time. Each result
+it returned is recorded against that search with its rank.</p>
+<p>This exists for one feature. A publisher listed here can ask
+<code>{B}/demand</code> what agents were looking for when their own resources came back,
+which is the only way a publisher learns whether anyone is looking for what they offer.
+The report is scoped to their own domain: it shows queries that returned <em>their</em>
+entries and nothing else.</p>
+<p><b>A search made with an API key is not recorded.</b> The query is replaced with a
+placeholder before it is written and no result-level rows are stored at all. If you do not
+want your queries kept, <a href="/console">prove a domain</a> and use the key.</p>
+
+<h3>Where a query goes</h3>
+<p>In the default federated mode a query leaves this machine twice, and both are the
+point of the product rather than an incidental transfer:</p>
+<ul>
+  <li><b>To the other public ARD registries</b>, so the answer covers the federation and
+      not one catalogue. They are listed on <a href="/ard-registries">ARD registries</a>
+      and each has its own policy. Responses are cached for 30 minutes, keyed by the
+      normalised query and the upstream, then deleted.</li>
+  <li><b>To an embedding provider</b>, to turn the query into a vector for the semantic
+      half of retrieval. The text is sent for that call and is not retained there by us.</li>
+</ul>
+<p>Neither happens for a request you send with <code>federate: false</code> and dense
+retrieval off; that path stays on this machine.</p>
+
+<h2>Traffic measurement</h2>
+<p>Privacy here is structural rather than promised, which is the only kind worth reading:</p>
+<ul>
+  <li><b>There is no column for an IP address.</b> Not emptied, not hashed on the way in.
+      The table has nowhere to put one.</li>
+  <li>A session identifier is a truncated SHA-256 of a daily-rotating salt, the address and
+      the user agent. The same visitor is one session within a day and <b>unlinkable across
+      days</b>, because tomorrow's salt does not exist yet.</li>
+  <li>A request carrying <code>Sec-GPC</code> or <code>DNT</code> yields <b>no session at
+      all</b>.</li>
+  <li>User agents are stored as a class and a family name, never the raw string.</li>
+  <li>Raw rows are kept 90 days. Daily aggregates are kept indefinitely and contain no
+      identifier of any kind.</li>
+</ul>
+
+<h2>What is never collected</h2>
+<ul>
+  <li>IP addresses.</li>
+  <li>Names, email addresses or accounts. None are asked for, because nothing here needs one.</li>
+  <li>Cookies for tracking. There is no advertising and no third-party analytics.</li>
+  <li>Anything about who you are. The index cannot tell one anonymous caller from another
+      beyond a same-day session identifier it cannot reverse.</li>
+</ul>
+
+<h2>Domain verification</h2>
+<p>Proving a domain writes the domain, the DNS TXT record used to prove it and the issued
+key. That is the whole record. Internal services registered against a key are stored in
+their own tables, are never returned to anyone else, and are never counted in any public
+figure.</p>
+
+<h2>Submitting a resource</h2>
+<p>Submitting an endpoint or a domain records what was submitted, what its endpoint
+answered when fetched, and the outcome. Being audited is not the same as being submitted:
+<code>/audit</code> reads a domain and reports on it, and never indexes it as a side
+effect.</p>
+
+<div class="note">
+Corrections are welcome and are treated as bugs. If something here does not match what the
+service does, the service or this page is wrong, and either way we want to know.
+</div>
+</div>
+"""
+    return render.page(
+        "Privacy",
+        "What Neuronto receives, what it stores and what leaves the machine. No accounts, "
+        "no IP addresses, no tracking cookies; keyed searches are not recorded at all.",
+        body, f"{B}/privacy")
