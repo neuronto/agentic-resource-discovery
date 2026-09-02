@@ -588,7 +588,7 @@ def sitemap():
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
             "/tools/", "/bench", "/adoption", "/submit", "/published"]
-    urls += [f"/connect/{s_}" for s_ in catalog.CLIENTS]
+    urls += [f"/connect/{s_}" for s_ in catalog.CLIENTS] + ["/connect/frameworks"]
     urls += [f"/tools/{slug}" for slug in catalog.published(db())]
     urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
                                    for p in catalog.publisher_list(db())]
@@ -1625,6 +1625,23 @@ def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|d
 @app.get("/connect/{slug}", include_in_schema=False)
 def connect_client_page(slug: str, request: Request):
     """One page per client, because that is the query people actually type."""
+    # Handled inside the slug route rather than as its own path, so it cannot
+    # depend on which route FastAPI matches first.
+    if slug == "frameworks":
+        if _wants_html(request):
+            html_ = render.cached("connect-frameworks-html", 3600,
+                                  catalog.render_frameworks_page)
+            return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
+                                                "Vary": "Accept"})
+        B = config.PUBLIC_BASE
+        return JSONResponse({
+            "endpoint": f"{B}/mcp",
+            "verified_snippets_for": ["langchain", "openai-agents-sdk", "vercel-ai-sdk"],
+            "also_speak_mcp": ["llamaindex", "crewai", "mastra", "pydantic-ai",
+                               "google-adk", "microsoft-agent-framework", "strands"],
+            "without_mcp": {"npm": "neuronto", "rest": f"{B}/search"},
+            "html": f"{B}/connect/frameworks",
+        }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
     if slug not in catalog.CLIENTS:
         return Response(status_code=404)
     if _wants_html(request):

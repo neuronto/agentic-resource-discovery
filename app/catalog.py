@@ -1802,3 +1802,152 @@ def render_state_page(rep: dict) -> str:
         "claim, and how fast the set changes. Measured by probing every endpoint, with the "
         "window and the limitations attached. Free to reuse.",
         body, f"{B}/state-of-mcp")
+
+
+def render_frameworks_page() -> str:
+    """Connecting from an agent framework rather than an editor.
+
+    Only snippets checked against that framework's own source or README appear
+    here. Where the exact call could not be verified, the page says so and gives
+    the endpoint instead of a guess: a config that looks authoritative and is
+    wrong costs a reader more time than no config at all.
+    """
+    B = config.PUBLIC_BASE
+    mcp = f"{B}/mcp"
+
+    lang = (
+        "from mcp import ClientSession\n"
+        "from mcp.client.streamable_http import streamablehttp_client\n"
+        "from langchain_mcp_adapters.tools import load_mcp_tools\n"
+        "from langchain.agents import create_agent\n\n"
+        f'async with streamablehttp_client("{mcp}") as (read, write, _):\n'
+        "    async with ClientSession(read, write) as session:\n"
+        "        await session.initialize()\n"
+        "        tools = await load_mcp_tools(session)\n"
+        '        agent = create_agent("openai:gpt-4.1", tools)')
+
+    oai = (
+        "from agents import Agent\n"
+        "from agents.mcp import MCPServerStreamableHttp\n\n"
+        "async with MCPServerStreamableHttp(\n"
+        f'    params={{"url": "{mcp}"}},\n'
+        '    name="Neuronto ARD Registry",\n'
+        "    cache_tools_list=True,\n"
+        ") as server:\n"
+        '    agent = Agent(name="Assistant", mcp_servers=[server])')
+
+    vercel = (
+        "import { experimental_createMCPClient as createMCPClient } from 'ai';\n\n"
+        "const client = await createMCPClient({\n"
+        f"  transport: {{ type: 'http', url: '{mcp}' }},\n"
+        "});\n\n"
+        "const tools = await client.tools();\n"
+        "// ...use tools, then release the connection\n"
+        "await client.close();")
+
+    node = (
+        "import { findResource } from 'neuronto';\n\n"
+        "const { results } = await findResource('read a PDF and extract tables');\n"
+        "for (const r of results) console.log(r.displayName, r.url, r.score);")
+
+    def snip(idx, label, code, note=""):
+        n = f'<p class="cnote">{note}</p>' if note else ""
+        return (f'<div class="snip"><div class="lbl"><span>{label}</span>'
+                f'<button type="button" onclick="cp(\'{idx}\',this)">Copy</button></div>'
+                f'<pre id="{idx}">{esc(code)}</pre></div>{n}')
+
+    body = f"""
+<style>
+.cwrap{{max-width:70ch}}
+.cnote{{color:var(--fg2);font-size:13px;line-height:1.6;margin:8px 0 0}}
+.snip{{margin:18px 0 0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}}
+.snip .lbl{{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:8px 12px;background:var(--panel2);border-bottom:1px solid var(--line);
+  font-size:13px;color:var(--fg2)}}
+.snip .lbl button{{background:none;border:1px solid var(--line2);border-radius:6px;
+  color:var(--fg2);padding:3px 10px;font-size:12px;cursor:pointer}}
+.snip pre{{margin:0;padding:12px;overflow-x:auto;font-family:var(--mono);font-size:13px;
+  line-height:1.55;white-space:pre}}
+h2.csec{{margin:42px 0 0;font-size:20px}}
+.cwrap p{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0}}
+.cwrap ul{{color:var(--fg2);font-size:15px;line-height:1.65;margin:12px 0 0;padding-left:20px}}
+</style>
+
+<div class="cwrap">
+  <p class="lede">An agent that can only use the tools its author wired in at build time
+  is limited to what its author thought of. This endpoint lets one ask, at runtime, what
+  exists for a task, across this index and every other public ARD registry at once.</p>
+  <p class="lede" style="margin-top:14px">One endpoint for all of it:
+  <code>{esc(mcp)}</code>. No account, no key.</p>
+</div>
+
+<h2 class="csec">LangChain</h2>
+<div class="cwrap">
+  {snip('f1', 'with langchain-mcp-adapters', lang)}
+  <p class="cnote">Every tool the registry exposes becomes a LangChain tool, so
+  <code>find_resource</code> and <code>find_tool</code> are callable by the agent itself.</p>
+</div>
+
+<h2 class="csec">OpenAI Agents SDK</h2>
+<div class="cwrap">
+  {snip('f2', 'Python', oai)}
+  <p class="cnote"><code>cache_tools_list=True</code> is worth setting: the tool list here
+  changes rarely and the round trip is not free.</p>
+</div>
+
+<h2 class="csec">Vercel AI SDK</h2>
+<div class="cwrap">
+  {snip('f3', 'TypeScript', vercel)}
+  <p class="cnote">Close the client when you are done; it holds a connection open. The
+  SDK also accepts MCP's official <code>StreamableHTTPClientTransport</code> if you
+  already use it.</p>
+</div>
+
+<h2 class="csec">Without MCP at all</h2>
+<div class="cwrap">
+  <p class="lede">Discovery is a plain HTTP call, so a framework with no MCP support can
+  still use it. The npm package wraps it with no dependencies:</p>
+  {snip('f4', 'npm i neuronto', node)}
+  <p class="cnote">Python: <code>pip install ard-publish</code> for the publishing side, or
+  POST <code>{esc(B)}/search</code> directly with
+  <code>{{"query": {{"text": "..."}}}}</code>. Both are documented at
+  <a href="/api-docs">/api-docs</a>.</p>
+</div>
+
+<h2 class="csec">Everything else that speaks MCP</h2>
+<div class="cwrap">
+  <p class="lede">LlamaIndex, CrewAI, Mastra, Pydantic AI, Google ADK, Microsoft Agent
+  Framework and Strands all connect to remote MCP servers. Their exact call signatures
+  are not reproduced here because they were not verified against source at the time of
+  writing, and a snippet that looks authoritative and is wrong wastes more of your time
+  than none. Point whatever the framework calls a streamable HTTP MCP server at:</p>
+  {snip('f5', 'the endpoint', mcp)}
+  <p class="cnote">If a snippet here is wrong or one is missing,
+  <a href="https://github.com/neuronto/agentic-resource-discovery/issues">tell us</a> and
+  it gets fixed rather than argued about.</p>
+</div>
+
+<h2 class="csec">What comes back</h2>
+<div class="cwrap">
+  <p class="lede">Ranked matches with the endpoint to connect to, which registries carried
+  each one, and what was verified by fetching it. <code>score</code> is semantic relevance
+  only and is never a trust or safety rating. Editors and CLIs are at
+  <a href="/connect">/connect</a>.</p>
+</div>
+
+<script>
+function cp(id,btn){{
+  const t=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>{{
+    const o=btn.textContent; btn.textContent='Copied';
+    setTimeout(()=>{{btn.textContent=o;}},1400);
+  }});
+}}
+</script>
+"""
+    return render.page(
+        "Neuronto for agent frameworks",
+        "Connect LangChain, the OpenAI Agents SDK, the Vercel AI SDK and any other "
+        "MCP-capable framework to an index that searches every public ARD registry at "
+        "once, so an agent can discover tools at runtime instead of at build time.",
+        body, f"{B}/connect/frameworks")
