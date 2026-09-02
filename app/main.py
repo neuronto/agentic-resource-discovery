@@ -497,9 +497,10 @@ def _manifest() -> dict:
             "description": ("Open source tool that builds, validates and verifies an Agentic "
                             "Resource Discovery manifest, then checks which registries actually "
                             "return your domain. pip install ard-publish."),
+            # Five, not six: the conformance tool recommends 2 to 5 per entry for
+            # vector index embedding, and six earned a warning we had not had before.
             "representativeQueries": [
                 "how to make my MCP server discoverable",
-                "publish my MCP server to a registry",
                 "how do I publish an ARD manifest",
                 "make my API discoverable by AI agents",
                 "which registries actually return my domain",
