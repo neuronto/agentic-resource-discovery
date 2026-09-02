@@ -70,19 +70,30 @@ def apply_liveness(score: int, live: int | None) -> int:
     return score
 
 
-def rrf(rankings: Iterable[Sequence[str]], k: int = 60) -> dict[str, float]:
+def rrf(rankings: Iterable[Sequence[str]], k: int = 60,
+        weights: Sequence[float] | None = None) -> dict[str, float]:
     """Reciprocal rank fusion over several ordered key lists.
 
-    score(d) = sum over lists of 1/(k + rank(d)), rank starting at 1. k=60 is
+    score(d) = sum over lists of w/(k + rank(d)), rank starting at 1. k=60 is
     the value from the original TREC work and is what our own search stack
     already uses, so the behaviour is one we have watched in production.
+
+    `weights` lets one ordering count for more than another. It exists for the
+    tool leg: a match on a tool is the server's own statement that it performs
+    exactly this operation, read back from its tools/list or its published
+    OpenAPI document. That is the same class of evidence `verified_bonus`
+    already prefers over prose, so weighting it is consistent with how the rest
+    of this module treats what we have verified against what we were told.
+    Unweighted lists default to 1.0 and behave exactly as before.
     """
     fused: dict[str, float] = {}
-    for ranking in rankings:
+    ws = list(weights or [])
+    for idx, ranking in enumerate(rankings):
+        w = ws[idx] if idx < len(ws) else 1.0
         for i, key in enumerate(ranking, start=1):
             if not key:
                 continue
-            fused[key] = fused.get(key, 0.0) + 1.0 / (k + i)
+            fused[key] = fused.get(key, 0.0) + w / (k + i)
     return fused
 
 

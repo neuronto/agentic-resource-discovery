@@ -8,9 +8,94 @@ import sqlite3
 from typing import Any
 
 from . import config, federation, rank, store
-from .normalize import expand_type_filter, media_family
+from .normalize import expand_type_filter, media_family, publisher_of
 
 _TOKEN = re.compile(r"[A-Za-z0-9_]+")
+
+
+
+# How much a tool match counts against a description match. A tool match is the
+# server's own statement, verified by us reading it; a description match is
+# prose. Set from measurement across a query battery, not from one example.
+TOOL_LEG_WEIGHT = 2.0
+
+
+def tool_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
+    """Entries whose TOOLS match, as their own retrieval ordering.
+
+    An entry's own description is often useless for discovery. Stripe's entire
+    OpenAPI description is "The Stripe REST API. Please see
+    https://stripe.com/docs/api for more details", which can never match
+    "charge a credit card". The verb lives one level down, in an operation that
+    says "To charge a credit card or other payment source".
+
+    We already read those: 32,861 tools from MCP servers' own tools/list and
+    every operation of the OpenAPI documents we index. They were searchable
+    only through /tools, so entry search could not see them. This makes them a
+    ranking leg, fused with the others through RRF rather than pasted into the
+    entry's text, so an entry surfaces for what its tools do without anything
+    being restated as if the publisher had claimed it.
+
+    Best-matching tool per entry, in rank order, deduplicated.
+    """
+    match = _fts_query(text)
+    if not match:
+        return []
+    try:
+        rows = conn.execute(
+            """SELECT entry_key FROM tools_fts WHERE tools_fts MATCH ?
+               ORDER BY bm25(tools_fts) LIMIT ?""", (match, limit * 4)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        k = r["entry_key"]
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def diversify(entries: list[dict], page_size: int, cap: int | None = None) -> list[dict]:
+    """Stop one publisher owning the page.
+
+    A single vendor can legitimately publish hundreds of distinct services:
+    Azure has 653 in the OpenAPI corpus, AWS 271, Google 281. Each is a real
+    capability and none should be dropped from the index, but "store a file"
+    returning ten Azure services and nothing else is a worse answer than one
+    Azure service and nine alternatives, even when the ten score higher.
+
+    So this is a presentation rule, not a scoring one: order is preserved, the
+    best entry from a publisher always keeps its place, and surplus entries are
+    held back and appended rather than discarded, so a page is never short.
+    """
+    if cap is None:
+        cap = max(1, min(3, (page_size // 4) or 1))
+    kept: list[dict] = []
+    held: list[dict] = []
+    seen: dict[str, int] = {}
+    for e in entries:
+        # Derived, not read off the entry: a search result carries identifier,
+        # displayName, type, url, description, score and source, and no
+        # publisher. Reading a field that is not there would have made this
+        # whole function a silent no-op that looked like it worked.
+        pub = (publisher_of(e.get("identifier"), e.get("url")) or "").lower()
+        if not pub:
+            kept.append(e)
+            continue
+        n = seen.get(pub, 0)
+        if n < cap:
+            seen[pub] = n + 1
+            kept.append(e)
+        else:
+            held.append(e)
+    # Never return a short page just because one publisher dominated the tail.
+    if len(kept) < page_size:
+        kept.extend(held[:page_size - len(kept)])
+    return kept
 
 
 def _label(identifier: str, url: str | None = None) -> str:
@@ -131,6 +216,37 @@ def _private_hits(conn: sqlite3.Connection, match: str, owner_domain: str,
           LIMIT ?""", (match, owner_domain.lower(), limit)).fetchall()
     except sqlite3.OperationalError:
         return []
+
+
+
+def local_by_keys(conn: sqlite3.Connection, keys: list[str]) -> list[dict]:
+    """Load entries the tool leg found but the lexical leg did not.
+
+    Built exactly as `local_search` builds one, so a result reaching the page
+    through its tools is indistinguishable from one that arrived through its
+    own text: same shape, same liveness treatment, same verification block.
+    The score is a floor rather than a BM25 value, because there is no lexical
+    match on this entry to derive one from; RRF decides its final position.
+    """
+    if not keys:
+        return []
+    out: list[dict] = []
+    qs = ",".join("?" for _ in keys)
+    rows = conn.execute(f"SELECT * FROM entries WHERE key IN ({qs})", keys).fetchall()
+    by_key = {r["key"]: r for r in rows}
+    for k in keys:                      # preserve the tool leg's ordering
+        r = by_key.get(k)
+        if r is None or _col(r, "visibility") == "private":
+            continue
+        e = store.row_to_entry(r)
+        e["score"] = rank.apply_liveness(rank._FLOOR, r["live"])
+        e["source"] = config.PUBLIC_BASE
+        e["_key"] = r["key"]
+        e["_live"] = r["live"]
+        e["_sources"] = len(json.loads(r["sources"] or "[]"))
+        _attach_verification(e, r)
+        out.append(e)
+    return out
 
 
 def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
@@ -272,9 +388,10 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         lambda: local_search(store.tls_conn(), text, flt, max(page_size, 10) * 3, owner_domain))
 
     if mode == "none":
-        return {"results": local[:page_size], "_federated": [], "_dense": None}
+        return {"results": diversify(local, page_size)[:page_size],
+                "_federated": [], "_dense": None}
     if mode == "referrals":
-        return {"results": local[:page_size],
+        return {"results": diversify(local, page_size)[:page_size],
                 "referrals": federation.referral_entries(),
                 "_federated": [], "_dense": None}
 
@@ -300,8 +417,23 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             dense_task.cancel()
             dense_order, dense_state = [], "timeout"
 
+    tool_order = await asyncio.to_thread(
+        lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3))
+
     rankings = [[e["_key"] for e in local]]
+    leg_weights = [1.0]
     by_key: dict[str, dict] = {e["_key"]: e for e in local}
+    # Entries found only through their tools still need their row loaded, or
+    # the fusion would score a key it cannot return.
+    missing = [k for k in tool_order if k not in by_key]
+    if missing:
+        extra = await asyncio.to_thread(
+            lambda: local_by_keys(store.tls_conn(), missing))
+        for e in extra:
+            by_key.setdefault(e["_key"], e)
+    if tool_order:
+        rankings.append([k for k in tool_order if k in by_key])
+        leg_weights.append(TOOL_LEG_WEIGHT)
     fam_filter = expand_type_filter(flt.get("type", [])) if flt and flt.get("type") else None
 
     for u in ups:
@@ -334,6 +466,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
                 }
         if order:
             rankings.append(order)
+            leg_weights.append(1.0)
 
     # The dense ranking joins the fusion as one more ordering. Entries it
     # surfaces that lexical search missed are the whole point, so they are
@@ -356,8 +489,9 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             dense_keep.append(k)
         if dense_keep:
             rankings.append(dense_keep)
+            leg_weights.append(1.0)
 
-    fused = rank.rrf(rankings)
+    fused = rank.rrf(rankings, weights=leg_weights)
     scored = rank.fuse_to_scores(fused)
     results = []
     for k, s in sorted(scored.items(), key=lambda kv: -kv[1]):
@@ -368,7 +502,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         e["score"] = rank.apply_liveness(s, e.get("_live"))
         results.append(e)
     results.sort(key=lambda x: -x["score"])
-    return {"results": results[:page_size], "_federated": ups,
+    return {"results": diversify(results, page_size)[:page_size], "_federated": ups,
             "_dense": {"state": dense_state, "candidates": len(dense_order)}}
 
 

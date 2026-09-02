@@ -55,7 +55,7 @@ SKILLS = [
         "name": "Find a specific tool",
         "description": (
             "Search individual tools rather than whole servers. Every tool was read from "
-            "the server's own tools/list, so the name and description are the server's, "
+            "the server's own tools/list or its published OpenAPI document, so the name and description are the publisher's, "
             "not a directory's summary of it."),
         "tags": ["tools", "search", "mcp", "verified"],
         "examples": ["a tool that converts currency", "which tool takes a screenshot"],
@@ -253,7 +253,7 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             hits = [{k: v for k, v in h.items() if k != "inputSchema"}
                     for h in tools_index.search_tools(conn, q, limit)]
             data = {"query": q, "tools": hits,
-                    "note": ("every tool listed was read from the server's own "
+                    "note": ("every tool listed was read from the publisher's own "
                              "tools/list; score is relevance only")}
             summary = (f"{len(hits)} tool(s) for {q!r}." if hits
                        else f"No verified tool matches {q!r}.")
