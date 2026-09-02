@@ -36,7 +36,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 
 from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, reliability,
-               render, safety, search, state, store, submissions, tools_index)
+               render, resolve, safety, search, state, store, submissions, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
@@ -356,6 +356,24 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
                            for f in fed],
         }
     return JSONResponse(payload)
+
+
+@app.get("/search", include_in_schema=False)
+@app.delete("/search", include_in_schema=False)
+@app.put("/search", include_in_schema=False)
+def search_wrong_verb() -> Response:
+    """405, never 404. Same repair as GET /mcp, for the same reason.
+
+    The outside-failure monitor's first run found four sessions that GET this
+    route and were told it does not exist. All four had succeeded at something
+    else first, so they were real callers, not scanners. A 404 tells a client
+    the endpoint is gone; a 405 with Allow tells it the verb was wrong, which
+    is the truth and is fixable in one line on their side.
+    """
+    return JSONResponse(status_code=405, headers={"Allow": "POST", "Cache-Control": "no-store"},
+                        content={"error": "method_not_allowed",
+                                 "detail": "search is POST. Send {\"query\": {\"text\": \"...\"}} "
+                                           "as JSON. Full contract: /api-docs"})
 
 
 @app.post("/explore")
@@ -957,6 +975,23 @@ def mcp_no_stream() -> Response:
 # The other half of the discovery world asks for an Agent Card by convention and
 # reads a 404 as "not an agent". Trust and reputation crawlers asked 108 times
 # before this existed. The card is only honest because this endpoint answers.
+
+@app.get("/sse", include_in_schema=False)
+@app.post("/sse", include_in_schema=False)
+@app.get("/mcp/sse", include_in_schema=False)
+@app.post("/mcp/sse", include_in_schema=False)
+def sse_transport_not_served() -> Response:
+    """Clients on the older HTTP+SSE transport look here. We serve streamable
+    HTTP at /mcp only, which is the current transport and the one every SDK
+    tries first. Tell them exactly that, rather than a bare 404 that reads as
+    "no MCP here at all". The monitor found real python clients doing this."""
+    return JSONResponse(status_code=404, headers={"Cache-Control": "no-store"}, content={
+        "error": "transport_not_served",
+        "detail": ("this registry speaks MCP over streamable HTTP, not the older HTTP+SSE "
+                   "transport. Connect to /mcp with POST (JSON-RPC) and Accept: "
+                   "application/json, text/event-stream. Setup for every client: /connect"),
+        "endpoint": f"{config.PUBLIC_BASE}/mcp", "transport": "streamable-http"})
+
 
 @app.get("/.well-known/agent-card.json", include_in_schema=False)
 @app.get("/.well-known/agent.json", include_in_schema=False)
@@ -1971,32 +2006,6 @@ def feed():
 # added, and one with a manifest was always going to be legitimate to index.
 # ---------------------------------------------------------------------------
 
-def _known_mcp_on_host(endpoint: str) -> str | None:
-    """A verified MCP endpoint we already hold on the same host, if any.
-
-    Only ever a suggestion. We do not index a URL the caller did not submit:
-    naming their own endpoint back to them is help, indexing something else on
-    their behalf is a decision that is theirs to make.
-    """
-    try:
-        host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
-        if not host:
-            return None
-        rows = db().execute(
-            """SELECT url FROM entries
-               WHERE type_family='mcp-server' AND url IS NOT NULL AND url != ''
-                 AND COALESCE(mcp_tools,0) > 0
-                 AND (lower(publisher)=? OR lower(url) LIKE ? OR lower(url) LIKE ?)
-               ORDER BY mcp_tools DESC LIMIT 1""",
-            (host, f"https://{host}/%", f"http://{host}/%")).fetchall()
-        for r in rows:
-            if (r["url"] or "").rstrip("/").lower() != endpoint.rstrip("/").lower():
-                return r["url"]
-    except Exception:
-        pass
-    return None
-
-
 @app.post("/submit", responses={
     200: {"description": "verified and indexed; `submission.id` is the receipt"},
     202: {"description": "kept and retried: not verified at this moment, `evidence` says "
@@ -2056,7 +2065,9 @@ def _emit_submit(b: dict, code: int, d: dict, probe: bool = False,
     us or them" means correlating request timings against the systemd
     journal. It cost a full investigation on 2026-09-01 and the answer was
     still unknowable."""
-    target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or "")[:120]
+    if b.get("dry_run") or d.get("dry_run"):
+        return          # nothing happened, so nothing to record or alert on
+    target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or b.get("url") or "")[:120]
     ok = code < 400 and d.get("status") == "indexed"
     sub = d.get("submission") or {}
     events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
@@ -2151,6 +2162,60 @@ def _busy(e: Exception) -> bool:
     return isinstance(e, sqlite3.OperationalError) and "locked" in str(e).lower()
 
 
+class _Busy(Exception):
+    """The index lock was held through both quick tries; the queue retries."""
+
+
+async def _index_verified(url: str, res: dict, dry: bool = False) -> tuple[dict, str | None]:
+    """Write one handshaken MCP endpoint into the index.
+
+    Shared by both submit doors, and by every endpoint the resolver finds,
+    so a server discovered through a server card is recorded exactly as one
+    a publisher named directly: same entry shape, same tools, same liveness
+    mark. `dry` builds the entry and writes nothing.
+    """
+    host = urllib.parse.urlparse(url).netloc.lower().split(":")[0]
+    name = res.get("server_name") or host
+    entry = {
+        "identifier": f"urn:air:{host}:mcp:{re.sub(r'[^a-z0-9-]+', '-', name.lower())[:60]}",
+        "displayName": name,
+        "type": "application/mcp-server-card+json",
+        "url": url,
+        "description": (f"MCP server at {host}, verified by introspection: "
+                        f"{len(res['tools'])} tools exposed."
+                        if res["tools"] else
+                        f"MCP server at {host}. Requires credentials before listing tools."
+                        if res["auth"] else f"MCP server at {host}."),
+    }
+    if dry:
+        return entry, None
+    key_box: dict = {}
+
+    def write(c):
+        key = store.upsert_entry(c, entry, "submitted")
+        if res["tools"]:
+            store.replace_tools(c, key, res["tools"])
+        store.mark_introspection(c, key, res["status"], len(res["tools"]),
+                                 res["auth"], res.get("server_name"))
+        store.mark_liveness(c, key, True, 200, None)
+        key_box["key"] = key
+
+    # A publisher joining the index is the rarest and most valuable write we
+    # take. Two quick tries; if the crawl holds the lock through both, the
+    # queue brings it back in thirty seconds rather than asking the publisher.
+    for attempt in range(2):
+        try:
+            await _index_write(write)
+            return entry, key_box.get("key")
+        except Exception as e:
+            if not _busy(e):
+                raise
+            if attempt == 1:
+                raise _Busy() from e
+            await asyncio.sleep(1.0)
+    raise _Busy()
+
+
 async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
 
@@ -2172,109 +2237,155 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
     b = body or {}
     endpoint = str(b.get("endpoint") or b.get("mcp") or "").strip()
     dom = str(b.get("domain") or "").strip()
+    dry = bool(b.get("dry_run"))
 
-    # ---- direct MCP endpoint --------------------------------------------
+    # One field for people who do not know, and should not need to know, our
+    # distinction between "an endpoint" and "a domain". `url` takes anything:
+    # a bare host, a homepage, a manifest, a server card, an endpoint. The
+    # resolver works out what is behind it. The two older fields stay, because
+    # clients already send them.
+    if not endpoint and not dom:
+        u = str(b.get("url") or "").strip()
+        if u:
+            endpoint = u if "://" in u else "https://" + u
+
+    # ---- an MCP endpoint, or anything that leads to one ------------------
     if endpoint:
         if not endpoint.startswith(("http://", "https://")) or len(endpoint) > 500:
             return JSONResponse(status_code=400, content={
                 "error": "invalid_request",
                 "detail": 'endpoint must be an absolute http(s) URL'})
-        sid = submissions.open("endpoint", endpoint, source, probe)
+        # `dry_run` writes nothing and alerts nobody: no submission row, no
+        # index write, no event. The probes still run, because the point is to
+        # see what they would find. `submissions.record` and `_not_indexed`
+        # both accept a missing id, so a None here threads through cleanly.
+        sid = None if dry else submissions.open("endpoint", endpoint, source, probe)
         import httpx as _httpx
-        try:
-            async with _httpx.AsyncClient(follow_redirects=True) as c:
-                async with limits.outbound():
-                    res = await tools_index.introspect_one(c, endpoint, retries=1)
-        except Exception as e:
-            res = {"status": f"error:{type(e).__name__}", "tools": [], "auth": False,
-                   "server_name": None,
-                   "evidence": {"exception": f"{type(e).__name__}: {str(e)[:160]}",
-                                "stage": "before the request was sent"}}
-        if not res["status"].startswith("ok") and res["status"] != "auth":
-            detail = ("this URL did not complete an MCP initialize handshake "
-                      f"({res['status']}). Nothing was indexed yet. `evidence` is exactly "
-                      "what your endpoint returned to us.")
-            # Before saying no, check whether we already know the answer. Our
-            # first verified publisher submitted their homepage as an MCP
-            # endpoint, got a 405 from their own web server (correctly: you
-            # cannot POST to a homepage), and was rejected and queued for two
-            # days of retries -- while `https://www.ikeytz.com/mcp`, with 45
-            # tools, had been sitting in this index since that morning. We held
-            # the answer and made them guess it.
-            known = _known_mcp_on_host(endpoint)
-            if known:
-                detail += (f" We already have a working MCP endpoint on this host: "
-                           f"{known}. Submit that URL instead.")
-            row = submissions.record(sid, indexed=False, reason=res["status"], detail=detail,
-                                     evidence=res.get("evidence"),
+
+        # The URL itself is only worth a handshake if it names something below
+        # the host. POSTing an initialize to a homepage gets a 405 from every
+        # web server on earth, and we already know that; skip straight to
+        # finding out what the host actually runs.
+        direct: dict | None = None
+        bare = not resolve._path_of(endpoint).strip("/")
+        async with _httpx.AsyncClient(follow_redirects=True) as c:
+            async with limits.outbound():
+                if not bare:
+                    try:
+                        direct = await tools_index.introspect_one(c, endpoint, retries=1)
+                    except Exception as e:
+                        direct = {"status": f"error:{type(e).__name__}", "tools": [],
+                                  "auth": False, "server_name": None,
+                                  "evidence": {"exception": f"{type(e).__name__}: {str(e)[:160]}",
+                                               "stage": "before the request was sent"}}
+                direct_ok = bool(direct) and (direct["status"].startswith("ok")
+                                              or direct["status"] == "auth")
+                # The submitted URL answered: index it, and do not go looking
+                # for more. A publisher who named an endpoint gets that endpoint.
+                if direct_ok:
+                    found = {"submitted": endpoint, "host": resolve.host_of(endpoint),
+                             "working": [{"url": endpoint, "source": "submitted",
+                                          "status": direct["status"],
+                                          "tools": len(direct["tools"]),
+                                          "auth": bool(direct["auth"]),
+                                          "server_name": direct.get("server_name"),
+                                          "evidence": direct.get("evidence"),
+                                          "_raw": direct}],
+                             "candidates": [], "checked": []}
+                else:
+                    found = await resolve.resolve(
+                        db(), endpoint, c,
+                        lambda cl, u: tools_index.introspect_one(cl, u, retries=0),
+                        direct_result=direct)
+
+        working = found.get("working") or []
+        if not working:
+            # Nothing on this host answered a handshake, anywhere we know to
+            # look. Say exactly what was tried. Whether that is worth retrying
+            # depends on the kind of failure, judged on the submitted URL when
+            # there was one and on the best-looking candidate otherwise: an
+            # unreachable host is transient and stays queued; a host that is up
+            # and simply runs no MCP server is a settled answer.
+            judge = direct if direct is not None else (
+                (found.get("candidates") or [{}])[0].get("evidence") and
+                {"status": (found.get("candidates") or [{}])[0].get("status"),
+                 "evidence": (found.get("candidates") or [{}])[0].get("evidence")} or
+                {"status": "error:unreachable", "evidence": {}})
+            reason = str(judge.get("status") or "error:unknown")
+            tried = [{k: v for k, v in cnd.items() if k in ("url", "source", "status", "tools")}
+                     for cnd in (found.get("candidates") or [])]
+            detail = ("no MCP endpoint answered a handshake on "
+                      f"{found.get('host') or endpoint}. " + resolve.explain(found)
+                      + ". `evidence` is what the submitted URL returned; `tried` is "
+                        "every location checked and what each answered.")
+            row = submissions.record(sid, indexed=False, reason=reason, detail=detail,
+                                     evidence=judge.get("evidence"),
                                      scheduled=(source == "retry"))
             return _not_indexed("not_an_mcp_server", row, endpoint=endpoint,
-                                reason=res["status"], detail=detail,
-                                evidence=res.get("evidence"),
-                                **({"try_instead": known} if known else {}))
-        host = urllib.parse.urlparse(endpoint).netloc.lower().split(":")[0]
-        name = res.get("server_name") or host
-        entry = {
-            "identifier": f"urn:air:{host}:mcp:{re.sub(r'[^a-z0-9-]+', '-', name.lower())[:60]}",
-            "displayName": name,
-            "type": "application/mcp-server-card+json",
-            "url": endpoint,
-            "description": (f"MCP server at {host}, verified by introspection: "
-                            f"{len(res['tools'])} tools exposed."
-                            if res["tools"] else
-                            f"MCP server at {host}. Requires credentials before listing tools."
-                            if res["auth"] else f"MCP server at {host}."),
-        }
-        key_box: dict = {}
+                                reason=reason, detail=detail,
+                                evidence=judge.get("evidence"), tried=tried,
+                                discovery_checked=found.get("checked") or [],
+                                **({"dry_run": True} if dry else {}))
 
-        def write(c):
-            key = store.upsert_entry(c, entry, "submitted")
-            if res["tools"]:
-                store.replace_tools(c, key, res["tools"])
-            store.mark_introspection(c, key, res["status"], len(res["tools"]),
-                                     res["auth"], res.get("server_name"))
-            store.mark_liveness(c, key, True, 200, None)
-            key_box["key"] = key
-
-        # A publisher joining the index is the rarest and most valuable write we
-        # take. It gets two quick tries here; if the crawl is holding the lock
-        # through both, the queue brings it back in thirty seconds rather than
-        # asking the publisher to.
-        for attempt in range(2):
+        # Index every distinct server that answered. Usually one; sometimes a
+        # host runs several, and a discovery document names each of them.
+        indexed: list[dict] = []
+        for w in working:
+            res = w["_raw"]
             try:
-                await _index_write(write)
-                break
-            except Exception as e:
-                if not _busy(e):
-                    raise
-                if attempt == 1:
-                    detail = ("your server verified, and the index was busy writing so it "
-                              "is not searchable yet. Nothing is wrong with your server; "
-                              "it will be indexed automatically within a minute.")
-                    row = submissions.record(sid, indexed=False, reason="busy", detail=detail,
-                                             evidence={"verified": True,
-                                                       "tools": len(res["tools"])},
-                                             busy=True)
-                    return _not_indexed("busy", row, endpoint=endpoint, reason="busy",
-                                        detail=detail, evidence=None, verified=True)
-                await asyncio.sleep(1.0)
-        catalog.invalidate_publishers(); render.invalidate()
+                ent, key = await _index_verified(w["url"], res, dry=dry)
+            except _Busy as e:
+                detail = ("your server verified, and the index was busy writing so it "
+                          "is not searchable yet. Nothing is wrong with your server; "
+                          "it will be indexed automatically within a minute.")
+                row = submissions.record(sid, indexed=False, reason="busy", detail=detail,
+                                         evidence={"verified": True, "tools": w["tools"]},
+                                         busy=True)
+                return _not_indexed("busy", row, endpoint=endpoint, reason="busy",
+                                    detail=detail, evidence=None, verified=True)
+            indexed.append({"endpoint": w["url"], "found_via": w["source"],
+                            "server_name": res.get("server_name"),
+                            "verified_tools": len(res["tools"]),
+                            "tools": [t.get("name") for t in res["tools"]][:40],
+                            "auth_required": bool(res["auth"]),
+                            "identifier": ent["identifier"], "_key": key})
+        if not dry:
+            catalog.invalidate_publishers(); render.invalidate()
+        first = indexed[0]
         row = submissions.record(sid, indexed=True, reason="indexed",
-                                 entry_key=key_box.get("key"), tools=len(res["tools"]))
-        return JSONResponse({
+                                 entry_key=first.get("_key"),
+                                 tools=sum(i["verified_tools"] for i in indexed))
+        body_out: dict = {
             "status": "indexed",
-            "endpoint": endpoint,
-            "server_name": res.get("server_name"),
-            "verified_tools": len(res["tools"]),
-            "tools": [t.get("name") for t in res["tools"]][:40],
-            "auth_required": res["auth"],
-            "identifier": entry["identifier"],
+            "endpoint": first["endpoint"],
+            "server_name": first["server_name"],
+            "verified_tools": first["verified_tools"],
+            "tools": first["tools"],
+            "auth_required": first["auth_required"],
+            "identifier": first["identifier"],
             "submission": submissions.public(row),
             "note": ("verified by handshaking with your server and reading its own "
                      "tools/list. To have your whole domain indexed, including skills, "
                      "APIs and agents, publish an ARD manifest and submit the domain: "
                      f"{config.PUBLIC_BASE}/publish"),
-        })
+        }
+        # Honest about how it was found. If the caller named the endpoint, the
+        # block is absent. If we had to find it, say from where, so the caller
+        # learns the URL and the mechanism rather than just getting lucky.
+        if first["found_via"] != "submitted" or len(indexed) > 1:
+            body_out["resolved"] = {
+                "submitted": endpoint,
+                "found_via": first["found_via"],
+                "endpoints": [{k: v for k, v in i.items() if k != "_key"} for i in indexed],
+                "note": ("the submitted URL did not answer an MCP handshake itself, so "
+                         "the host was resolved through its own discovery documents, "
+                         "this index, and the conventional paths. Everything listed "
+                         "here answered."),
+            }
+        if dry:
+            body_out["dry_run"] = True
+            body_out["note"] = "dry run: nothing was written, nothing was recorded. " + body_out["note"]
+        return JSONResponse(body_out)
 
     # ---- whole domain via its manifest ----------------------------------
     host = (dom.replace("https://", "").replace("http://", "")
@@ -2289,7 +2400,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             "detail": ('send {"domain": "example.com"} for a whole domain, or '
                        '{"endpoint": "https://example.com/mcp"} for a single MCP server')})
 
-    sid = submissions.open("domain", host, source, probe)
+    sid = None if dry else submissions.open("domain", host, source, probe)
     conn = db()
     before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                           (host,)).fetchone()[0]
@@ -2299,7 +2410,9 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
     async with limits.outbound():
         data, path = await ingest.fetch_manifest(host)
     got = {"considered": 1, "crawled": 1, "manifest": path, "entries": 0}
-    if data:
+    if data and dry:
+        got["entries"] = len(data.get("entries") or [])
+    elif data:
         try:
             got["entries"] = await _index_write(
                 lambda c: ingest.index_manifest(c, host, data, path, strict=True))
@@ -2313,7 +2426,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
                                      evidence=None, busy=True)
             return _not_indexed("busy", row, domain=host, reason="busy", detail=detail,
                                 evidence=None)
-    else:
+    elif not dry:
         # Nothing to write but the fact that we looked, which the publisher
         # page and `verified_manifests` read. Best effort: a busy index must
         # not turn "no manifest" into a 500.
@@ -2328,16 +2441,68 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
     catalog.invalidate_publishers(); render.invalidate()
 
     if not path and after == 0:
-        detail = ("no ARD manifest found at either well-known path. If you have an "
-                  "MCP server, submit it directly with "
-                  '{"endpoint": "https://your-host/mcp"} and we will verify it by '
-                  "handshake. To list everything on your domain, publish a manifest: "
-                  + config.PUBLIC_BASE + "/publish")
-        ev = {"checked": ingest.PATHS, "crawl": _small(got)}
+        # No manifest is not the same as nothing to index. Most MCP developers
+        # have a server and no manifest, and this door used to send them away
+        # to guess the endpoint and come back through the other one. Look for
+        # the server here instead, the same way the endpoint door does.
+        import httpx as _httpx
+        async with _httpx.AsyncClient(follow_redirects=True) as c:
+            async with limits.outbound():
+                found = await resolve.resolve(
+                    conn, host, c,
+                    lambda cl, u: tools_index.introspect_one(cl, u, retries=0))
+        working = found.get("working") or []
+        if working:
+            indexed = []
+            for w in working:
+                try:
+                    ent, key = await _index_verified(w["url"], w["_raw"], dry=dry)
+                except _Busy:
+                    detail = ("your server verified, and the index was busy writing so it "
+                              "is not searchable yet. It will be indexed automatically "
+                              "within a minute.")
+                    row = submissions.record(sid, indexed=False, reason="busy",
+                                             detail=detail, busy=True,
+                                             evidence={"verified": True})
+                    return _not_indexed("busy", row, domain=host, reason="busy",
+                                        detail=detail, evidence=None, verified=True)
+                indexed.append({"endpoint": w["url"], "found_via": w["source"],
+                                "server_name": w["_raw"].get("server_name"),
+                                "verified_tools": len(w["_raw"]["tools"]),
+                                "identifier": ent["identifier"]})
+            if not dry:
+                catalog.invalidate_publishers(); render.invalidate()
+            srow = submissions.record(sid, indexed=True, reason="indexed",
+                                      tools=sum(i["verified_tools"] for i in indexed))
+            return JSONResponse({
+                "status": "indexed",
+                "domain": host,
+                "manifest_path": None,
+                "resources_indexed": len(indexed),
+                "page": f"{config.PUBLIC_BASE}/ard-publishers/{host}",
+                "resolved": {
+                    "endpoints": indexed,
+                    "note": ("no ARD manifest on this domain, but it runs an MCP server, "
+                             "found through the host's own discovery documents, this "
+                             "index, or the conventional paths, and verified by "
+                             "handshake. Publishing a manifest lists everything else: "
+                             f"{config.PUBLIC_BASE}/publish"),
+                },
+                "submission": submissions.public(srow),
+                **({"dry_run": True} if dry else {}),
+            })
+        detail = ("no ARD manifest at either well-known path, and no MCP endpoint "
+                  "answered a handshake anywhere we know to look on this host. "
+                  + resolve.explain(found) + ". To be listed, run an MCP server at "
+                  "/mcp, or publish a manifest: " + config.PUBLIC_BASE + "/publish")
+        ev = {"checked": ingest.PATHS, "crawl": _small(got),
+              "tried": [{k: v for k, v in cnd.items() if k in ("url", "source", "status")}
+                        for cnd in (found.get("candidates") or [])]}
         srow = submissions.record(sid, indexed=False, reason="no_manifest", detail=detail,
                                   evidence=ev, scheduled=(source == "retry"))
         return _not_indexed("no_manifest", srow, domain=host, reason="no_manifest",
-                            detail=detail, evidence=ev, checked=ingest.PATHS)
+                            detail=detail, evidence=ev, checked=ingest.PATHS,
+                            tried=ev["tried"], **({"dry_run": True} if dry else {}))
 
     srow = submissions.record(sid, indexed=True, reason="indexed", tools=after)
     return JSONResponse({

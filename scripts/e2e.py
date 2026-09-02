@@ -2133,8 +2133,10 @@ def t_a_refused_submission_says_whose_fault_it_is():
         f"a server that answers 405 to our POST is settled, not pending: {d}"
     assert d.get("reason", "").startswith("error:"), \
         f"no machine-readable reason on a refusal: {d}"
-    assert "what your endpoint returned" in (d.get("detail") or ""), \
-        "the refusal does not tell the publisher whose fault it is"
+    assert "returned" in (d.get("detail") or "") and "tried" in (d.get("detail") or ""), \
+        "the refusal does not tell the publisher whose fault it is, nor what was tried"
+    assert len(d.get("tried") or []) >= 4, \
+        f"a refusal must show every location checked, not just the one submitted: {d.get('tried')}"
     ev = d.get("evidence") or {}
     assert 400 <= int(ev.get("http") or 0) < 500 and "html" in (ev.get("content_type") or ""), \
         f"evidence should show example.com's own HTML refusal of that POST: {ev}"
@@ -2203,6 +2205,81 @@ def t_an_indexed_submission_carries_its_receipt():
     assert sub.get("status") == "indexed" and sub.get("id"), f"no receipt on success: {d}"
     code, st = get("/submit/status/" + sub["id"])
     assert code == 200 and st["status"] == "indexed" and st.get("entry_key"), st
+
+
+# ---------------------------------------------------------------------------
+# The stranger suite. Every test here sends what someone who has never read
+# our documentation would plausibly send, and asserts we resolve it rather
+# than refuse it. The first four were real failures. Hosts are ours or IANA's
+# reserved example.com, never a real publisher, and every call is a dry run
+# with the probe header, so nothing is written and nobody is alerted.
+# ---------------------------------------------------------------------------
+
+def _dry(body: dict):
+    body = dict(body); body["dry_run"] = True
+    return post("/submit", body, timeout=90)
+
+
+def t_stranger_bare_host_as_endpoint_resolves():
+    """The ikeytz case. A homepage submitted as the endpoint. Their web server
+    answers 405 to a POST, correctly; the MCP server is at /mcp. We used to
+    refuse and queue 2.7 days of retries while holding the answer."""
+    s, d = not_rate_limited(*_dry({"endpoint": "https://neuronto.com"}))
+    assert s == 200 and d["status"] == "indexed", (s, d)
+    assert d["endpoint"].endswith("/mcp"), f"did not resolve to the server: {d['endpoint']}"
+    r = d.get("resolved") or {}
+    assert r.get("found_via") in ("index", "/.well-known/mcp/server-card.json",
+                                  "/.well-known/ard.json", "convention"), r
+    assert d.get("dry_run") is True and not (d.get("submission") or {}).get("id"), \
+        "a dry run must not create a submission row"
+
+
+def t_stranger_url_field_takes_anything():
+    """One field for people who should not have to know our endpoint/domain
+    split. A bare host, no scheme."""
+    s, d = not_rate_limited(*_dry({"url": "neuronto.com"}))
+    assert s == 200 and d["status"] == "indexed", (s, d)
+    assert d["endpoint"].endswith("/mcp"), d["endpoint"]
+
+
+def t_stranger_named_endpoint_is_taken_as_named():
+    """When the caller names the endpoint and it answers, we index that and
+    do not go looking for more: a publisher who names an endpoint gets it."""
+    s, d = not_rate_limited(*_dry({"endpoint": "https://neuronto.com/mcp"}))
+    assert s == 200 and d["status"] == "indexed", (s, d)
+    assert "resolved" not in d, "a directly named, answering endpoint needs no resolution block"
+
+
+def t_stranger_refusal_shows_everything_tried():
+    """A no must show its work: every location checked and what each said."""
+    s, d = not_rate_limited(*_dry({"endpoint": "https://example.com/definitely-not-mcp"}))
+    assert s == 404 and d["refusal"] == "not_an_mcp_server", (s, d)
+    tried = d.get("tried") or []
+    assert len(tried) >= 5, f"expected the submitted URL plus the conventional paths: {tried}"
+    srcs = {t["source"] for t in tried}
+    assert "submitted" in srcs and "convention" in srcs, srcs
+    assert all(t.get("status") for t in tried), "every attempt must carry its outcome"
+    assert d.get("discovery_checked"), "must say which discovery documents were looked for"
+
+
+def t_stranger_domain_without_manifest_is_still_searched():
+    """A domain with no manifest is not the same as nothing to index. The
+    domain door now looks for the server the same way the endpoint door does,
+    and when there is none it says what it tried."""
+    s, d = not_rate_limited(*_dry({"domain": "example.com"}))
+    assert s == 404 and d["refusal"] == "no_manifest", (s, d)
+    assert len(d.get("tried") or []) >= 4, \
+        f"no_manifest must show the endpoint paths it probed: {d.get('tried')}"
+
+
+def t_stranger_dry_run_leaves_no_trace():
+    """dry_run is what an operator uses to verify against production. It
+    must write nothing: no row, no index change, and its status id, if any,
+    must not resolve."""
+    s, d = not_rate_limited(*_dry({"endpoint": "https://example.com/definitely-not-mcp"}))
+    assert d.get("dry_run") is True, d
+    sub = d.get("submission") or {}
+    assert not sub.get("id"), f"dry run created a submission row: {sub}"
 
 
 def main():

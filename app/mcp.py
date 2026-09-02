@@ -198,6 +198,7 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             payload = json.loads(bytes(resp.body).decode() or "{}")
             indexed = resp.status_code < 400 and payload.get("status") == "indexed"
             pending = resp.status_code == 202 and payload.get("status") == "pending"
+            rejected = resp.status_code == 404 and payload.get("status") == "rejected"
             if indexed:
                 payload.setdefault("note",
                     "indexed and searchable. It will be re-checked periodically; an "
@@ -212,9 +213,21 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                                         "shows a fault in the endpoint; we retry on the "
                                         "schedule in `retry`. Check `submission.status_url` "
                                         "for the outcome.")
+            elif rejected:
+                # Also not an error, for the same reason with the opposite
+                # instruction. A rejection is a settled answer with the evidence
+                # and every location tried attached; the one thing an agent
+                # must not do with it is retry the same call, which is exactly
+                # what isError makes an agent do.
+                payload["indexed"] = False
+                payload["next_step"] = ("do not resubmit this URL: the host gave a settled "
+                                        "answer, and `tried` lists every location checked. "
+                                        + ("Submit `try_instead` instead." if payload.get("try_instead")
+                                           else "Run an MCP server at /mcp on that host, or "
+                                                "submit the URL of one that exists."))
             return 200, {"jsonrpc": "2.0", "id": rid,
                          "result": {**_text(payload),
-                                    **({} if (indexed or pending) else {"isError": True})}}
+                                    **({} if (indexed or pending or rejected) else {"isError": True})}}
 
         if name == "registry_stats":
             c = store.counts(conn)
