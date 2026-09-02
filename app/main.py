@@ -582,7 +582,7 @@ def sitemap():
     B = config.PUBLIC_BASE
     urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
             "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
-            "/badge", "/connect", "/console", "/blog",
+            "/badge", "/connect", "/privacy", "/console", "/blog",
             # The capability pages and the two measurement pages. These carry
             # the verified tool surface, which exists on no other site, so they
             # are the pages most worth discovering.
@@ -1618,6 +1618,35 @@ def badge_svg(publisher: str, theme: str = Query("auto", pattern="^(auto|light|d
                              # cache headers; an hour keeps badge fetches from
                              # ever being load while staying fresh enough.
                              "ETag": f'W/"{hash(svg) & 0xffffffff:x}"'})
+
+
+@app.get("/privacy", include_in_schema=False)
+@app.get("/privacy-policy", include_in_schema=False)
+def privacy_page(request: Request):
+    """What we receive, keep and forward. See catalog.render_privacy_page."""
+    if _wants_html(request):
+        html_ = render.cached("privacy-html", 3600, catalog.render_privacy_page)
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
+                                            "Vary": "Accept"})
+    return JSONResponse({
+        "accounts": "none. no signup, no payment, no personal data requested",
+        "ip_addresses": "not stored. the analytics table has no column for one",
+        "session_id": ("truncated sha256 of a daily-rotating salt, address and user agent; "
+                       "unlinkable across days. Sec-GPC or DNT yields no session at all"),
+        "search_queries": {
+            "anonymous": ("query text truncated to 200 chars, mode, result count, duration "
+                          "and the entries returned with their rank"),
+            "with_api_key": "not recorded. the query is replaced with a placeholder",
+            "why": f"powers {config.PUBLIC_BASE}/demand, scoped to a publisher's own domain",
+        },
+        "query_leaves_the_machine": [
+            "to the other public ARD registries when federating, cached 30 minutes then deleted",
+            "to an embedding provider, to vectorise the query for semantic retrieval",
+        ],
+        "retention": "raw analytics rows 90 days; daily aggregates indefinitely, with no identifier",
+        "cookies": "none for tracking. no advertising, no third-party analytics",
+        "html": f"{config.PUBLIC_BASE}/privacy",
+    }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
 
 
 @app.get("/connect", include_in_schema=False)
