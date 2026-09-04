@@ -66,7 +66,10 @@ def search(base: str, q: str, fed: str, limit: int = 10) -> list[dict]:
         base.rstrip("/") + "/search",
         data=json.dumps({"query": {"text": q}, "limit": limit,
                          "federation": fed}).encode(),
-        headers={"content-type": "application/json"})
+        # Identify as ours. Without this the benchmark's own queries are logged
+        # as third-party demand: "charge a credit card" alone had accumulated
+        # 9,158 impressions against stripe.com, which is this file, not a user.
+        headers={"content-type": "application/json", "x-neuronto-probe": "1"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r).get("results") or []
 

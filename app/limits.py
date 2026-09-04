@@ -213,7 +213,7 @@ REASONS: dict[str, str] = {
 
 def too_many(rule: str, retry_after: int, headers: dict, verified: bool) -> dict:
     """The body for a refusal. Says what to do, not just that you may not."""
-    limit, window, vlimit, _pro = RULES.get(rule, (0, 0, 0))
+    limit, window, vlimit = RULES.get(rule, (0, 0, 0))
     per = "hour" if window >= 3600 else f"{window} seconds"
     out = {
         "error": "rate_limited",

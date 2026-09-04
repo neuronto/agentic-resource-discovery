@@ -638,6 +638,12 @@ def mark_introspection(conn: sqlite3.Connection, key: str, status: str,
                      (key, now, n_tools, 1 if auth else 0, status))
 
 
+# The first search recorded with a working probe flag. Everything earlier is
+# unattributable: the flag existed but the benchmark and the rank sweep did not
+# set it, so "unflagged" did not mean "a stranger asked".
+PROBE_FLAG_SINCE = 1788551653          # 2026-09-04 17:54 UTC
+
+
 def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
                limit: int = 25, include_probe: bool = False) -> dict:
     """What agents asked that returned this publisher's resources.
@@ -649,6 +655,11 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
     is not our business, so no client identifier is stored to aggregate.
     """
     since = int(time.time()) - days * 86400
+    # Before this instant nothing marked itself, so a row from before it may be
+    # a real agent or may be our benchmark, and we cannot tell which. Serving it
+    # as demand would be inventing the one number this product refuses to
+    # invent, so it is excluded and counted separately under its own name.
+    since = max(since, PROBE_FLAG_SINCE)
     host = host.lower().strip()
     keys = [r["key"] for r in conn.execute(
         "SELECT key FROM entries WHERE lower(publisher)=?", (host,))]

@@ -1153,12 +1153,26 @@ def t_demand_reports_real_queries():
         assert f'"{leak}"' not in blob, f"demand response exposes {leak}"
 
 
-def t_demand_404s_for_an_unindexed_domain():
-    try:
-        get("/demand?domain=definitely-not-indexed.example")
-        raise AssertionError("expected 404")
-    except urllib.error.HTTPError as e:
-        assert e.code == 404, e.code
+def t_demand_answers_200_with_a_reason_for_an_unindexed_domain():
+    """Not knowing a domain is an answer, not a missing endpoint.
+
+    This asserted a 404 until 2026-09-05, which is what it was. A real visitor
+    audited a NASA metadata service, the console then asked for its demand, and
+    got a 404 carrying a perfectly good explanation that no client trusting the
+    status code would ever read. "Nothing of yours is indexed yet" is a
+    successful answer to "what demand do I have", the same way an absent ranking
+    is a measured nothing rather than a missing measurement.
+
+    Stricter than the old test, not looser: 200 alone would let us answer
+    cheerfully and say nothing useful.
+    """
+    code, d = get("/demand?domain=definitely-not-indexed.example")
+    assert code == 200, f"expected 200 for an unknown domain, got {code}"
+    assert d.get("status") == "not_indexed", d
+    assert d.get("indexed") is False, "the body must carry the fact, not only the status"
+    assert d.get("impressions") == 0, "an unknown domain has zero impressions, stated"
+    assert "submit" in (d.get("detail") or "").lower(), \
+        "the answer must say what to do next"
 
 
 def t_metrics_json_is_public_and_complete():
@@ -2369,6 +2383,36 @@ def t_vendor_index_lists_and_links():
     s, h = _html("/api/")
     assert s == 200, s
     assert 'href="/api/stripe.com"' in h, "index must link the vendor pages it lists"
+
+
+def t_a_refusal_is_a_refusal_not_a_fault():
+    """The body a caller gets when we say no, for every rule and for no rule.
+
+    Nothing else here is ever refused, so this path had never run. It was
+    broken: `too_many` unpacked four values from a three-wide rule, so every 429
+    became a 500 telling the caller the fault was ours and there was nothing
+    they could do, when they needed only to wait or to claim a domain.
+
+    Called directly rather than by exhausting a limit on purpose. Burning a real
+    allowance to prove a message is well formed would leave the next hour's
+    honest callers refused for our convenience.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from app import limits
+    except Exception as e:
+        raise Skip(f"app.limits is not importable from here: {type(e).__name__}")
+
+    for rule in list(limits.RULES) + ["a-rule-that-does-not-exist"]:
+        for verified in (False, True):
+            body = limits.too_many(rule, 30, {}, verified)
+            for key in ("error", "detail", "retryAfter"):
+                assert key in body, f"{rule!r} refusal is missing {key}: {body}"
+            assert body["error"] == "rate_limited", \
+                f"{rule!r} refusal says {body['error']!r}, not 'rate_limited'"
+            if not verified:
+                assert "raiseTheLimit" in body, \
+                    f"{rule!r} does not tell an unverified caller how to raise the limit"
 
 
 def main():

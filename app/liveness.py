@@ -21,14 +21,26 @@ from . import config, store
 
 
 async def _probe(client: httpx.AsyncClient, url: str) -> tuple[bool, int | None, int]:
+    """One endpoint, under a hard deadline.
+
+    The timeout below is httpx's budget for a single request, and this client
+    follows redirects, so without the outer deadline one URL with a long chain
+    can hold a probe slot for minutes. It did: the first sweep on the live box
+    was killed at thirty minutes having committed nothing, while sixty ordinary
+    endpoints measured under eight seconds.
+    """
     t0 = time.perf_counter()
     try:
-        r = await client.get(url, timeout=config.LIVENESS_TIMEOUT_S,
-                             headers={"user-agent": config.USER_AGENT},
-                             follow_redirects=True)
+        r = await asyncio.wait_for(
+            client.get(url, timeout=config.LIVENESS_TIMEOUT_S,
+                       headers={"user-agent": config.USER_AGENT},
+                       follow_redirects=True),
+            timeout=config.LIVENESS_DEADLINE_S)
         ms = int((time.perf_counter() - t0) * 1000)
         return (r.status_code < 500), r.status_code, ms
     except Exception:
+        # Includes the deadline. "We asked and nothing usable came back inside
+        # the time we allow" is the same answer as any other failed probe.
         return False, None, int((time.perf_counter() - t0) * 1000)
 
 
@@ -55,25 +67,52 @@ async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
     conn.commit()
 
     sem = asyncio.Semaphore(config.LIVENESS_CONCURRENCY)
-    alive = dead = 0
+    alive = dead = probed = 0
 
-    found: list[tuple] = []
-    async with httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=config.LIVENESS_CONCURRENCY * 2)) as client:
-        async def one(key: str, url: str):
-            async with sem:
-                ok, status, ms = await _probe(client, url)
-            found.append((key, ok, status, ms))
-        await asyncio.gather(*(one(r["key"], r["url"]) for r in rows),
-                             return_exceptions=True)
+    # Chunked, because the unit of lost work is whatever has not been committed.
+    # The first run of this on the live box was killed at its timeout having
+    # probed most of eight hundred endpoints and written none of them: the whole
+    # batch was one transaction's worth of progress. A chunk still obeys the rule
+    # below (no write while any probe is in flight), it just makes the rule cost
+    # a chunk instead of a sweep.
+    # No keep-alive: each host is visited once, so a pooled connection is never
+    # reused, and a connection whose request was cancelled by the deadline is
+    # never held on to. Both matter for the teardown below.
+    client = httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=config.LIVENESS_CONCURRENCY * 2,
+                            max_keepalive_connections=0),
+        max_redirects=5)
+    try:
+        for start in range(0, len(rows), config.LIVENESS_CHUNK):
+            chunk = rows[start:start + config.LIVENESS_CHUNK]
+            found: list[tuple] = []
 
-    # Writes go after the network phase, never inside the gather. SQLite takes
-    # one writer, and a transaction opened on the first probe used to stay open
-    # until the last one returned, holding the lock for the length of the whole
-    # sweep and refusing anyone trying to submit during it.
-    for key, ok, status, ms in found:
-        store.mark_liveness(conn, key, ok, status, ms)
-        if ok: alive += 1
-        else:  dead += 1
-    conn.commit()
-    return {"probed": len(rows), "alive": alive, "dead": dead}
+            async def one(key: str, url: str):
+                async with sem:
+                    ok, status, ms = await _probe(client, url)
+                found.append((key, ok, status, ms))
+            await asyncio.gather(*(one(r["key"], r["url"]) for r in chunk),
+                                 return_exceptions=True)
+
+            # Writes go after the network phase, never inside the gather. SQLite
+            # takes one writer, and a transaction opened on the first probe used
+            # to stay open until the last one returned, holding the lock for the
+            # length of the whole sweep and refusing anyone trying to submit
+            # during it.
+            for key, ok, status, ms in found:
+                store.mark_liveness(conn, key, ok, status, ms)
+                if ok: alive += 1
+                else:  dead += 1
+            conn.commit()
+            probed += len(chunk)
+    finally:
+        # Closing waits on connections, and the deadline above cancels requests
+        # mid-flight, so this can hang: it did, for sixteen minutes, after a
+        # sweep whose every result was already committed. Nothing is at risk by
+        # then, so an overrunning teardown is abandoned rather than waited on.
+        try:
+            await asyncio.wait_for(client.aclose(), timeout=config.LIVENESS_DEADLINE_S)
+        except Exception:
+            pass
+
+    return {"probed": probed, "alive": alive, "dead": dead}
