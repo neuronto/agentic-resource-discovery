@@ -2417,6 +2417,52 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
 
         working = found.get("working") or []
         if not working:
+            # Before refusing: this host may publish a manifest and run no MCP
+            # server at all. A publisher of skills, APIs or agents is a
+            # publisher, and the domain door already falls back the other way
+            # when a host has a server and no manifest. Same resolution, same
+            # index, whichever door they came through.
+            mhost = found.get("host") or resolve.host_of(endpoint)
+            mdata, mpath = None, None
+            if mhost:
+                async with limits.outbound():
+                    mdata, mpath = await ingest.fetch_manifest(mhost)
+            if mdata and (mdata.get("entries") or []):
+                n = len(mdata["entries"])
+                if not dry:
+                    try:
+                        n = await _index_write(
+                            lambda c: ingest.index_manifest(c, mhost, mdata, mpath,
+                                                            strict=True))
+                    except Exception as e:
+                        if not _busy(e):
+                            raise
+                        detail = ("your manifest was read, and the index was busy "
+                                  "writing so it is not searchable yet. Nothing is "
+                                  "wrong on your side; it will be indexed "
+                                  "automatically within a minute.")
+                        row = submissions.record(sid, indexed=False, reason="busy",
+                                                 detail=detail, evidence=None, busy=True)
+                        return _not_indexed("busy", row, domain=mhost, reason="busy",
+                                            detail=detail, evidence=None)
+                    catalog.invalidate_publishers(); render.invalidate()
+                row = submissions.record(sid, indexed=True, reason="indexed", tools=0)
+                out = {
+                    "status": "indexed",
+                    "domain": mhost,
+                    "manifest_path": mpath,
+                    "resources_indexed": n,
+                    "page": f"{config.PUBLIC_BASE}/ard-publishers/{mhost}",
+                    "submission": submissions.public(row),
+                    "note": ("no MCP endpoint answered on this host, and it publishes "
+                             "an ARD manifest, so the manifest was indexed instead. "
+                             "Entries of every type are indexed, not only MCP servers."),
+                }
+                if dry:
+                    out["dry_run"] = True
+                    out["note"] = "dry run: nothing was written. " + out["note"]
+                return JSONResponse(out)
+
             # Nothing on this host answered a handshake, anywhere we know to
             # look. Say exactly what was tried. Whether that is worth retrying
             # depends on the kind of failure, judged on the submitted URL when
@@ -2432,7 +2478,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             tried = [{k: v for k, v in cnd.items() if k in ("url", "source", "status", "tools")}
                      for cnd in (found.get("candidates") or [])]
             detail = ("no MCP endpoint answered a handshake on "
-                      f"{found.get('host') or endpoint}. " + resolve.explain(found)
+                      f"{found.get('host') or endpoint}, and it publishes no ARD "
+                      "manifest at /.well-known/ard.json. " + resolve.explain(found)
                       + ". `evidence` is what the submitted URL returned; `tried` is "
                         "every location checked and what each answered.")
             row = submissions.record(sid, indexed=False, reason=reason, detail=detail,
