@@ -2372,6 +2372,12 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             return JSONResponse(status_code=400, content={
                 "error": "invalid_request",
                 "detail": 'endpoint must be an absolute http(s) URL'})
+        # Resolved, in a thread: getaddrinfo blocks, and this runs on the loop.
+        if not await asyncio.to_thread(resolve.is_safe_target,
+                                       resolve.host_of(endpoint) or ""):
+            return JSONResponse(status_code=400, content={
+                "error": "invalid_request",
+                "detail": "/submit connects to the host you name, from our network, and indexes what answers, so it only accepts publicly routable addresses. This name does not resolve to one."})
         # `dry_run` writes nothing and alerts nobody: no submission row, no
         # index write, no event. The probes still run, because the point is to
         # see what they would find. `submissions.record` and `_not_indexed`
@@ -2563,6 +2569,10 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             "error": "invalid_request",
             "detail": ('send {"domain": "example.com"} for a whole domain, or '
                        '{"endpoint": "https://example.com/mcp"} for a single MCP server')})
+    if not await asyncio.to_thread(resolve.is_safe_target, host):
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": "/submit connects to the host you name, from our network, and indexes what answers, so it only accepts publicly routable addresses. This name does not resolve to one."})
 
     sid = None if dry else submissions.open("domain", host, source, probe)
     conn = db()

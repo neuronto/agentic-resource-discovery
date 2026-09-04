@@ -37,7 +37,9 @@ is what each returned" replaces "no".
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import socket
 import sqlite3
 import urllib.parse
 from typing import Any, Awaitable, Callable
@@ -65,6 +67,53 @@ CONVENTIONAL = ("/mcp", "/sse", "/api/mcp", "/mcp/sse")
 MAX_PROBES = 8
 
 ProbeFn = Callable[[httpx.AsyncClient, str], Awaitable[dict]]
+
+
+def is_safe_target(host: str) -> bool:
+    """False only when this name resolves to an address we must not connect to.
+
+    `/submit` connects to what an unauthenticated stranger names, from our
+    network, and indexes what answers. Without this it is a server-side request
+    forgery primitive: it will probe an internal address and, on success,
+    publish internal infrastructure into a public search index. It did:
+    `{"url": "http://172.18.0.1:8700/mcp"}` returned `{"status": "indexed"}`.
+
+    Resolving is the point. Rejecting the literal string `127.0.0.1` is easy and
+    useless, because a public name can resolve to a private address, and one
+    that does (localtest.me) reached the fetcher before this existed. Every
+    address in the result must pass, not the first one.
+
+    A name that does not resolve returns **True**, deliberately. It is not a
+    forgery target, because there is no address to reach; it is a host that is
+    down, not yet delegated, or mistyped. Those must go down the normal path so
+    the submission is recorded and retried on a schedule. The first version of
+    this function refused them, which turned a queued retry into a 400 and broke
+    the guarantee that a submission is never lost.
+
+    This does not defeat DNS rebinding: the client resolves the name again when
+    it connects. Closing that means pinning the connection to the address
+    checked here, which is a larger change, noted in LESSONS.
+    """
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except Exception:
+        return True          # unresolvable: there is no address to forge to
+    if not infos:
+        return True
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if ip.is_multicast or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+        if ip.is_private or ip.is_unspecified:
+            return False
+        if not ip.is_global:
+            return False
+    return True
 
 
 def host_of(raw: str) -> str | None:
