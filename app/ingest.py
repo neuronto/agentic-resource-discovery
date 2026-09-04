@@ -223,10 +223,16 @@ async def fetch_manifest(dom: str, client: httpx.AsyncClient | None = None
 
 
 def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
-                   strict: bool = True) -> int:
+                   strict: bool = True, source: str = "crawl") -> int:
     """The write half: upsert every entry of a fetched manifest in one
     transaction and record the crawl. Pure SQLite, so a request can run it in
     a thread on its own connection (`main._index_write`) and never on the loop.
+
+    `source` is who caused this, not who wrote it. It defaults to `crawl` because
+    the bulk crawler is the usual caller, and the submit doors pass `submitted`
+    so a deliberate submission is not filed as something we happened to find.
+    Getting this wrong is invisible until someone counts submissions from the
+    entries table and publishes the answer.
 
     `strict` is for the submit path: a locked index must surface as the
     exception so the caller can answer `busy` and queue the submission. The
@@ -238,7 +244,7 @@ def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
         if not isinstance(e, dict):
             continue
         try:
-            if store.upsert_entry(conn, e, "crawl"):
+            if store.upsert_entry(conn, e, source):
                 got += 1
         except sqlite3.OperationalError:
             if strict:
@@ -247,7 +253,7 @@ def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
             # the publisher we just successfully fetched.
             time.sleep(1.0)
             try:
-                if store.upsert_entry(conn, e, "crawl"):
+                if store.upsert_entry(conn, e, source):
                     got += 1
             except Exception:
                 continue

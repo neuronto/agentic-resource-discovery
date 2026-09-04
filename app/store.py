@@ -833,6 +833,46 @@ def daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:
     }
 
 
+def manifest_adoption(conn) -> dict:
+    """Domains serving a well-known manifest, and the path they serve it at.
+
+    Not the same as `publishers`. A publisher is any domain with an entry, and
+    most were indexed from the MCP Registry or an OpenAPI corpus without ever
+    publishing a manifest. This counts the ones that actually did, which is the
+    only honest measure of adoption, and splits them by path because v0.91
+    moved it and most of the ecosystem has not followed.
+
+    Three aggregates over `crawl_seen`, which is small next to `entries`.
+    """
+    crawled = conn.execute("SELECT COUNT(*) FROM crawl_seen").fetchone()[0]
+    found = conn.execute("SELECT COUNT(*) FROM crawl_seen WHERE status='found'").fetchone()[0]
+    by_path = {p: n for p, n in conn.execute(
+        "SELECT manifest_path, COUNT(*) FROM crawl_seen "
+        "WHERE status='found' AND manifest_path IS NOT NULL GROUP BY 1 ORDER BY 2 DESC")}
+    spread = {}
+    for band, n in conn.execute(
+            "SELECT CASE WHEN entries<=1 THEN '1' WHEN entries<=4 THEN '2-4' "
+            "WHEN entries<=19 THEN '5-19' ELSE '20+' END b, COUNT(*) "
+            "FROM crawl_seen WHERE status='found' GROUP BY b"):
+        spread[band] = n
+    # Ranked by what they actually publish, not by what we happen to hold about
+    # them: azure.com has 653 entries in the index and no manifest at all.
+    top = [{"domain": d, "entries": e, "path": p}
+           for d, e, p in conn.execute(
+               "SELECT domain, entries, manifest_path FROM crawl_seen "
+               "WHERE status='found' AND entries > 0 ORDER BY entries DESC LIMIT 20")]
+    return {
+        "domains_crawled": crawled,
+        "domains_serving_a_manifest": found,
+        "top": top,
+        "by_path": by_path,
+        "entries_per_manifest": spread,
+        "what_it_is": ("domains that answered at a well-known path. Much smaller than "
+                       "`publishers`: most publishers are indexed from the MCP Registry or "
+                       "an OpenAPI corpus and never published a manifest at all."),
+    }
+
+
 def top_publishers(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
     rows = conn.execute("""
         SELECT publisher,

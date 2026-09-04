@@ -894,6 +894,7 @@ def stats(days: int = Query(30, ge=7, le=90)):
             "circuits": federation.breaker_snapshot(),
             "federation_budget_ms": config.FEDERATION_BUDGET_MS,
             "series": store.daily_series(conn, days),
+            "manifests": store.manifest_adoption(conn),
             "publishers_top": store.top_publishers(conn, 12),
             "recent": store.recent_searches(conn, 8),
             "federation": {"enabled": config.FEDERATION_ENABLED,
@@ -2439,7 +2440,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
                     try:
                         n = await _index_write(
                             lambda c: ingest.index_manifest(c, mhost, mdata, mpath,
-                                                            strict=True))
+                                                            strict=True,
+                                                            source="submitted"))
                     except Exception as e:
                         if not _busy(e):
                             raise
@@ -2589,7 +2591,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
     elif data:
         try:
             got["entries"] = await _index_write(
-                lambda c: ingest.index_manifest(c, host, data, path, strict=True))
+                lambda c: ingest.index_manifest(c, host, data, path, strict=True,
+                                                source="submitted"))
         except Exception as e:
             if not _busy(e):
                 raise
