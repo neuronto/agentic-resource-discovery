@@ -251,7 +251,20 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
 
 # ─────────────────────────── Registry REST API (§5.3) ───────────────────────
 
-@app.post("/search")
+_SEARCH_SCHEMA = {
+    "requestBody": {"required": True, "content": {"application/json": {"schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "object", "required": ["text"],
+                      "properties": {"text": {"type": "string"}}},
+            "limit": {"type": "integer", "default": 10},
+            "federation": {"type": "string", "enum": ["auto", "none", "referrals"], "default": "auto",
+                           "description": "auto (the spec default) fans out to every public ARD registry and fuses; none answers from this index alone in ~60 ms."}},
+        "required": ["query"],
+        "example": {"query": {"text": "charge a credit card"}, "limit": 10}}}}}}
+
+
+@app.post("/search", openapi_extra=_SEARCH_SCHEMA)
 async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     """POST /search - the one endpoint the spec mandates.
 
@@ -358,11 +371,52 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     return JSONResponse(payload)
 
 
+# Paths that real callers guessed in the outside-failure log, each pointed at
+# the thing they were looking for. Aliases, not new surfaces: every target here
+# already existed. 301 for documents; 307/308 where the method must survive.
+#
+#   an agent that read /openapi.json then tried three other conventional names
+#   for it, and /api/about after finding /about; a client that POSTed /api/mcp
+#   after succeeding at /mcp; a curl user who guessed /api/ard/v1/search before
+#   finding POST /search; and a person in Chrome, twice in twenty minutes,
+#   asking for /pricing, /login and /signup on a site with no accounts.
+_ALIASES = {
+    "/api/openapi.json": ("/openapi.json", 301),
+    "/api/v1/openapi.json": ("/openapi.json", 301),
+    "/swagger.json": ("/openapi.json", 301),
+    "/api/about": ("/about", 301),
+    "/.well-known/mcp.json": ("/.well-known/mcp/server-card.json", 301),
+    "/mcp/.well-known/mcp": ("/.well-known/mcp/server-card.json", 301),
+    "/api/ard/v1/search": ("/search", 308),
+    "/login": ("/connect", 302),
+    "/signup": ("/connect", 302),
+    "/register": ("/connect", 302),
+    "/pricing": ("/about", 302),
+}
+for _src, (_dst, _code) in _ALIASES.items():
+    def _mk(dst=_dst, code=_code):
+        def _alias() -> RedirectResponse:
+            return RedirectResponse(dst, status_code=code)
+        return _alias
+    app.add_api_route(_src, _mk(), methods=["GET"], include_in_schema=False)
+
+
+@app.post("/api/mcp", include_in_schema=False)
+def api_mcp_alias() -> RedirectResponse:
+    """A client that had just succeeded at /mcp tried /api/mcp next. 307 keeps
+    the POST and the body; the /api/{host} vendor route had been answering 405."""
+    return RedirectResponse("/mcp", status_code=307)
+
+
 @app.get("/search", include_in_schema=False)
 @app.delete("/search", include_in_schema=False)
 @app.put("/search", include_in_schema=False)
-def search_wrong_verb() -> Response:
+def search_wrong_verb(request: Request) -> Response:
     """405, never 404. Same repair as GET /mcp, for the same reason.
+
+    A person in a browser is the exception: the outside-failure monitor saw a
+    visitor click through fourteen pages of the site and then get a JSON 405
+    at /search. They wanted the search box, which is on the homepage.
 
     The outside-failure monitor's first run found four sessions that GET this
     route and were told it does not exist. All four had succeeded at something
@@ -370,24 +424,48 @@ def search_wrong_verb() -> Response:
     the endpoint is gone; a 405 with Allow tells it the verb was wrong, which
     is the truth and is fixable in one line on their side.
     """
+    if request.method == "GET" and _wants_html(request):
+        return RedirectResponse("/", status_code=303)
     return JSONResponse(status_code=405, headers={"Allow": "POST", "Cache-Control": "no-store"},
                         content={"error": "method_not_allowed",
                                  "detail": "search is POST. Send {\"query\": {\"text\": \"...\"}} "
                                            "as JSON. Full contract: /api-docs"})
 
 
-@app.post("/explore")
+_EXPLORE_SCHEMA = {
+    "requestBody": {"required": True, "content": {"application/json": {"schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "object", "properties": {"text": {"type": "string"}},
+                      "description": "Optional. Restricts the counts to entries matching this text."},
+            "resultType": {"type": "object", "properties": {"facets": {
+                "type": "array", "items": {"oneOf": [
+                    {"type": "string"},
+                    {"type": "object", "properties": {"field": {"type": "string"},
+                                                      "limit": {"type": "integer"}},
+                     "required": ["field"]}]},
+                "description": "Which facets to count. Omit to receive every supported facet."}}}},
+        "example": {"query": {"text": "payments"},
+                    "resultType": {"facets": [{"field": "type", "limit": 20}, "publisher"]}}}}}}}
+
+
+@app.post("/explore", openapi_extra=_EXPLORE_SCHEMA)
 def explore_endpoint(body: dict) -> JSONResponse:
     """POST /explore - optional introspection over facets (§5.3.3).
 
     Explore does not federate; it is scoped to this registry's own index.
+
+    A bare body, or one without `resultType.facets`, returns every supported
+    facet rather than a 400. The outside-failure monitor watched one agent read
+    /openapi.json, find a request schema that said only "object", and then send
+    seven plausible bodies here and be refused each time. Introspection that has
+    to be introspected first is a contradiction; asked for nothing specific, it
+    now answers with everything it has.
     """
     rt = body.get("resultType") or {}
-    facets = rt.get("facets")
+    facets = rt.get("facets") or body.get("facets")
     if not facets:
-        return JSONResponse(status_code=400, content={
-            "error": "invalid_request",
-            "detail": 'resultType.facets is required, e.g. {"resultType":{"facets":[{"field":"type"}]}}'})
+        facets = ["type", "type_family", "publisher", "source", "tags", "capabilities"]
     q = (body.get("query") or {}).get("text") or ""
     conn = db()
     keys = None
