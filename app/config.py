@@ -32,9 +32,40 @@ PAGE_SIZE_MAX     = 100
 # implements. Upstreams are mirrored into our own index by the ingest job, so
 # the fast path never touches the network; `auto` adds a live fan-out on top
 # for freshness, bounded hard so one slow upstream cannot blow the budget.
-FEDERATION_BUDGET_MS = _i("NEURONTO_FED_BUDGET_MS", 1800)
-UPSTREAM_TIMEOUT_S   = float(os.getenv("NEURONTO_UPSTREAM_TIMEOUT", "1.7"))
+# 700, not 1800. Measured 2026-09-04 at 1800/900/700/500 ms: every value from
+# 900 down returned the same four upstreams and the same sixty upstream results
+# as 1800 did. The only leg that ever needed the long budget was one that is
+# dead (Hugging Face Discover, unreachable at 12 s), so the long budget bought
+# nothing but a 1.9 s wait on every federated search. 700 leaves headroom over
+# the slowest live leg (~500 ms) and halves the latency.
+FEDERATION_BUDGET_MS = _i("NEURONTO_FED_BUDGET_MS", 700)
+# Well under the budget on purpose: an upstream that hangs must surface as
+# ITS timeout (a breaker failure) before OUR budget expires (not one).
+UPSTREAM_TIMEOUT_S   = float(os.getenv("NEURONTO_UPSTREAM_TIMEOUT", "0.5"))
 FEDERATION_ENABLED   = _b("NEURONTO_FEDERATION", True)
+
+# Concurrency cap on live fan-outs, per worker process. Each fan-out is one
+# request to every upstream, so this bounds what we send to other people's
+# registries as much as what we spend ourselves. ARD Registry Hub answered 429
+# to every request at sixteen concurrent fan-outs. A caller who cannot get a
+# slot within FED_SHED_WAIT_S gets the local answer with the federation block
+# saying `capacity`, not a slow one and not an error.
+FED_MAX_INFLIGHT = _i("NEURONTO_FED_MAX_INFLIGHT", 4)
+FED_SHED_WAIT_S  = float(os.getenv("NEURONTO_FED_SHED_WAIT", "0.15"))
+
+# Circuit breaker per upstream. After FED_BREAKER_FAILS consecutive failures an
+# upstream is skipped for FED_BREAKER_COOLDOWN_S, then allowed one probe; a
+# success closes the circuit. A skipped upstream is still listed in the
+# response as `circuit open`, so the federation claim stays honest.
+# Five and 120 s, not three and 300 s. At 60 visitors/s an upstream that is
+# merely slow under our own fan-out trips a 0.5 s timeout a few times in a row,
+# and with a threshold of three WellKnown opened twelve times in 25 s and sat
+# dark for five minutes each time while perfectly healthy. Five consecutive
+# failures still catches a dead host or a 429 storm within a couple of seconds
+# of load; two minutes is long enough to stop hammering it and short enough
+# that a healthy upstream is back before anyone notices.
+FED_BREAKER_FAILS      = _i("NEURONTO_FED_BREAKER_FAILS", 5)
+FED_BREAKER_COOLDOWN_S = _i("NEURONTO_FED_BREAKER_COOLDOWN", 120)
 
 UPSTREAMS = [
     # (id, display name, search URL, the value we report as `source`)
@@ -94,7 +125,10 @@ EMBED_BATCH    = _i("NEURONTO_EMBED_BATCH", 64)
 EMBED_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_TIMEOUT", "20"))
 # The query-time budget. Dense runs only alongside federation, never on the
 # fast path, so it must fit inside the federation budget or be dropped.
-EMBED_QUERY_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_QUERY_TIMEOUT", "1.6"))
+# Waited on AFTER the fan-out returns, so this is the extra allowance beyond
+# the federation budget, not a parallel one. 1.6 s on top of a 700 ms budget
+# would put the worst case back above two seconds.
+EMBED_QUERY_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_QUERY_TIMEOUT", "0.3"))
 EMBED_CACHE_S  = _i("NEURONTO_EMBED_CACHE_S", 300)
 DENSE_ENABLED  = _b("NEURONTO_DENSE", True)
 

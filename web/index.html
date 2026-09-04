@@ -237,6 +237,10 @@ h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
   font-family:var(--mono);font-size:11px;color:var(--mut)}
 .tick{border:1px solid var(--line);border-radius:99px;padding:3px 9px}
 .tick.on{color:var(--fg2);border-color:var(--line2)}.tick.off{color:var(--dim)}
+.fedopt{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);white-space:nowrap;cursor:pointer;user-select:none}
+.fedopt input{accent-color:var(--fg2);margin:0}
+.fedopt:hover{color:var(--fg2)}
+.tick.more{cursor:pointer;text-decoration:underline dotted}
 .tick.hi{color:#09090A;background:#FAFAFA;border-color:#FAFAFA}
 .sc{font-family:var(--mono);font-size:15px;font-weight:500;width:38px;text-align:right;flex:none}
 .badge{font-family:var(--mono);font-size:10px;color:var(--fg2);border:1px solid var(--line2);
@@ -527,6 +531,8 @@ th,td,.dsc,p.src{font-size:12.5px}
                  enterkeyhint="search">
           <span class="hsType" id="hsType" aria-hidden="true"><span id="hsTypeText"></span><i class="hsCaret"></i></span>
         </div>
+        <label class="fedopt" title="Also query GitHub Agent Finder, WellKnown, Desvela and ARD Registry Hub live, about a second more">
+          <input type="checkbox" id="fed"><span>all registries</span></label>
         <button class="btn btn--w" id="btn" type="submit">
           <span>Search</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
@@ -892,8 +898,9 @@ function paint(d, ms, pending){
     /* A cached upstream is shown as cached with its age. It answered, but not
        just now, and the difference is the whole federation claim. */
     head+=fed.map(f=>{
+      const why=f.error==="capacity"?"busy":f.error==="circuit open"?"paused":"timeout";
       const how=f.cached?` · ${f.results} cached ${Math.round((f.age_s||0)/60)}m`
-                        :(f.ok?" · "+f.results:" · timeout");
+                        :(f.ok?" · "+f.results:" · "+why);
       return `<span class="tick ${f.ok?"on":"off"}">${esc(f.name)}${how}</span>`}).join("");
   }
   head+=`</div>`;
@@ -911,13 +918,41 @@ async function ask(q, federation, preview){
   return r.json();
 }
 
+/* Federation is opt-in on the page. This index answers in ~60 ms and, by
+   the battery, ranks better than the fused set; the live fan-out costs ~1 s
+   and one request to four other people's registries per search. A visitor
+   who wants every registry ticks the box once and it is remembered. The API
+   default stays `auto`, as the spec says; this is a page choice, not a
+   contract change. */
+const FED_KEY="nb_fed";
+try{ $("#fed").checked = localStorage.getItem(FED_KEY)==="1"; }catch(e){}
+$("#fed").addEventListener("change",()=>{ try{localStorage.setItem(FED_KEY,$("#fed").checked?"1":"0");}catch(e){}
+  if($("#q").value.trim()) run(); });
+
 async function run(){
   const q=$("#q").value.trim(); if(!q) return;
   const mine=++seq, t0=performance.now();
+  const wantFed=$("#fed").checked;
   $("#btn").disabled=true;
-  $("#out").innerHTML='<div class="empty"><span class="dots">searching every registry</span></div>';
+  $("#out").innerHTML='<div class="empty"><span class="dots">'+(wantFed?"searching every registry":"searching")+'</span></div>';
 
-  const local=ask(q,"none",true), federated=ask(q,"auto",false);
+  /* Without the fan-out the local call IS the search, so it is not a preview
+     and is logged as a search. With it, the local call is the preview. */
+  const local=ask(q,"none",wantFed), federated=wantFed?ask(q,"auto",false):null;
+  if(!federated){
+    try{
+      const d=await local; if(mine!==seq) return;
+      paint(d, Math.round(performance.now()-t0), false);
+      const m=document.querySelector(".rmeta");
+      if(m){ const t=document.createElement("span"); t.className="tick more";
+        t.textContent="+ search all registries"; t.title="about a second more";
+        t.onclick=()=>{ $("#fed").checked=true; $("#fed").dispatchEvent(new Event("change")); };
+        m.appendChild(t); }
+      load(WIN);
+    }catch(e){ if(mine===seq) $("#out").innerHTML='<div class="empty">Search failed. Try again.</div>'; }
+    finally{ if(mine===seq) $("#btn").disabled=false }
+    return;
+  }
   /* Without this, a rejection that loses the race to the other call is an
      unhandled rejection in the console on every failed search. */
   local.catch(()=>{}); federated.catch(()=>{});

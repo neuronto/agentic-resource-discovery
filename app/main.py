@@ -327,7 +327,12 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     # Resolved before the search rather than filtered after, so private rows
     # never enter a result set the caller is not entitled to.
     auth = (request_key or "")
-    owner = publisher.domain_for_key(conn, auth)
+    # The last sync read on the event loop in this handler. search.search
+    # already threads its local leg; log_search is a queue. This one is a
+    # single indexed lookup, but a lookup that waits on a writer lock stalls
+    # every request on the worker, so it goes to a thread with its own conn.
+    owner = await asyncio.to_thread(
+        lambda: publisher.domain_for_key(store.tls_conn(), auth))
     out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner)
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
@@ -885,6 +890,9 @@ def stats(days: int = Query(30, ge=7, le=90)):
             "dense": embed.status(conn),
             "searches_7d": q["n"] or 0,
             "avg_search_ms": round(q["avg_ms"] or 0, 1),
+            # This worker's view; each of the four learns independently.
+            "circuits": federation.breaker_snapshot(),
+            "federation_budget_ms": config.FEDERATION_BUDGET_MS,
             "series": store.daily_series(conn, days),
             "publishers_top": store.top_publishers(conn, 12),
             "recent": store.recent_searches(conn, 8),
