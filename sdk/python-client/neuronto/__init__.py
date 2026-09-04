@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = ["find_resource", "find_tool", "registry_stats", "liveness", "publish",
            "NeurontoError", "BASE"]
 

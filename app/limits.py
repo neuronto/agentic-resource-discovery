@@ -47,26 +47,26 @@ ENABLED = os.getenv("NEURONTO_LIMITS", "1").strip().lower() not in ("0", "false"
 # costly, human step, so it is a reasonable thing to reward, and it gives an
 # integrator a way out of the limit that does not involve asking us.
 #
-# (limit, window_seconds, verified_limit)
-RULES: dict[str, tuple[int, int, int]] = {
+# (limit, window_seconds, verified_limit, pro_limit)
+RULES: dict[str, tuple[int, int, int, int]] = {
     # ~25 outbound calls each, by far the most expensive thing we offer.
-    "audit":          (30,   3600,  200),
+    "audit":          (30, 3600, 200, 1000),
     # Up to 11 outbound fetches against a caller-supplied host.
-    "manifest_build": (60,   3600,  300),
+    "manifest_build": (60, 3600, 300, 1500),
     # One MCP handshake or manifest fetch each.
-    "submit":         (60,   3600,  300),
+    "submit":         (60, 3600, 300, 1500),
     # One DNS-over-HTTPS lookup each, cheap but still somebody else's resolver.
-    "claim_verify":   (100,  3600,  400),
+    "claim_verify":   (100, 3600, 400, 2000),
     # Deliberately loose. This makes no outbound call and writes nothing: the
     # token is a hash of the domain, so asking twice returns the same value and
     # there is no state to exhaust. Set to 60 at first out of symmetry, which
     # was wrong, it only refused honest callers reading the docs.
-    "claim":          (200,  3600,  600),
+    "claim":          (200, 3600, 600, 3000),
     # Key required already, so this only bounds a compromised or runaway key.
-    "private_write":  (300,  3600,  300),
+    "private_write":  (300, 3600, 300, 1500),
     # The product. Only the federated mode costs anything outbound, and this is
     # deliberately loose: five requests a second sustained, per caller.
-    "search_fed":     (300,  60,    600),
+    "search_fed":     (300, 60, 600, 3000),
 }
 
 # A ceiling on outbound work in flight, per worker. Per caller limits bound any
@@ -135,15 +135,29 @@ def caller(request) -> tuple[str, bool]:
     return f"ip:{client_id(request)}", False
 
 
+def tier_of(request) -> str:
+    """free | verified | pro. Read from the key's row; a missing key is free."""
+    auth = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
+    if not auth.startswith("nk_"):
+        return "free"
+    try:
+        from . import store
+        r = store.connect().execute("SELECT tier FROM api_keys WHERE key=?",
+                                    (auth,)).fetchone()
+        return (r[0] if r and r[0] in ("free", "verified", "pro") else "verified")
+    except Exception:
+        return "verified"
+
+
 def check(rule: str, request) -> tuple[bool, int, dict]:
     """Count this request. Returns (allowed, retry_after_seconds, headers)."""
     spec = RULES.get(rule)
     if not ENABLED or spec is None:
         return True, 0, {}
-    limit, window, verified_limit = spec
+    limit, window, verified_limit, pro_limit = spec
     who, is_verified = caller(request)
     if is_verified:
-        limit = verified_limit
+        limit = pro_limit if tier_of(request) == "pro" else verified_limit
 
     c = _db()
     if c is None:
@@ -197,7 +211,7 @@ REASONS: dict[str, str] = {
 
 def too_many(rule: str, retry_after: int, headers: dict, verified: bool) -> dict:
     """The body for a refusal. Says what to do, not just that you may not."""
-    limit, window, vlimit = RULES.get(rule, (0, 0, 0))
+    limit, window, vlimit, _pro = RULES.get(rule, (0, 0, 0, 0))
     per = "hour" if window >= 3600 else f"{window} seconds"
     out = {
         "error": "rate_limited",

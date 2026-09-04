@@ -620,8 +620,56 @@ async function audit(){
         </div>` : ""}
       </section>`;
     window.__badge = j.badge || null;
+    extras(j.domain);
   }catch(e){$("#rep").innerHTML='<div class="empty">Audit failed. Try again.</div>'}
   finally{busy=false;$("#ab").disabled=false}
+}
+
+// Demand and the doctor, appended after the audit. Each is independent: one
+// failing must not take the other, or the audit above it, with it.
+async function extras(domain){
+  const host=document.createElement("div"); host.id="extras"; $("#rep").appendChild(host);
+  const [dem, doc] = await Promise.all([
+    fetch(`/demand?domain=${encodeURIComponent(domain)}&limit=25`).then(r=>r.json()).catch(()=>null),
+    fetch("/doctor",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({domain})}).then(r=>r.json()).catch(()=>null)
+  ]);
+  let h="";
+  if(dem && !dem.error){
+    const n=dem.impressions||0;
+    h+=`<div class="shead" style="margin-top:34px"><h2>Did anyone come looking</h2>
+      <div class="sp"><span class="src">last ${dem.days||30} days, this index. Our own probes are excluded from 4 Sep 2026; earlier rows may include them</span></div></div>`;
+    if(dem.status==="not_indexed"){
+      h+=`<div class="note" style="max-width:66ch"><p style="margin:0">Nothing from this domain is in the index yet, so there is no demand to report.</p></div>`;
+    } else if(!n){
+      h+=`<div class="note" style="max-width:66ch"><p style="margin:0">No search on this index returned one of your resources in that window. That is the honest number, and it is the normal one this early: publishers are found by crawling, and almost nobody has told a registry they exist. The doctor below is what changes it.</p></div>`;
+    } else {
+      h+=`<p class="src" style="margin:0 0 12px"><b>${n}</b> impression${n===1?"":"s"} across <b>${dem.distinct_queries||0}</b> distinct quer${dem.distinct_queries===1?"y":"ies"}.</p>
+      <div class="scroll"><table class="tbl"><thead><tr><th>What was asked</th><th class="num">Times</th><th class="num">Best rank</th><th class="num">Avg rank</th></tr></thead><tbody>
+      ${(dem.queries||[]).map(q=>`<tr><td class="nm mono" style="font-size:12.5px">${esc(q.query)}</td><td class="num">${q.times}</td><td class="num ${q.best_rank<=3?"ok":"mid"}">${q.best_rank}</td><td class="num">${q.avg_rank}</td></tr>`).join("")}
+      </tbody></table></div>`;
+    }
+  }
+  if(doc && !doc.error){
+    const c=doc.counts||{};
+    h+=`<div class="shead" style="margin-top:34px"><h2>What to change, and why</h2>
+      <div class="sp"><span class="src">${c.error||0} error · ${c.warning||0} warning · ${c.hint||0} hint</span></div></div>`;
+    if(doc.first){
+      h+=`<div class="note" style="max-width:66ch;margin-bottom:16px"><p style="margin:0"><b>First:</b> ${esc(doc.first.what)} <span class="src">${esc(doc.first.where)}</span></p>${doc.first.fix?`<p style="margin:8px 0 0">${esc(doc.first.fix)}</p>`:""}</div>`;
+    }
+    h+=`<div>${(doc.findings||[]).slice(0,30).map(f=>`<div class="find ${f.severity==="hint"?"info":f.severity}">
+      <div class="sev">${esc(f.severity)} · <span class="mono" style="font-size:12px">${esc(f.where)}</span></div>
+      <p style="margin:4px 0 0">${esc(f.what)}</p>${f.fix?`<p class="src" style="margin:6px 0 0">${esc(f.fix)}</p>`:""}</div>`).join("")}</div>`;
+    if((doc.resources||[]).some(r=>r.reliability)){
+      h+=`<div class="shead" style="margin-top:34px"><h2>How your endpoints have behaved</h2>
+        <div class="sp"><span class="src">share of our probes that got any answer, with a 95% lower bound. Not an SLA.</span></div></div>
+        <div class="scroll"><table class="tbl"><thead><tr><th>Resource</th><th class="num">Probes</th><th class="num">Answered</th><th class="num">Lower bound</th><th>Status</th></tr></thead><tbody>
+        ${doc.resources.filter(r=>r.reliability).map(r=>`<tr><td class="nm">${esc(r.name)}</td><td class="num">${r.reliability.probes}</td><td class="num">${r.reliability.observed_uptime_pct}%</td><td class="num">${r.reliability.lower_bound_pct}%</td><td class="mono" style="font-size:12px">${esc(r.status||"")}</td></tr>`).join("")}
+        </tbody></table></div>`;
+    }
+    h+=`<p class="src" style="margin-top:14px">${esc(doc.note||"")}</p>`;
+  }
+  host.innerHTML=h;
 }
 function copyBadge(kind, btn){
   // The snippet is the product here. Asking someone to navigate to another page
