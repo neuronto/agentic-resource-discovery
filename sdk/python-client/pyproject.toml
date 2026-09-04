@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuronto"
-version = "1.0.0"
+version = "1.1.0"
 description = "Find the MCP servers, skills, agents and APIs that can do a task, across every public Agentic Resource Discovery (ARD) registry at once."
 readme = "README.md"
 requires-python = ">=3.9"

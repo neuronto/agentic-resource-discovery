@@ -18,6 +18,9 @@ def _i(name: str, default: int) -> int:
     except ValueError: return default
 
 PUBLIC_BASE = os.getenv("NEURONTO_BASE", "https://neuronto.com").rstrip("/")
+# Multi-step discovery makes a model call per request. Off until staging has
+# shown it answers well and within budget; on there first, then here.
+PLAN_ENABLED = os.getenv("NEURONTO_PLAN_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 HOST_NAME   = "Neuronto"
 PUBLISHER   = "neuronto.com"
 

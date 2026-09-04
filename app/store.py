@@ -390,6 +390,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if ad and "path" not in ad:
         conn.execute("ALTER TABLE adoption ADD COLUMN path TEXT")
 
+    # Our own probes were being reported to publishers as demand.
+    sc = {r["name"] for r in conn.execute("PRAGMA table_info(searches)")}
+    if sc and "probe" not in sc:
+        conn.execute("ALTER TABLE searches ADD COLUMN probe INTEGER NOT NULL DEFAULT 0")
+
+    # Access tiers. Every existing key was issued to a verified domain.
+    ak = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)")}
+    if ak and "tier" not in ak:
+        conn.execute("ALTER TABLE api_keys ADD COLUMN tier TEXT NOT NULL DEFAULT 'verified'")
+
     have = {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}
     for col, decl in _ADD_COLUMNS.items():
         if col not in have:
@@ -516,6 +526,9 @@ def _reindex(conn: sqlite3.Connection, key: str) -> None:
         """SELECT GROUP_CONCAT(name || ' ' || COALESCE(title,'') || ' '
                                || COALESCE(description,''), ' ')
            FROM tools WHERE entry_key=?""", (key,)).fetchone()[0] or ""
+    # And what each tool accepts. A description can be one word; the schema
+    # names `to_phone_number` and `message_body`, which is what the tool does.
+    tt = tt + " " + schema_terms(conn, key)
     conn.execute("DELETE FROM entries_fts WHERE key=?", (key,))
     conn.execute("""INSERT INTO entries_fts(key,display_name,description,rep_queries,
                                             tags,capabilities,tool_text)
@@ -523,6 +536,51 @@ def _reindex(conn: sqlite3.Connection, key: str) -> None:
                  (r["key"], r["display_name"] or "", r["description"] or "",
                   flat(r["rep_queries"]), flat(r["tags"]), flat(r["capabilities"]),
                   tt[:20000]))
+
+
+def schema_terms(conn: sqlite3.Connection, entry_key: str,
+                 per_tool: int = 24, total_cap: int = 6000) -> str:
+    """Parameter names and descriptions from every tool's input schema.
+
+    Names are split on `_`, `-` and camelCase so `toPhoneNumber` indexes as
+    "to phone number". Bounded twice: a per-tool property cap so one
+    kitchen-sink tool does not dominate, and a total cap so the FTS document
+    stays a document. Malformed schemas are skipped, not fatal: they are third
+    parties' JSON.
+    """
+    import re as _re
+    out: list[str] = []
+    size = 0
+    for (raw,) in conn.execute(
+            "SELECT input_schema FROM tools WHERE entry_key=? AND input_schema IS NOT NULL",
+            (entry_key,)):
+        try:
+            sch = json.loads(raw)
+        except Exception:
+            continue
+        props = sch.get("properties") if isinstance(sch, dict) else None
+        if not isinstance(props, dict):
+            continue
+        n = 0
+        for name, spec in props.items():
+            if n >= per_tool:
+                break
+            words = _re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name))
+            words = _re.sub(r"[_\-.]+", " ", words).lower()
+            desc = ""
+            if isinstance(spec, dict):
+                d = spec.get("description")
+                if isinstance(d, str):
+                    desc = d[:160]
+            piece = (words + " " + desc).strip()
+            if not piece:
+                continue
+            size += len(piece) + 1
+            if size > total_cap:
+                return " ".join(out)
+            out.append(piece)
+            n += 1
+    return " ".join(out)
 
 
 def replace_tools(conn: sqlite3.Connection, entry_key: str,
@@ -581,7 +639,7 @@ def mark_introspection(conn: sqlite3.Connection, key: str, status: str,
 
 
 def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
-               limit: int = 25) -> dict:
+               limit: int = 25, include_probe: bool = False) -> dict:
     """What agents asked that returned this publisher's resources.
 
     The question a publisher actually has is not "am I listed" but "did anyone
@@ -614,15 +672,19 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
         return {"domain": host, "indexed": 0, "impressions": 0, "queries": [],
                 "resources": [], "days": days}
     marks = ",".join("?" * len(keys))
+    # Our own probes are not a publisher's demand. They stay in the table, so
+    # the suite can prove impressions are written, and are excluded here.
+    probe_sql = "" if include_probe else " AND COALESCE(s.probe, 0) = 0"
     total = conn.execute(
-        f"SELECT COUNT(*) FROM impressions WHERE ts>=? AND entry_key IN ({marks})",
+        f"""SELECT COUNT(*) FROM impressions i JOIN searches s ON s.id = i.search_id
+            WHERE i.ts>=? AND i.entry_key IN ({marks}){probe_sql}""",
         [since] + keys).fetchone()[0]
     queries = [{"query": r["q"], "times": r["n"], "best_rank": r["best"],
                 "avg_rank": round(r["avg_r"], 1)}
                for r in conn.execute(
         f"""SELECT s.q, COUNT(*) n, MIN(i.rank) best, AVG(i.rank) avg_r
             FROM impressions i JOIN searches s ON s.id = i.search_id
-            WHERE i.ts>=? AND i.entry_key IN ({marks})
+            WHERE i.ts>=? AND i.entry_key IN ({marks}){probe_sql}
             GROUP BY s.q ORDER BY n DESC, best ASC LIMIT ?""",
         [since] + keys + [limit])]
     resources = [{"name": r["display_name"] or r["identifier"],
@@ -631,7 +693,8 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
                  for r in conn.execute(
         f"""SELECT e.display_name, e.identifier, COUNT(*) n, MIN(i.rank) best
             FROM impressions i JOIN entries e ON e.key = i.entry_key
-            WHERE i.ts>=? AND i.entry_key IN ({marks})
+            JOIN searches s ON s.id = i.search_id
+            WHERE i.ts>=? AND i.entry_key IN ({marks}){probe_sql}
             GROUP BY e.key ORDER BY n DESC LIMIT ?""", [since] + keys + [limit])]
     return {"domain": host, "indexed": len(keys), "impressions": total,
             "distinct_queries": len(queries), "queries": queries,
@@ -770,11 +833,11 @@ def _log_writer() -> None:
         except queue.Empty:
             pass
         try:
-            for (q, mode, results, ms, federated, ents, authenticated, now) in batch:
-                cur = c.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts)
-                                   VALUES(?,?,?,?,?,?)""",
+            for (q, mode, results, ms, federated, ents, authenticated, now, probe) in batch:
+                cur = c.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts,probe)
+                                   VALUES(?,?,?,?,?,?,?)""",
                                 (PRIVATE_QUERY_PLACEHOLDER if authenticated else q[:200],
-                                 mode, results, ms, federated, now))
+                                 mode, results, ms, federated, now, 1 if probe else 0))
                 if ents and not authenticated:
                     c.executemany(
                         """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
@@ -790,7 +853,7 @@ def _log_writer() -> None:
 
 def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
                ms: int, federated: int, entries: list[dict] | None = None,
-               authenticated: bool = False) -> None:
+               authenticated: bool = False, probe: bool = False) -> None:
     """Record a query and what it returned, off the request path.
 
     `conn` is accepted for compatibility and unused: the writer thread holds
@@ -802,7 +865,8 @@ def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
     ents = [(e.get("_key"), e.get("score")) for e in (entries or [])[:10]
             if e.get("_key") and e.get("visibility") != "private"]
     try:
-        _logq.put_nowait((q, mode, results, ms, federated, ents, authenticated, int(time.time())))
+        _logq.put_nowait((q, mode, results, ms, federated, ents, authenticated,
+                          int(time.time()), bool(probe)))
     except queue.Full:
         return
     if _logthread is None or not _logthread.is_alive():

@@ -37,6 +37,12 @@ class Skip(Exception):
     """
 
 
+def get_text(path: str, timeout: int = 30):
+    req = urllib.request.Request(BASE + path, headers=UA)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.read().decode("utf-8", "replace")
+
+
 def get(path, timeout=30):
     r = urllib.request.urlopen(urllib.request.Request(BASE + path, headers=UA), timeout=timeout)
     return r.status, json.loads(r.read() or b"{}")
@@ -596,7 +602,7 @@ def t_search_records_impressions():
         saturated = []
         for host in hosts[:5]:
             try:
-                s3, dem = get(f"/demand?domain={host}&limit=200")
+                s3, dem = get(f"/demand?domain={host}&limit=200&include_probe=1")
             except urllib.error.HTTPError:
                 continue
             queries = [q.get("query") for q in (dem.get("queries") or [])]
@@ -2166,6 +2172,116 @@ def t_a_submission_is_never_lost():
     # and the target lookup finds it without the id
     code, st2 = get("/submit/status?endpoint=" + urllib.parse.quote(url, safe=""))
     assert code == 200 and st2["id"] == sub["id"], st2
+
+
+def t_a_probe_is_not_a_publishers_demand():
+    """Our own searches must not show up in a publisher's demand report.
+
+    Every request this suite makes is marked as a probe, and before this the
+    report a real publisher read was mostly us. The row is still written, which
+    t_search_records_impressions proves, and it is excluded from the default
+    view, which this proves.
+    """
+    import time as _t
+    marker = f"probe exclusion check {int(_t.time())}"
+    s, d = post("/search", {"query": {"text": marker}, "federation": "none",
+                            "pageSize": 5}, timeout=70)
+    assert s == 200, s
+    results = d.get("results") or []
+    assert results, "nothing returned, nothing to check"
+    hosts = []
+    for r in results:
+        for cand in (r.get("url") or "", r.get("identifier") or ""):
+            if "//" in cand:
+                h = cand.split("//", 1)[1].split("/", 1)[0].lower()
+                if h and h not in hosts:
+                    hosts.append(h)
+    deadline = _t.time() + 8
+    seen_with = False
+    while _t.time() < deadline:
+        for host in hosts[:5]:
+            try:
+                _, full = get(f"/demand?domain={host}&limit=200&include_probe=1")
+                _, view = get(f"/demand?domain={host}&limit=200")
+            except urllib.error.HTTPError:
+                continue
+            if marker in [q.get("query") for q in (full.get("queries") or [])]:
+                seen_with = True
+                assert marker not in [q.get("query") for q in (view.get("queries") or [])], \
+                    "a probe search is being reported to a publisher as demand"
+                return
+        _t.sleep(0.5)
+    assert seen_with, "could not find the probe with include_probe=1; inconclusive"
+
+
+def t_doctor_reads_a_pasted_manifest_without_the_network():
+    """A pasted manifest is diagnosed from the document alone."""
+    man = {"specVersion": "1.0", "entries": [{
+        "identifier": "urn:air:example.com:server:x", "displayName": "Invoicely",
+        "type": "application/mcp-server-card+json", "url": "https://example.com/mcp",
+        "representativeQueries": ["document processing"]}]}
+    s, d = post("/doctor", {"manifest": man}, timeout=30)
+    assert s == 200, (s, d)
+    codes = {f["code"] for f in d["findings"]}
+    assert "label_query" in codes, codes
+    assert "query_count" in codes, codes
+    assert "no_description" in codes, codes
+    assert "score" not in d and "grade" not in d, "the doctor must not score"
+    assert d["counts"]["error"] == 0, d["counts"]
+
+
+def t_doctor_finds_the_missing_queries():
+    man = {"specVersion": "1.0", "entries": [{
+        "identifier": "urn:air:example.com:server:x", "displayName": "X",
+        "type": "application/mcp-server-card+json", "url": "https://example.com/mcp"}]}
+    s, d = post("/doctor", {"manifest": man}, timeout=30)
+    assert s == 200, s
+    assert d["first"] and d["first"]["code"] == "no_queries", d["first"]
+    assert d["first"]["severity"] == "error"
+
+
+def t_doctor_on_a_domain_reports_the_index_view():
+    """For our own host: fetched, diagnosed, and the index consulted."""
+    s, d = post("/doctor", {"domain": "neuronto.com"}, timeout=60)
+    assert s == 200, (s, d)
+    assert d["domain"] == "neuronto.com"
+    assert d["indexed"] >= 1, d.get("indexed")
+    assert isinstance(d["resources"], list) and d["resources"]
+    assert "note" in d and "not a score" in d["note"]
+
+
+def t_doctor_refuses_nothing_to_read():
+    s, d = post("/doctor", {}, timeout=15)
+    assert s == 400 and d["error"] == "invalid_request", (s, d)
+
+
+def t_plan_is_off_unless_enabled_and_then_decomposes():
+    """Behind a flag. When on, a two-capability task yields two or more steps,
+    each with candidates from this index."""
+    s, d = post("/plan", {"task": "read a pdf invoice and post the total to a slack channel"},
+                timeout=90)
+    if s == 404:
+        assert d.get("detail", "").startswith("multi-step discovery is not enabled"), d
+        return
+    assert s == 200, (s, d)
+    steps = d.get("steps") or []
+    assert 1 <= len(steps) <= 6, len(steps)
+    assert all("query" in st and "candidates" in st for st in steps)
+    if d.get("decomposed_by") == "model":
+        assert len(steps) >= 2, "two capabilities should not collapse to one step"
+    assert any(st["candidates"] for st in steps), "no step found any candidate"
+
+
+def t_plan_rejects_a_bare_word():
+    s, d = post("/plan", {"task": "pdf"}, timeout=15)
+    assert s in (400, 404), s
+
+
+def t_pricing_page_says_rank_is_not_for_sale():
+    s, h = get_text("/pricing")
+    assert s == 200, s
+    assert "never for sale" in h and "Position" in h, "the pricing page must say what is not sold"
+    assert "free" in h.lower()
 
 
 def t_submit_status_unknown_is_404_and_garbage_is_400():

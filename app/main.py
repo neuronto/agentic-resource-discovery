@@ -34,7 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
-from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
+from . import (doctor, plan,a2a, adoption, audit, badge, bench, catalog, config, embed, events,
                federation, ingest, liveness, limits, publisher, reliability,
                render, resolve, safety, search, state, store, submissions, tools_index)
 from .normalize import media_family
@@ -59,6 +59,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 _LIMITED: dict[tuple[str, str], str] = {
     ("POST", "/audit"):           "audit",
     ("POST", "/manifest/build"):  "manifest_build",
+    ("POST", "/doctor"):          "manifest_build",
+    ("POST", "/plan"):            "audit",
     ("POST", "/submit"):          "submit",
     ("POST", "/claim"):           "claim",
     ("POST", "/claim/verify"):    "claim_verify",
@@ -346,7 +348,8 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     preview = request.headers.get("x-neuronto-preview") == "1"
     if not preview:
         store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
-                         entries=out["results"], authenticated=bool(owner))
+                         entries=out["results"], authenticated=bool(owner),
+                         probe=_is_probe(request))
     cleaned = search.clean(out["results"])
     payload: dict[str, Any] = {"results": cleaned,
                                "queryMatch": search.query_match(text, cleaned)}
@@ -396,7 +399,6 @@ _ALIASES = {
     "/login": ("/connect", 302),
     "/signup": ("/connect", 302),
     "/register": ("/connect", 302),
-    "/pricing": ("/about", 302),
 }
 for _src, (_dst, _code) in _ALIASES.items():
     def _mk(dst=_dst, code=_code):
@@ -1302,7 +1304,8 @@ def metrics_json():
 @app.get("/demand")
 def demand_endpoint(domain: str = Query(..., min_length=3),
                           days: int = Query(30, ge=1, le=365),
-                          limit: int = Query(25, ge=1, le=200)) -> JSONResponse:
+                          limit: int = Query(25, ge=1, le=200),
+                          include_probe: int = Query(0, ge=0, le=1)) -> JSONResponse:
     """Did anyone come looking, and what did they ask?
 
     Being listed is not the question a publisher has; this is. Every search
@@ -1315,7 +1318,7 @@ def demand_endpoint(domain: str = Query(..., min_length=3),
     if not host or "." not in host or len(host) > 253:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request", "detail": "domain is required"})
-    d = store.demand_for(db(), host, days, limit)
+    d = store.demand_for(db(), host, days, limit, include_probe=bool(include_probe))
     events.emit("demand", a=host, n=d.get("impressions"))
     if not d["indexed"]:
         return JSONResponse(status_code=404, content={
@@ -1330,6 +1333,70 @@ def demand_endpoint(domain: str = Query(..., min_length=3),
     d["console"] = f"{config.PUBLIC_BASE}/console?domain={host}"
     return JSONResponse(d, headers={"Cache-Control": "private, max-age=60"})
 
+
+
+@app.post("/doctor")
+async def doctor_endpoint(body: dict, request: Request) -> JSONResponse:
+    """What to change in a manifest, and why it is not being found.
+
+    Takes a domain, in which case the manifest is fetched and the index is
+    consulted for what happened when we called its endpoints, or a manifest
+    body, in which case only the document is read. Findings, never a score.
+    """
+    b = body or {}
+    dom = _host_arg(b.get("domain") or "")
+    man = b.get("manifest")
+    if not dom and man is None:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": 'send {"domain": "example.com"} or {"manifest": {...}}'})
+
+    disc = None
+    if dom:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(follow_redirects=True, timeout=config.CRAWL_TIMEOUT_S) as c:
+            async with limits.outbound():
+                disc = await audit.discovery(c, f"https://{dom}")
+        man = disc.get("manifest") if isinstance(disc, dict) else None
+    elif isinstance(man, str):
+        try:
+            man = json.loads(man)
+        except Exception:
+            return JSONResponse(status_code=400, content={
+                "error": "invalid_request", "detail": "manifest is not valid JSON"})
+
+    findings = doctor.diagnose_manifest(man, host=dom, discovery=disc)
+    index = await asyncio.to_thread(doctor.diagnose_index, db(), dom) if dom else None
+    out = doctor.compose(findings, index)
+    out["domain"] = dom
+    if dom:
+        events.emit("doctor", a=dom, n=out["counts"].get("error", 0))
+    return JSONResponse(out, headers={"Cache-Control": "private, max-age=60"})
+
+
+@app.post("/plan")
+async def plan_endpoint(body: dict, request: Request) -> JSONResponse:
+    """A task, decomposed into steps, each with candidate resources.
+
+    Discovery for jobs that need more than one tool. The agent still chooses,
+    connects over each resource's own protocol, and verifies trust itself.
+    """
+    if not config.PLAN_ENABLED:
+        return JSONResponse(status_code=404, content={
+            "error": "not_found", "detail": "multi-step discovery is not enabled on this instance"})
+    b = body or {}
+    task = str(b.get("task") or "").strip()
+    if len(task) < 8:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request", "detail": 'send {"task": "what the agent has to do"}'})
+    per_step = max(1, min(int(b.get("perStep") or 3), 5))
+    mode = str(b.get("federation") or "none").lower()
+    if mode not in ("none", "auto", "referrals"):
+        mode = "none"
+    async with limits.outbound():
+        out = await plan.plan(db(), task, per_step=per_step, mode=mode)
+    events.emit("plan", a=out.get("decomposed_by"), n=len(out.get("steps") or []))
+    return JSONResponse(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1555,6 +1622,49 @@ async def private_delete(body: dict, request: Request) -> JSONResponse:
     return JSONResponse({"status": "deleted" if gone else "not_found",
                          "owner": owner, "private_entries": store.private_count(conn, owner)},
                         status_code=200 if gone else 404)
+
+
+@app.get("/pricing", include_in_schema=False)
+def pricing_page():
+    """What costs what. A visitor who cannot find this assumes "free for now"."""
+    body = """
+<h1>Pricing</h1>
+<p class="lede">Search, publishing, the console, the validator, the data feeds and the API are
+free, without a key, with no time limit. A key raises your allowances. Ranking is never sold.</p>
+
+<h2>Free, no key</h2>
+<ul>
+<li>Search, including federation across every public ARD registry.</li>
+<li>Publishing: submit a domain or an endpoint, get indexed, keep the entry current.</li>
+<li>The console: audit, coverage, demand, and the doctor for any domain.</li>
+<li>Every data feed: liveness, reliability, tool safety, state of MCP, adoption.</li>
+<li>Rate limits sized for a person or one agent. /audit is the expensive one at 30 an hour.</li>
+</ul>
+
+<h2>Verified, free</h2>
+<p>Prove you control a domain with one DNS record and you get a key. Same features, higher
+allowances (about six times), and searches made with the key are not logged at all.</p>
+
+<h2>Pro</h2>
+<p>For a service that calls this index on behalf of many users or agents. Allowances about
+thirty times the anonymous ones, and a person to email when something looks wrong. There is
+no self-serve checkout yet because nobody has asked; if you need it, ask, and the price will
+be a number rather than a form.</p>
+
+<h2>Private index</h2>
+<p>Your organisation's internal services, discoverable by your own agents, in their own tables,
+never mixed with the public index and never ranked against it. Built and isolated; priced when
+someone wants it.</p>
+
+<h2>What is never for sale</h2>
+<p>Position. A relevance score is relevance only, the specification says it must not be read as
+trust, and the benchmark this index publishes is only worth citing because its author cannot
+rig it. There are no sponsored results, no bids for placement, and no paid badges. Charging for
+access is fine; charging for rank would make everything else here worthless.</p>
+"""
+    html = render.page("Pricing", "What is free, what a key adds, and what is never for sale.",
+                       body, f"{config.PUBLIC_BASE}/pricing")
+    return HTMLResponse(html, headers=PAGE_CACHE)
 
 
 @app.get("/console", include_in_schema=False)
