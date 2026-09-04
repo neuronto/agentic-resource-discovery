@@ -96,7 +96,13 @@ UPSTREAMS = [
 # responding, so this is not hypothetical.
 LIVENESS_TIMEOUT_S   = float(os.getenv("NEURONTO_LIVENESS_TIMEOUT", "6"))
 LIVENESS_MAX_AGE_H   = _i("NEURONTO_LIVENESS_MAX_AGE_H", 24)
+# The bound on a whole probe, not on one request within it. Redirects are
+# followed, so the timeout above is a per-hop budget and cannot bound a probe.
+LIVENESS_DEADLINE_S  = float(os.getenv("NEURONTO_LIVENESS_DEADLINE", "12"))
 LIVENESS_CONCURRENCY = _i("NEURONTO_LIVENESS_CONCURRENCY", 12)
+# How many probes are committed together. Small enough that a killed sweep
+# loses little, large enough that the writer is not opened once per host.
+LIVENESS_CHUNK       = _i("NEURONTO_LIVENESS_CHUNK", 100)
 # Dead entries are demoted, never silently deleted: a service can come back,
 # and a registry that forgets is as bad as one that lies.
 DEAD_PENALTY = float(os.getenv("NEURONTO_DEAD_PENALTY", "0.35"))

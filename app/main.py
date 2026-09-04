@@ -146,9 +146,38 @@ def _warm_all() -> None:
         print(f"page cache: warmed {built} page(s)", flush=True)
 
 
+SHADOWED_PATHS: list[str] = []
+
+
+def _find_shadowed() -> list[str]:
+    """Paths claimed more than once for the same verb.
+
+    The commercial layer registers partway down this module, so anything it
+    installs wins over a core route defined below that point. That is how a paid
+    `/adoption` came to shadow the public adoption page, which is in the
+    navigation and the sitemap, and nothing said a word.
+
+    Checked at startup rather than at registration because only here is every
+    route known. It warns rather than raises: keeping the registry up outranks
+    this. The paid test suite asserts the list is empty, so the warning is not
+    the only thing standing between us and doing it again.
+    """
+    seen: dict[tuple, int] = {}
+    for r in app.router.routes:
+        path = getattr(r, "path", None)
+        for m in (getattr(r, "methods", None) or ()):
+            if path:
+                seen[(m, path)] = seen.get((m, path), 0) + 1
+    return sorted(f"{m} {p}" for (m, p), n in seen.items() if n > 1)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     db()
+    SHADOWED_PATHS[:] = _find_shadowed()
+    if SHADOWED_PATHS:
+        print("WARNING: routes claimed more than once, the first registration wins: "
+              + ", ".join(SHADOWED_PATHS), flush=True)
     # In a thread: warming touches every tool row and would otherwise block the
     # event loop, and therefore every request, for the whole of startup.
     threading.Thread(target=_warm_all, name="page-warm", daemon=True).start()
@@ -216,6 +245,56 @@ async def _timing(request: Request, call_next):
     for k, v in _SECURITY.items():
         resp.headers.setdefault(k, v)
     return resp
+
+
+_LITERAL_METHODS: dict[str, set[str]] = {}
+
+
+def _literal_methods() -> dict[str, set[str]]:
+    """Every route path with no parameters, mapped to the verbs it accepts.
+
+    Built once, lazily, on the first 404 rather than at import: the commercial
+    layer registers its routes after this module is read, and an index built too
+    early would have been missing exactly the paths most likely to be called
+    with the wrong verb.
+    """
+    if not _LITERAL_METHODS:
+        for r in app.router.routes:
+            path = getattr(r, "path", None)
+            methods = getattr(r, "methods", None)
+            if path and methods and "{" not in path:
+                _LITERAL_METHODS.setdefault(path, set()).update(methods)
+    return _LITERAL_METHODS
+
+
+@app.middleware("http")
+async def _wrong_verb_is_405(request: Request, call_next):
+    """A 404 on a path that exists under another verb is a lie. Answer 405.
+
+    `GET /mcp` returning 404 told SDK clients the endpoint was not there and
+    cost two days of handshakes that never completed. That was repaired route by
+    route, which meant every route added afterwards inherited the bug again:
+    eight of them had it, including both endpoints our own documentation tells
+    strangers to call.
+
+    The catch-all `GET /{slug}` is why the router never gets to answer for
+    itself, so this runs on the way out instead, and only for paths with no
+    parameters, which the catch-all is not.
+    """
+    resp = await call_next(request)
+    if resp.status_code != 404:
+        return resp
+    path = request.url.path
+    allowed = _literal_methods().get(path) or _literal_methods().get(path.rstrip("/"))
+    if not allowed or request.method in allowed:
+        return resp
+    verbs = sorted(allowed | {"OPTIONS"})
+    return JSONResponse(
+        status_code=405,
+        headers={"Allow": ", ".join(verbs), "Cache-Control": "no-store"},
+        content={"error": "method_not_allowed",
+                 "detail": f"{path} exists but does not accept {request.method}. "
+                           f"Allowed: {', '.join(sorted(allowed))}. Contract: /api-docs"})
 
 
 @app.exception_handler(RecursionError)
@@ -1319,8 +1398,15 @@ def demand_endpoint(domain: str = Query(..., min_length=3),
     d = store.demand_for(db(), host, days, limit, include_probe=bool(include_probe))
     events.emit("demand", a=host, n=d.get("impressions"))
     if not d["indexed"]:
-        return JSONResponse(status_code=404, content={
-            "domain": host, "status": "not_indexed",
+        # 200, not 404. A 404 says the endpoint is not there, so a client that
+        # believes the status code never reads the sentence telling it what to
+        # do next, and a real visitor hit exactly that moments after running an
+        # audit. "Nothing of yours is indexed yet" is a successful answer to
+        # "what demand do I have", the same way an absent ranking is a measured
+        # nothing rather than a missing measurement.
+        return JSONResponse(status_code=200, content={
+            "domain": host, "status": "not_indexed", "indexed": False,
+            "impressions": 0, "distinct_queries": 0, "queries": [],
             "detail": ("nothing from this domain is in the index yet, so there is no "
                        "demand to report. Submit it at " + config.PUBLIC_BASE + "/submit"),
         })
