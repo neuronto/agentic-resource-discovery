@@ -50,3 +50,15 @@ sdk/**/*.egg-info/
 
 # Distribution and rank tracking: names competitors, never published.
 presence/
+
+# HARD RULE: paid features are never published.
+#
+# The open source project is a complete, conformant ARD registry: index, crawl,
+# search, federation, submissions, conformance, badge, benchmark, every data
+# feed and the SDKs. Anyone can run all of it, forever, with no key.
+#
+# The commercial layer is what is sold on top: the publisher analytics engine,
+# advanced multi-step discovery, tiers, allowances and metering. It is imported
+# optionally and the core does not know what is in it. It never leaves this
+# machine, and nothing under app/ may import from it.
+commercial/
