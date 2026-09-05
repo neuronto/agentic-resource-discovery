@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Why every ARD registry gives you a different answer</title>
-<meta name="description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<link rel="canonical" href="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
+<title>Why your MCP server returns 404, and the seven other ways it fails</title>
+<meta name="description" content="The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occurs and what actually causes it: 404 stale listings, 422 wrappers, 405 SSE-era paths, TLS handshakes and rate limits.">
+<link rel="canonical" href="https://neuronto.com/blog/why-your-mcp-server-returns-404">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Neuronto ARD Registry">
-<meta property="og:title" content="Why every ARD registry gives you a different answer">
-<meta property="og:description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<meta property="og:url" content="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
-<meta property="og:image" content="https://neuronto.com/img/federation.jpg">
+<meta property="og:title" content="Why your MCP server returns 404, and the seven other ways it fails">
+<meta property="og:description" content="The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occurs and what actually causes it: 404 stale listings, 422 wrappers, 405 SSE-era paths, TLS handshakes and rate limits.">
+<meta property="og:url" content="https://neuronto.com/blog/why-your-mcp-server-returns-404">
+<meta property="og:image" content="https://neuronto.com/img/errors.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://neuronto.com/img/federation.jpg">
+<meta name="twitter:image" content="https://neuronto.com/img/errors.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer#post", "headline": "Why every ARD registry gives you a different answer", "description": "We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.", "image": "https://neuronto.com/img/federation.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does federation: auto mean in ARD?", "acceptedAnswer": {"@type": "Answer", "text": "The ARD specification defines three federation modes and makes auto the default: a registry queries upstream registries, merges their results with its own, and returns a single unified set. The alternatives are referrals, where the registry returns pointers to its peers, and none, where it answers only from its own index."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "As measured on 31 August 2026, none of the four incumbent public registries implemented the default federation mode. Requesting federation: auto returned results identical to federation: none on every one, with each registry's own domain as the only source."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-your-mcp-server-returns-404#post", "headline": "Why your MCP server returns 404, and the seven other ways it fails", "description": "The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occurs and what actually causes it: 404 stale listings, 422 wrappers, 405 SSE-era paths, TLS handshakes and rate limits.", "image": "https://neuronto.com/img/errors.jpg", "datePublished": "2026-09-05", "dateModified": "2026-09-05", "url": "https://neuronto.com/blog/why-your-mcp-server-returns-404", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-your-mcp-server-returns-404"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Why does my MCP server return 404?", "acceptedAnswer": {"@type": "Answer", "text": "Almost always because the URL in the listing is not the URL the server is served at any more. It is the most common failure in the ecosystem, affecting 1,237 of 8,593 endpoints tested. Check the path in your published entry against the path your server actually binds, including the trailing segment."}}, {"@type": "Question", "name": "What does a 422 from an MCP server mean?", "acceptedAnswer": {"@type": "Answer", "text": "Something is answering at that address but it is not speaking the Model Context Protocol. The usual cause is a wrapper, a proxy or an API gateway that accepts the request and rejects the JSON-RPC body. 1,160 endpoints returned this."}}, {"@type": "Question", "name": "Why does my MCP endpoint return 405?", "acceptedAnswer": {"@type": "Answer", "text": "The method is wrong for that path. This is very often an SSE-era URL: the older HTTP+SSE transport used a different path shape, and clients using streamable HTTP POST to a path that only accepts GET. 563 endpoints returned this."}}, {"@type": "Question", "name": "Could not connect to your MCP server, what do I check first?", "acceptedAnswer": {"@type": "Answer", "text": "In order: is the host resolving at all, is TLS completing, does the exact path in your listing exist, and does a POST with a JSON-RPC initialize body get a JSON-RPC response. Those four checks separate a dead host from a stale path from a non-protocol wrapper."}}, {"@type": "Question", "name": "Does requiring authentication count as a broken MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "No. An endpoint answering 401 or 403 to an anonymous handshake is behaving correctly. 2,094 endpoints did exactly that. It is only a problem if your listing does not say so, because then every agent discovers the requirement by failing."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -492,81 +492,147 @@ th,td,.dsc,p.src{font-size:12.5px}
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="art">
-<p class="kick">Federation, original measurement</p>
-<h1>Why every ARD registry gives you a different answer</h1>
-<p class="meta">31 August 2026 · 7 min read</p>
-<img class="hero" src="/img/federation.jpg" alt="Four separate constellations of white points weaving into one braided channel" width="1344" height="768">
-<p class="stand">We put the same 26 queries to every public ARD registry. The <b>union of their indexes was 68% larger than the largest single one</b>, and not one of them implemented <code>federation: auto</code>, the mode the specification makes the default. Asking for it returned byte-identical results to asking for nothing.</p>
+<p class="kick">Diagnosis</p>
+<h1>Why your MCP server returns 404</h1>
+<p class="meta">5 September 2026 · 8 min read</p>
+<img class="hero" src="/img/errors.jpg" alt="A single dark door handle lit from one side, the door slightly ajar with nothing behind it" width="1344" height="768">
+<p class="stand">We tried to shake hands with every MCP endpoint in the public registries. <b>3,847 of 8,593</b> failed, and the failures are not evenly spread: eight causes account for almost all of them. Here is each one, how often it happens, and what it means when it is yours.</p>
 
-<h2>The test</h2>
-<p>Four public ARD registries existed when we measured: GitHub Agent Finder, WellKnown, Hugging Face
-Discover and Desvela. We asked each the same 26 probe queries spanning search, email, databases,
-images, payments, scraping and the rest, and counted the distinct resources each returned.</p>
-<table><thead><tr><th>Registry</th><th>Distinct entries surfaced</th></tr></thead><tbody>
-<tr><td>WellKnown</td><td>1,239</td></tr>
-<tr><td>Hugging Face Discover</td><td>412</td></tr>
-<tr><td>GitHub Agent Finder</td><td>344</td></tr>
-<tr><td>Desvela</td><td>93</td></tr>
-<tr><td><b>Union of all four</b></td><td><b>2,080</b></td></tr>
-</tbody></table>
-<p>The union is <b>68% larger</b> than the best single index. Every client that picks one registry is
-silently choosing to miss most of what exists.</p>
+<h2>The distribution</h2>
 
-<h2>The specification already solved this</h2>
-<p>Section 5.4 defines three federation modes, and <code>auto</code> is the default:</p>
-<p class="pull">The Registry queries upstream registries automatically, merges their results with its
-own, and returns a unified response.</p>
-<p>So we tested it, sending each registry the same query twice: once with
-<code>federation: none</code> and once with <code>auto</code>.</p>
-<p><b>Every one returned identical results</b>, and the only <code>source</code> value in any
-response was the registry's own domain. The default mode of the specification is, at time of
-writing, unimplemented across the entire ecosystem.</p>
-<div class="try">
-<h4>Try it on your own resource</h4>
-<p>Publishing takes one file. This checks whether it worked, across every public registry rather
-than only ours.</p>
-<pre>pip install ard-publish
-python -m ard_publish <b>check</b> yourdomain.com</pre>
-<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
-<a class="btn btn--g" href="/publish">Publishing guide</a></div>
-</div>
-<h2>Why fuse on rank rather than score</h2>
-<p>Merging results from several registries is not concatenation, because their scores are not
-comparable. Measured across the same result sets:</p>
-<table><thead><tr><th>Registry</th><th>Score range</th><th>Average spread within a result set</th></tr></thead><tbody>
-<tr><td>GitHub Agent Finder</td><td>90 to 100</td><td>32.5</td></tr>
-<tr><td>WellKnown</td><td>66 to 80</td><td>6.7</td></tr>
-<tr><td>Hugging Face Discover</td><td>44 to 98</td><td>40.8</td></tr>
-<tr><td>Desvela</td><td>21 to 85</td><td>39.7</td></tr>
-</tbody></table>
-<p>One registry crams everything into the top ten points, another spreads across sixty. A score of 94
-means something different in each, and merging on score would import whichever calibration was
-loudest.</p>
-<p><b>Reciprocal rank fusion</b> avoids this by using only the ordering each registry produced, the
-part each one is genuinely competent about, and discarding the numbers. A resource several registries
-rank highly rises; one that a single registry loves does not dominate.</p>
+<p>We ran a standard handshake against every MCP endpoint in the public registries: an
+<b>initialize</b> call, then <b>tools/list</b>, read-only, short timeout, no retries. Of 8,593
+endpoints, 3,847 failed. The failures cluster hard.</p>
 
-<h2>A note on that 6.7</h2>
-<p>WellKnown holds the largest incumbent index and returns accurate top results, but the average gap
-between its best and worst result is under seven points. A client cannot tell a strong match from a
-weak one, which defeats the purpose of returning a score at all. Ranking is only useful when the gap
-is legible.</p>
+<table>
+<thead><tr><th>Failure</th><th>Count</th><th>Share of all attempts</th></tr></thead>
+<tbody>
+<tr><td class="mono">http 404</td><td class="mono">1,237</td><td class="mono">14.4%</td></tr>
+<tr><td class="mono">http 422</td><td class="mono">1,160</td><td class="mono">13.5%</td></tr>
+<tr><td class="mono">http 405</td><td class="mono">563</td><td class="mono">6.6%</td></tr>
+<tr><td class="mono">connect error</td><td class="mono">319</td><td class="mono">3.7%</td></tr>
+<tr><td class="mono">http 429</td><td class="mono">211</td><td class="mono">2.5%</td></tr>
+<tr><td class="mono">TLS handshake</td><td class="mono">128</td><td class="mono">1.5%</td></tr>
+<tr><td class="mono">http 402</td><td class="mono">69</td><td class="mono">0.8%</td></tr>
+<tr><td class="mono">timeouts</td><td class="mono">54</td><td class="mono">0.6%</td></tr>
+</tbody>
+</table>
 
-<h2>What we built</h2>
-<p>Neuronto implements <code>federation: auto</code> as specified: concurrent fan-out to every other
-public registry under a hard time budget, fused with reciprocal rank fusion, with the per-upstream
-outcome reported back so a caller can see which registries answered and which timed out.</p>
-<pre>{"results": [ ... ],
- "federation": {"mode": "auto", "registries": [
-   {"name": "WellKnown", "ok": true,  "ms": 449, "results": 20},
-   {"name": "Desvela",   "ok": true,  "ms": 143, "results": 7},
-   {"name": "GitHub Agent Finder", "ok": false, "error": "budget exceeded"}
- ]}}</pre>
-<p>A slow peer costs the budget and nothing more. And because a federating registry serves other
-people's indexes, it is useful from the first day rather than after years of crawling, which is the
-argument for building one while the ecosystem is still small.</p>
-<p>The full comparison, including conformance results, is on the <a href="/registries">registries
-page</a>.</p>
+<p>Three causes are two thirds of everything that goes wrong. They have completely different
+fixes, and they are routinely confused with each other because a client usually reports all three
+the same way.</p>
+
+<h2>404: the listing is stale</h2>
+
+<p>The largest single failure in the ecosystem, and the least interesting technically. Nothing is
+served at the address the entry gives. The server may be perfectly healthy somewhere else.</p>
+
+<p>What causes it, in rough order of frequency: the path changed and the listing did not, a
+deployment moved to a new host, the entry was written by hand with a typo, or the service was
+retired and nothing removed the row.</p>
+
+<p class="pull">1,237 endpoints answer 404 at the address their own listing gives. That is a
+bookkeeping failure, not a protocol failure, and no directory noticed.</p>
+
+<h3>How to check yours</h3>
+
+<pre>curl -i -X POST https://your-host/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+       "protocolVersion":"2025-06-18","capabilities":{},
+       "clientInfo":{"name":"check","version":"1"}}}'</pre>
+
+<p>A 404 here means the path is wrong. Try it without the trailing segment, and with it. A
+surprising share of these are a missing or extra <span class="mono">/mcp</span>.</p>
+
+<h2>422: something answers, but not the protocol</h2>
+
+<p>The second largest, and the one people find hardest to diagnose, because the host is up and TLS
+works and a browser shows a page. The request reached something that accepted it and rejected the
+body.</p>
+
+<p>The usual culprits are an API gateway in front of the server, a framework rejecting the
+JSON-RPC shape because it expects a specific schema, or a URL that points at documentation rather
+than at the protocol endpoint. The last is more common than it should be: a listing points at the
+project homepage and the homepage answers.</p>
+
+<h3>How to tell them apart</h3>
+
+<p>Look at what came back. A JSON-RPC error object means you reached a protocol implementation
+that disliked your request. HTML means you reached a web page. A gateway error mentioning a
+schema or a validation failure means something is in front of your server.</p>
+
+<h2>405: an SSE-era path</h2>
+
+<p>563 endpoints answered method not allowed. Most are a version-skew problem rather than a bug.
+The older HTTP+SSE transport used a different path shape, and a client speaking streamable HTTP
+POSTs to a path that only ever accepted GET.</p>
+
+<p>If you serve the older transport and want current clients to work, the fix is to serve
+streamable HTTP at the path your listing advertises. If you have deliberately dropped SSE, answer
+<b>405 with an Allow header</b> rather than 404, because a 404 tells a client the endpoint does not
+exist and it will stop trying. That distinction is worth more than it sounds: a 404 on the wrong
+verb reads to an SDK as "there is nothing here", and the client gives up on a server that works.</p>
+
+<h2>Connection errors and TLS: the host is gone or misconfigured</h2>
+
+<p>319 connection errors and 128 TLS handshake failures. These are infrastructure rather than
+protocol. The TLS group is worth a specific check, because it fails silently for a subset of
+clients: an incomplete certificate chain often works in a browser, which fills in the missing
+intermediate from its own store, and fails in a plain HTTP client that does not.</p>
+
+<pre>openssl s_client -connect your-host:443 -servername your-host &lt; /dev/null 2&gt;&amp;1 | head -20</pre>
+
+<p>If that shows a verify error but the browser is happy, your chain is incomplete. Every
+non-browser client will fail, and agents are non-browser clients.</p>
+
+<h2>429 and 402: answering, but not to you</h2>
+
+<p>211 endpoints rate limited a single handshake, and 69 asked for payment. Both are legitimate,
+and both are invisible in most listings. A server that rate limits discovery traffic is
+effectively opting out of being discovered, which may be intentional and is worth doing knowingly
+rather than by default.</p>
+
+<h2>Not a failure: 2,094 endpoints that wanted credentials</h2>
+
+<p>Worth stating plainly because it is often counted as breakage. An endpoint answering 401 or 403
+to an anonymous handshake is correct. It answered. It has a policy.</p>
+
+<p>The problem is not the requirement, it is that the requirement is undiscoverable. An agent
+finds out by failing, and a developer finds out from a stack trace. If your server needs
+credentials, say so in your published entry: it costs you nothing and saves every client one
+failed round trip.</p>
+
+<h2>A four-step triage</h2>
+
+<ol>
+<li><b>Does the host resolve and complete TLS?</b> If not, it is infrastructure and nothing else
+matters. Use the openssl check above, not a browser.</li>
+<li><b>Does the exact path in your listing exist?</b> Not the homepage, the path. This catches the
+1,237.</li>
+<li><b>Does a JSON-RPC initialize get a JSON-RPC response?</b> If you get HTML or a gateway error,
+something is in front of you.</li>
+<li><b>Does your listing say what you require?</b> Auth, rate limits, payment. Undocumented
+requirements are indistinguishable from breakage.</li>
+</ol>
+
+<h2>The part nobody checks</h2>
+
+<p>Every number here exists because somebody connected. Most directories do not: they accept a
+submission, store the URL, and display it indefinitely. That is why an ecosystem can carry 1,237
+endpoints that answer 404 at their own registered address without anybody raising it.</p>
+
+<p>If you publish a server, the useful habit is to run the handshake against your own listing on a
+schedule, from outside your network, the way a stranger would. Almost every failure above is
+something you can see in one request and would never see from inside.</p>
+
+<h2>Method</h2>
+
+<p>Two read-only JSON-RPC calls per endpoint over streamable HTTP, short timeout, no retries, one
+attempt per endpoint per sweep, project user agent. Endpoints answering 401 or 403 recorded as
+auth-required rather than failed. 8,593 endpoints attempted, figures as of 5 September 2026. No
+tool was invoked.</p>
 <div class="try">
 <h4>Use Neuronto from your agent</h4>
 <p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
@@ -576,7 +642,7 @@ page</a>.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a><a class="pc" href="/blog/half-of-mcp-servers-dont-answer"><div class="t">We asked 7,708 MCP servers to say hello. 46% couldn't.</div><div class="d">We ran a standard initialize handshake against every MCP endpoint in the public registri…</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>

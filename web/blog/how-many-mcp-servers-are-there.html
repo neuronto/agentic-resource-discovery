@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Why every ARD registry gives you a different answer</title>
-<meta name="description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<link rel="canonical" href="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
+<title>How many MCP servers are there? We counted, then we called them.</title>
+<meta name="description" content="A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every public registry, 8,593 endpoints we could try, and 2,652 that answered a handshake with a real tool list.">
+<link rel="canonical" href="https://neuronto.com/blog/how-many-mcp-servers-are-there">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Neuronto ARD Registry">
-<meta property="og:title" content="Why every ARD registry gives you a different answer">
-<meta property="og:description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<meta property="og:url" content="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
-<meta property="og:image" content="https://neuronto.com/img/federation.jpg">
+<meta property="og:title" content="How many MCP servers are there? We counted, then we called them.">
+<meta property="og:description" content="A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every public registry, 8,593 endpoints we could try, and 2,652 that answered a handshake with a real tool list.">
+<meta property="og:url" content="https://neuronto.com/blog/how-many-mcp-servers-are-there">
+<meta property="og:image" content="https://neuronto.com/img/census.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://neuronto.com/img/federation.jpg">
+<meta name="twitter:image" content="https://neuronto.com/img/census.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer#post", "headline": "Why every ARD registry gives you a different answer", "description": "We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.", "image": "https://neuronto.com/img/federation.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does federation: auto mean in ARD?", "acceptedAnswer": {"@type": "Answer", "text": "The ARD specification defines three federation modes and makes auto the default: a registry queries upstream registries, merges their results with its own, and returns a single unified set. The alternatives are referrals, where the registry returns pointers to its peers, and none, where it answers only from its own index."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "As measured on 31 August 2026, none of the four incumbent public registries implemented the default federation mode. Requesting federation: auto returned results identical to federation: none on every one, with each registry's own domain as the only source."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/how-many-mcp-servers-are-there#post", "headline": "How many MCP servers are there? We counted, then we called them.", "description": "A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every public registry, 8,593 endpoints we could try, and 2,652 that answered a handshake with a real tool list.", "image": "https://neuronto.com/img/census.jpg", "datePublished": "2026-09-05", "dateModified": "2026-09-05", "url": "https://neuronto.com/blog/how-many-mcp-servers-are-there", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/how-many-mcp-servers-are-there"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How many MCP servers are there in total?", "acceptedAnswer": {"@type": "Answer", "text": "8,753 MCP servers are indexed here as of 5 September 2026, aggregated from the official MCP Registry, every public ARD registry, and manifests published on publishers' own domains. Any single directory shows fewer, because no directory sees all the others."}}, {"@type": "Question", "name": "How many MCP servers actually work?", "acceptedAnswer": {"@type": "Answer", "text": "Of 8,593 endpoints we could attempt a connection to, 2,652 completed a standard initialize handshake and returned a tool list, which is 30.9 percent. A further 2,094 answered but required credentials first, which is legitimate. 3,847 failed outright."}}, {"@type": "Question", "name": "Why is the number of MCP servers different everywhere you look?", "acceptedAnswer": {"@type": "Answer", "text": "Because each directory counts a different thing. Some count registry submissions, some count GitHub repositories, some count entries that have never been contacted. A listing is a claim somebody typed, and counting claims produces a larger number than counting servers that answer."}}, {"@type": "Question", "name": "What is the largest category of agentic resource?", "acceptedAnswer": {"@type": "Answer", "text": "MCP servers, at 8,753 of 14,821 total entries. Skills follow at 2,810 and OpenAPI services at 2,670. A2A agents remain small at 80, which is the clearest signal that the agent-to-agent layer is much earlier than the tool layer."}}, {"@type": "Question", "name": "Where can I search these MCP servers?", "acceptedAnswer": {"@type": "Answer", "text": "Every entry and all 97,472 verified tools are searchable at neuronto.com, over REST, MCP and A2A. The tool data comes from the servers themselves, returned by their own tools/list response rather than copied from a description."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -492,81 +492,127 @@ th,td,.dsc,p.src{font-size:12.5px}
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="art">
-<p class="kick">Federation, original measurement</p>
-<h1>Why every ARD registry gives you a different answer</h1>
-<p class="meta">31 August 2026 · 7 min read</p>
-<img class="hero" src="/img/federation.jpg" alt="Four separate constellations of white points weaving into one braided channel" width="1344" height="768">
-<p class="stand">We put the same 26 queries to every public ARD registry. The <b>union of their indexes was 68% larger than the largest single one</b>, and not one of them implemented <code>federation: auto</code>, the mode the specification makes the default. Asking for it returned byte-identical results to asking for nothing.</p>
+<p class="kick">Census</p>
+<h1>How many MCP servers are there?</h1>
+<p class="meta">5 September 2026 · 7 min read</p>
+<img class="hero" src="/img/census.jpg" alt="A dense grid of small metal tokens on black, roughly a third catching the light" width="1344" height="768">
+<p class="stand">The short answer is <b>8,753</b> in this index, drawn from every public registry and from manifests on publishers' own domains. The useful answer is smaller: of <b>8,593</b> endpoints we could actually try, <b>2,652</b> answered a standard handshake and returned a tool list. Counting listings and counting servers are different measurements, and only one of them tells an agent anything.</p>
 
-<h2>The test</h2>
-<p>Four public ARD registries existed when we measured: GitHub Agent Finder, WellKnown, Hugging Face
-Discover and Desvela. We asked each the same 26 probe queries spanning search, email, databases,
-images, payments, scraping and the rest, and counted the distinct resources each returned.</p>
-<table><thead><tr><th>Registry</th><th>Distinct entries surfaced</th></tr></thead><tbody>
-<tr><td>WellKnown</td><td>1,239</td></tr>
-<tr><td>Hugging Face Discover</td><td>412</td></tr>
-<tr><td>GitHub Agent Finder</td><td>344</td></tr>
-<tr><td>Desvela</td><td>93</td></tr>
-<tr><td><b>Union of all four</b></td><td><b>2,080</b></td></tr>
-</tbody></table>
-<p>The union is <b>68% larger</b> than the best single index. Every client that picks one registry is
-silently choosing to miss most of what exists.</p>
+<h2>Why the number is always different</h2>
 
-<h2>The specification already solved this</h2>
-<p>Section 5.4 defines three federation modes, and <code>auto</code> is the default:</p>
-<p class="pull">The Registry queries upstream registries automatically, merges their results with its
-own, and returns a unified response.</p>
-<p>So we tested it, sending each registry the same query twice: once with
-<code>federation: none</code> and once with <code>auto</code>.</p>
-<p><b>Every one returned identical results</b>, and the only <code>source</code> value in any
-response was the registry's own domain. The default mode of the specification is, at time of
-writing, unimplemented across the entire ecosystem.</p>
-<div class="try">
-<h4>Try it on your own resource</h4>
-<p>Publishing takes one file. This checks whether it worked, across every public registry rather
-than only ours.</p>
-<pre>pip install ard-publish
-python -m ard_publish <b>check</b> yourdomain.com</pre>
-<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
-<a class="btn btn--g" href="/publish">Publishing guide</a></div>
-</div>
-<h2>Why fuse on rank rather than score</h2>
-<p>Merging results from several registries is not concatenation, because their scores are not
-comparable. Measured across the same result sets:</p>
-<table><thead><tr><th>Registry</th><th>Score range</th><th>Average spread within a result set</th></tr></thead><tbody>
-<tr><td>GitHub Agent Finder</td><td>90 to 100</td><td>32.5</td></tr>
-<tr><td>WellKnown</td><td>66 to 80</td><td>6.7</td></tr>
-<tr><td>Hugging Face Discover</td><td>44 to 98</td><td>40.8</td></tr>
-<tr><td>Desvela</td><td>21 to 85</td><td>39.7</td></tr>
-</tbody></table>
-<p>One registry crams everything into the top ten points, another spreads across sixty. A score of 94
-means something different in each, and merging on score would import whichever calibration was
-loudest.</p>
-<p><b>Reciprocal rank fusion</b> avoids this by using only the ordering each registry produced, the
-part each one is genuinely competent about, and discarding the numbers. A resource several registries
-rank highly rises; one that a single registry loves does not dominate.</p>
+<p>Ask three directories how many MCP servers exist and you get three answers, none of them
+wrong. They are counting different things. One counts submissions to a registry. One counts
+GitHub repositories with a matching topic. One counts entries it has aggregated from the others,
+including duplicates under different names.</p>
 
-<h2>A note on that 6.7</h2>
-<p>WellKnown holds the largest incumbent index and returns accurate top results, but the average gap
-between its best and worst result is under seven points. A client cannot tell a strong match from a
-weak one, which defeats the purpose of returning a score at all. Ranking is only useful when the gap
-is legible.</p>
+<p>None of those is a count of servers. They are counts of <b>claims</b>, and a claim is a line
+somebody typed into a form. The gap between a claim and a server is the whole subject of this
+post.</p>
 
-<h2>What we built</h2>
-<p>Neuronto implements <code>federation: auto</code> as specified: concurrent fan-out to every other
-public registry under a hard time budget, fused with reciprocal rank fusion, with the per-upstream
-outcome reported back so a caller can see which registries answered and which timed out.</p>
-<pre>{"results": [ ... ],
- "federation": {"mode": "auto", "registries": [
-   {"name": "WellKnown", "ok": true,  "ms": 449, "results": 20},
-   {"name": "Desvela",   "ok": true,  "ms": 143, "results": 7},
-   {"name": "GitHub Agent Finder", "ok": false, "error": "budget exceeded"}
- ]}}</pre>
-<p>A slow peer costs the budget and nothing more. And because a federating registry serves other
-people's indexes, it is useful from the first day rather than after years of crawling, which is the
-argument for building one while the ecosystem is still small.</p>
-<p>The full comparison, including conformance results, is on the <a href="/registries">registries
-page</a>.</p>
+<h2>The census</h2>
+
+<p>This index aggregates the official MCP Registry, every public ARD registry, an OpenAPI corpus,
+GitHub, Hugging Face, and manifests served on publishers' own domains. Deduplicated by endpoint
+and identifier, as of 5 September 2026:</p>
+
+<table>
+<thead><tr><th>Resource family</th><th>Entries</th></tr></thead>
+<tbody>
+<tr><td>MCP servers</td><td class="mono">8,753</td></tr>
+<tr><td>Skills</td><td class="mono">2,810</td></tr>
+<tr><td>OpenAPI services</td><td class="mono">2,670</td></tr>
+<tr><td>Documentation resources</td><td class="mono">279</td></tr>
+<tr><td>A2A agents</td><td class="mono">80</td></tr>
+<tr><td>Registries and catalogs</td><td class="mono">28</td></tr>
+<tr><td><b>Total entries</b></td><td class="mono"><b>14,821</b></td></tr>
+</tbody>
+</table>
+
+<p>Two things in that table are worth pausing on. MCP servers are 59 percent of everything, which
+matches the attention the protocol gets. And <b>A2A agents are 80</b>. The agent-to-agent layer is
+talked about as though it were comparable to the tool layer, and by published-resource count it is
+roughly one percent of it.</p>
+
+<h2>Then we called them</h2>
+
+<p>A count of listings tells an agent nothing, because an agent does not consume listings, it
+connects. So we connected: two read-only JSON-RPC calls per endpoint, <b>initialize</b> and then
+<b>tools/list</b>, over streamable HTTP, with a short timeout and no retries. No tool was ever
+called.</p>
+
+<p>8,593 endpoints were reachable enough to attempt. Here is what happened.</p>
+
+<table>
+<thead><tr><th>Outcome</th><th>Endpoints</th><th>Share</th></tr></thead>
+<tbody>
+<tr><td>Answered with a tool list</td><td class="mono">2,652</td><td class="mono">30.9%</td></tr>
+<tr><td>Answered, credentials required</td><td class="mono">2,094</td><td class="mono">24.4%</td></tr>
+<tr><td>Failed outright</td><td class="mono">3,847</td><td class="mono">44.8%</td></tr>
+</tbody>
+</table>
+
+<p class="pull">Fewer than a third of listed MCP servers will complete a handshake with a stranger
+and tell them what they can do.</p>
+
+<p>The middle row is the one most often misread. <b>Credentials required is not a failure.</b>
+Those 2,094 endpoints are real servers behaving correctly: they answered, and they want
+authentication before exposing a tool list. What is notable is that almost no directory records
+this, so an agent discovers it by trying and failing, and a developer discovers it by reading a
+stack trace.</p>
+
+<h2>What the failures actually were</h2>
+
+<table>
+<thead><tr><th>Failure</th><th>Endpoints</th><th>Usually means</th></tr></thead>
+<tbody>
+<tr><td class="mono">404</td><td class="mono">1,237</td><td>The listing is stale. Nothing is served at the address the entry gives.</td></tr>
+<tr><td class="mono">422</td><td class="mono">1,160</td><td>Something answers, but it does not speak the protocol.</td></tr>
+<tr><td class="mono">405</td><td class="mono">563</td><td>Wrong method at that path, often an SSE-era URL.</td></tr>
+<tr><td class="mono">connection error</td><td class="mono">319</td><td>The host is gone.</td></tr>
+<tr><td class="mono">429</td><td class="mono">211</td><td>Rate limited before it would talk to us.</td></tr>
+<tr><td class="mono">handshake</td><td class="mono">128</td><td>TLS failed.</td></tr>
+<tr><td class="mono">402</td><td class="mono">69</td><td>Payment required.</td></tr>
+</tbody>
+</table>
+
+<p><b>1,237 endpoints answer 404 at the address their own listing gives.</b> That is the single
+largest failure mode, and it is not a protocol problem. It is a bookkeeping problem: something
+moved and no directory noticed, because most directories never check.</p>
+
+<h2>What survives</h2>
+
+<p>The servers that did answer returned <b>97,472 verified tools</b> between them, each one with
+the name, description and JSON input schema its own server reported. That is the part worth
+having. A tool description copied from a README is marketing. A tool description returned by
+<b>tools/list</b> is what the agent will actually be handed.</p>
+
+<p>It also produces a finding that is easy to miss in aggregate: <b>122 different publishers ship
+a tool called <span class="mono">search</span></b>. 62 ship one called <span class="mono">fetch</span>.
+Names alone cannot disambiguate an ecosystem at this size, which is a discovery problem rather
+than a naming problem.</p>
+
+<h2>How to read any MCP server count, including this one</h2>
+
+<ol>
+<li><b>Ask what was counted.</b> Submissions, repositories, or endpoints that answered. The three
+differ by a factor of three.</li>
+<li><b>Ask when.</b> A count with no date is a number from an unknown moment. 1,237 dead endpoints
+in this index were live at some point.</li>
+<li><b>Ask whether anyone connected.</b> Most counts are of text, not of servers.</li>
+<li><b>Treat auth-required as working.</b> A directory that reports it as broken is measuring its
+own lack of credentials.</li>
+</ol>
+
+<p>Our own count fails the second test the moment you read this page in a month, which is why the
+date is in the standfirst and the underlying figures are served as JSON.</p>
+
+<h2>Method</h2>
+
+<p>Entries deduplicated by endpoint URL and by <span class="mono">urn:air</span> identifier.
+Introspection is two read-only calls with a short timeout, no retries, and a project user agent.
+Endpoints answering 401 or 403 are recorded as auth-required rather than failed. Counts are as of
+5 September 2026 and move daily. No tool was invoked at any point, and nothing here required
+credentials from anyone.</p>
 <div class="try">
 <h4>Use Neuronto from your agent</h4>
 <p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
@@ -576,7 +622,7 @@ page</a>.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a><a class="pc" href="/blog/half-of-mcp-servers-dont-answer"><div class="t">We asked 7,708 MCP servers to say hello. 46% couldn't.</div><div class="d">We ran a standard initialize handshake against every MCP endpoint in the public registri…</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>

@@ -3002,8 +3002,13 @@ def blog_index():
     f = WEB / "blog" / "index.html"
     if not f.exists():
         return JSONResponse(status_code=404, content={"error": "not_found"})
+    # Short, with a long revalidation window. This file changes only when a post
+    # is published, and a thirty minute TTL meant a new post stayed invisible at
+    # the edge for half an hour after the build, which reads as a failed deploy.
+    # stale-while-revalidate keeps the cache useful without that.
     return HTMLResponse(f.read_text(encoding="utf-8"),
-                        headers={"Cache-Control": "public, max-age=1800"})
+                        headers={"Cache-Control":
+                                 "public, max-age=300, stale-while-revalidate=1800"})
 
 
 @app.get("/blog/{slug}", include_in_schema=False)

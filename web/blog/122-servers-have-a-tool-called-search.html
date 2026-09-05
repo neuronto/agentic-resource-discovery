@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Why every ARD registry gives you a different answer</title>
-<meta name="description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<link rel="canonical" href="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
+<title>122 servers have a tool called search. How does an agent pick one?</title>
+<meta name="description" content="Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a tool called search, 62 ship fetch. Why names cannot disambiguate an ecosystem, and what actually does.">
+<link rel="canonical" href="https://neuronto.com/blog/122-servers-have-a-tool-called-search">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Neuronto ARD Registry">
-<meta property="og:title" content="Why every ARD registry gives you a different answer">
-<meta property="og:description" content="We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.">
-<meta property="og:url" content="https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer">
-<meta property="og:image" content="https://neuronto.com/img/federation.jpg">
+<meta property="og:title" content="122 servers have a tool called search. How does an agent pick one?">
+<meta property="og:description" content="Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a tool called search, 62 ship fetch. Why names cannot disambiguate an ecosystem, and what actually does.">
+<meta property="og:url" content="https://neuronto.com/blog/122-servers-have-a-tool-called-search">
+<meta property="og:image" content="https://neuronto.com/img/collision.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://neuronto.com/img/federation.jpg">
+<meta name="twitter:image" content="https://neuronto.com/img/collision.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer#post", "headline": "Why every ARD registry gives you a different answer", "description": "We asked all four public Agentic Resource Discovery registries the same 26 queries. Their combined index was 68% larger than the best single one.", "image": "https://neuronto.com/img/federation.jpg", "datePublished": "2026-08-31", "dateModified": "2026-08-31", "url": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/why-every-ard-registry-gives-a-different-answer"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What does federation: auto mean in ARD?", "acceptedAnswer": {"@type": "Answer", "text": "The ARD specification defines three federation modes and makes auto the default: a registry queries upstream registries, merges their results with its own, and returns a single unified set. The alternatives are referrals, where the registry returns pointers to its peers, and none, where it answers only from its own index."}}, {"@type": "Question", "name": "Do ARD registries federate with each other?", "acceptedAnswer": {"@type": "Answer", "text": "As measured on 31 August 2026, none of the four incumbent public registries implemented the default federation mode. Requesting federation: auto returned results identical to federation: none on every one, with each registry's own domain as the only source."}}]}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "BlogPosting", "@id": "https://neuronto.com/blog/122-servers-have-a-tool-called-search#post", "headline": "122 servers have a tool called search. How does an agent pick one?", "description": "Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a tool called search, 62 ship fetch. Why names cannot disambiguate an ecosystem, and what actually does.", "image": "https://neuronto.com/img/collision.jpg", "datePublished": "2026-09-05", "dateModified": "2026-09-05", "url": "https://neuronto.com/blog/122-servers-have-a-tool-called-search", "author": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com"}, "publisher": {"@type": "Organization", "name": "Neuronto", "url": "https://neuronto.com", "logo": "https://neuronto.com/favicon.svg"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://neuronto.com/blog/122-servers-have-a-tool-called-search"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Why do so many MCP servers use the same tool names?", "acceptedAnswer": {"@type": "Answer", "text": "Because the names are the obvious ones. search, fetch, get_product and list_categories describe common operations, and each publisher names theirs without seeing anybody else's. 122 publishers independently arrived at search, which is what happens when a namespace has no coordination and no need for one."}}, {"@type": "Question", "name": "How does an agent choose between identically named tools?", "acceptedAnswer": {"@type": "Answer", "text": "Not by the name. It has to use the surrounding evidence: the description the server returned, the parameter names in the input schema, what the publisher says the resource is for, and which publisher it is. A discovery layer that matches on names alone cannot separate 122 candidates."}}, {"@type": "Question", "name": "What makes a tool description good for discovery?", "acceptedAnswer": {"@type": "Answer", "text": "Specificity about the job rather than the mechanism, and parameter names that say what they carry. A tool called send described as sends via the configured channel is unusable. The same tool called send_sms with parameters to_phone_number and message_body explains itself without a description at all."}}, {"@type": "Question", "name": "Do parameter names matter for tool discovery?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and more than most publishers expect. Parameter names are frequently the clearest statement of what a tool actually does, which is why this index includes them in the searchable document rather than indexing names and descriptions alone."}}, {"@type": "Question", "name": "How many verified tools are there across MCP servers?", "acceptedAnswer": {"@type": "Answer", "text": "97,472 as of 5 September 2026, each returned by a live server's own tools/list response rather than copied from documentation, across 5,079 servers that answered with a tool list."}}]}]}</script>
 <style>
 :root{
   --bg:#09090A; --panel:#0E0E10; --panel2:#131315;
@@ -492,81 +492,123 @@ th,td,.dsc,p.src{font-size:12.5px}
   <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
 </div></nav>
 <div class="wrap"><article class="art">
-<p class="kick">Federation, original measurement</p>
-<h1>Why every ARD registry gives you a different answer</h1>
-<p class="meta">31 August 2026 · 7 min read</p>
-<img class="hero" src="/img/federation.jpg" alt="Four separate constellations of white points weaving into one braided channel" width="1344" height="768">
-<p class="stand">We put the same 26 queries to every public ARD registry. The <b>union of their indexes was 68% larger than the largest single one</b>, and not one of them implemented <code>federation: auto</code>, the mode the specification makes the default. Asking for it returned byte-identical results to asking for nothing.</p>
+<p class="kick">Measurement</p>
+<h1>122 servers have a tool called search</h1>
+<p class="meta">5 September 2026 · 6 min read</p>
+<img class="hero" src="/img/collision.jpg" alt="Many identical unlabelled keys overlapping on black, one lit and the rest in shadow" width="1344" height="768">
+<p class="stand">We read the tool list of every MCP server that would answer us, 97,472 tools in all. The most common names are not distinctive at all: <b>122 different publishers</b> ship a tool called <span class="mono">search</span>, and 62 ship one called <span class="mono">fetch</span>. An agent choosing between them cannot use the name, because the name is the same.</p>
 
-<h2>The test</h2>
-<p>Four public ARD registries existed when we measured: GitHub Agent Finder, WellKnown, Hugging Face
-Discover and Desvela. We asked each the same 26 probe queries spanning search, email, databases,
-images, payments, scraping and the rest, and counted the distinct resources each returned.</p>
-<table><thead><tr><th>Registry</th><th>Distinct entries surfaced</th></tr></thead><tbody>
-<tr><td>WellKnown</td><td>1,239</td></tr>
-<tr><td>Hugging Face Discover</td><td>412</td></tr>
-<tr><td>GitHub Agent Finder</td><td>344</td></tr>
-<tr><td>Desvela</td><td>93</td></tr>
-<tr><td><b>Union of all four</b></td><td><b>2,080</b></td></tr>
-</tbody></table>
-<p>The union is <b>68% larger</b> than the best single index. Every client that picks one registry is
-silently choosing to miss most of what exists.</p>
+<h2>The collision</h2>
 
-<h2>The specification already solved this</h2>
-<p>Section 5.4 defines three federation modes, and <code>auto</code> is the default:</p>
-<p class="pull">The Registry queries upstream registries automatically, merges their results with its
-own, and returns a unified response.</p>
-<p>So we tested it, sending each registry the same query twice: once with
-<code>federation: none</code> and once with <code>auto</code>.</p>
-<p><b>Every one returned identical results</b>, and the only <code>source</code> value in any
-response was the registry's own domain. The default mode of the specification is, at time of
-writing, unimplemented across the entire ecosystem.</p>
-<div class="try">
-<h4>Try it on your own resource</h4>
-<p>Publishing takes one file. This checks whether it worked, across every public registry rather
-than only ours.</p>
-<pre>pip install ard-publish
-python -m ard_publish <b>check</b> yourdomain.com</pre>
-<div class="row"><a class="btn btn--w" href="/console">Run a free audit</a>
-<a class="btn btn--g" href="/publish">Publishing guide</a></div>
-</div>
-<h2>Why fuse on rank rather than score</h2>
-<p>Merging results from several registries is not concatenation, because their scores are not
-comparable. Measured across the same result sets:</p>
-<table><thead><tr><th>Registry</th><th>Score range</th><th>Average spread within a result set</th></tr></thead><tbody>
-<tr><td>GitHub Agent Finder</td><td>90 to 100</td><td>32.5</td></tr>
-<tr><td>WellKnown</td><td>66 to 80</td><td>6.7</td></tr>
-<tr><td>Hugging Face Discover</td><td>44 to 98</td><td>40.8</td></tr>
-<tr><td>Desvela</td><td>21 to 85</td><td>39.7</td></tr>
-</tbody></table>
-<p>One registry crams everything into the top ten points, another spreads across sixty. A score of 94
-means something different in each, and merging on score would import whichever calibration was
-loudest.</p>
-<p><b>Reciprocal rank fusion</b> avoids this by using only the ordering each registry produced, the
-part each one is genuinely competent about, and discarding the numbers. A resource several registries
-rank highly rises; one that a single registry loves does not dominate.</p>
+<p>We connect to every MCP server we index and read the tool list it returns. Not the README, not
+the registry description: the server's own <b>tools/list</b> response. That is 97,472 tools across
+5,079 servers that answered.</p>
 
-<h2>A note on that 6.7</h2>
-<p>WellKnown holds the largest incumbent index and returns accurate top results, but the average gap
-between its best and worst result is under seven points. A client cannot tell a strong match from a
-weak one, which defeats the purpose of returning a score at all. Ranking is only useful when the gap
-is legible.</p>
+<p>Sorted by how many distinct publishers ship a tool of that exact name:</p>
 
-<h2>What we built</h2>
-<p>Neuronto implements <code>federation: auto</code> as specified: concurrent fan-out to every other
-public registry under a hard time budget, fused with reciprocal rank fusion, with the per-upstream
-outcome reported back so a caller can see which registries answered and which timed out.</p>
-<pre>{"results": [ ... ],
- "federation": {"mode": "auto", "registries": [
-   {"name": "WellKnown", "ok": true,  "ms": 449, "results": 20},
-   {"name": "Desvela",   "ok": true,  "ms": 143, "results": 7},
-   {"name": "GitHub Agent Finder", "ok": false, "error": "budget exceeded"}
- ]}}</pre>
-<p>A slow peer costs the budget and nothing more. And because a federating registry serves other
-people's indexes, it is useful from the first day rather than after years of crawling, which is the
-argument for building one while the ecosystem is still small.</p>
-<p>The full comparison, including conformance results, is on the <a href="/registries">registries
-page</a>.</p>
+<table>
+<thead><tr><th>Tool name</th><th>Publishers shipping it</th></tr></thead>
+<tbody>
+<tr><td class="mono">search</td><td class="mono">122</td></tr>
+<tr><td class="mono">fetch</td><td class="mono">62</td></tr>
+<tr><td class="mono">get_product</td><td class="mono">52</td></tr>
+<tr><td class="mono">search_products</td><td class="mono">52</td></tr>
+<tr><td class="mono">list_categories</td><td class="mono">51</td></tr>
+<tr><td class="mono">get_pricing</td><td class="mono">39</td></tr>
+<tr><td class="mono">get_article</td><td class="mono">35</td></tr>
+<tr><td class="mono">list_projects</td><td class="mono">30</td></tr>
+</tbody>
+</table>
+
+<p>Nobody did anything wrong here. Each publisher named their tool the obvious thing, without
+seeing anybody else's. This is simply what an uncoordinated namespace looks like once it is large
+enough, and it will get worse rather than better.</p>
+
+<h2>Why this is a discovery problem, not a naming problem</h2>
+
+<p>The instinct is to want namespacing, and the protocol already effectively has it: tools are
+scoped to the server you connected to, so there is no collision at call time. Your agent is
+talking to one server and its <span class="mono">search</span> is unambiguous.</p>
+
+<p>The collision happens one step earlier, at the moment nobody has connected yet. An agent that
+needs to search something has to choose a server first. If 122 candidates offer a tool with the
+same name, the name has contributed nothing to that choice.</p>
+
+<p class="pull">Names disambiguate at call time and are useless at discovery time. Discovery has to
+run on everything except the name.</p>
+
+<h2>What actually separates them</h2>
+
+<p>Four signals, in roughly increasing order of how much work they take to produce and how much
+they are worth.</p>
+
+<h3>1. The description the server returned</h3>
+
+<p>Not the marketing sentence. The string the server hands a client in <b>tools/list</b>, which is
+what the model will actually read. A large share of them describe the mechanism rather than the
+job: sends via the configured channel, queries the backing store, returns results. Those are
+accurate and they do not tell a chooser anything.</p>
+
+<h3>2. The parameter names</h3>
+
+<p>Consistently the most underrated signal in the whole stack. A tool named
+<span class="mono">send</span> with a description of sends a message tells you almost nothing. The
+same tool with parameters <span class="mono">to_phone_number</span> and
+<span class="mono">message_body</span> tells you it is SMS, without reading a word of prose.</p>
+
+<p>Parameter names are written by engineers for engineers, which makes them unusually honest.
+They are rarely marketing. It is why we put them into the searchable document rather than
+indexing names and descriptions alone, and the measured effect on retrieval was positive.</p>
+
+<h3>3. What the publisher says the resource is for</h3>
+
+<p>The <span class="mono">representativeQueries</span> field of an ARD manifest is the one place a
+publisher states, in plain language, the requests their resource answers well. It is the only
+statement of intent in the whole chain that is not our inference, and it is the single highest
+leverage thing an author can write.</p>
+
+<p>Most are wasted. The common failure is a category label: document processing, payments
+infrastructure, AI-powered search. Those match everything and therefore nothing. What works is a
+sentence with a verb that somebody would actually type: extract line items from a scanned invoice.</p>
+
+<h3>4. Which publisher it is</h3>
+
+<p>Whether the manifest asserting a resource was served by the domain it names is checkable, and
+it is the difference between a claim and a credential. It does not tell you a tool is good. It
+tells you who is responsible for it, which is often the deciding factor when two candidates look
+equally plausible.</p>
+
+<h2>What this means if you publish a tool</h2>
+
+<ol>
+<li><b>Assume your tool name is taken.</b> If it is search, fetch or get_&lt;noun&gt;, dozens of
+others have it. Do not rename it, that is not the fix. Make everything around it carry the
+meaning.</li>
+<li><b>Write the description for a stranger.</b> The reader is a model that has never seen your
+product and will not visit your site. Say what job it does, not how it is implemented.</li>
+<li><b>Name parameters like they are documentation</b>, because at discovery time they are.
+<span class="mono">to_phone_number</span> beats <span class="mono">recipient</span> beats
+<span class="mono">arg1</span>.</li>
+<li><b>Write representativeQueries as sentences.</b> Three to eight, each with a verb, each
+describing something you are genuinely one of the better answers to.</li>
+</ol>
+
+<h2>What it means if you build a client</h2>
+
+<p>Do not match on tool names. It feels like the precise thing to do and it is the least
+informative field available at the moment you need to choose. Rank on the whole document: the
+description, the parameters, the publisher's stated queries, and the publisher itself.</p>
+
+<p>And expect ties. When 122 candidates offer the same capability, the honest answer is often
+several, ranked, with the evidence attached, rather than one confident pick.</p>
+
+<h2>Method</h2>
+
+<p>Tool records come from live <b>tools/list</b> responses over streamable HTTP, one read-only
+introspection per server, no retries, no tool invoked. Counts are distinct publishers per exact
+tool name across 97,472 tools from 5,079 responding servers, as of 5 September 2026. Names are
+compared exactly, so <span class="mono">search</span> and <span class="mono">search_docs</span>
+are separate rows, which makes these figures a floor rather than a ceiling.</p>
 <div class="try">
 <h4>Use Neuronto from your agent</h4>
 <p>One call searches this index and every other public ARD registry. No key, no signup. Or install it as an MCP server and let the agent search from the interface it already speaks.</p>
@@ -576,7 +618,7 @@ page</a>.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/half-of-mcp-servers-dont-answer"><div class="t">We asked 7,708 MCP servers to say hello. 46% couldn't.</div><div class="d">We ran a standard initialize handshake against every MCP endpoint in the public registri…</div></a></div></article></div>
 <footer><div class="wrap">
   <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
   <div>An Agentic Resource Discovery registry, index and publisher.</div>

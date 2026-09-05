@@ -68,6 +68,7 @@ HEAD = """<!doctype html>
 <link rel="ard" href="{base}/.well-known/ard.json">
 <link rel="ai-catalog" href="{base}/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
+<meta property="og:site_name" content="Neuronto ARD Registry">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc}">
 <meta property="og:url" content="{base}{path}">
@@ -156,12 +157,12 @@ def build(a, style, others):
 
 
 def build_index(arts, style):
-    html = HEAD.format(title="Neuronto Blog, Agentic Resource Discovery, measured",
+    html = HEAD.format(title="Neuronto ARD Registry Blog: Agentic Resource Discovery, measured",
                        desc="Analysis and walkthroughs on Agentic Resource Discovery, built on our own "
                             "measurements of every public ARD registry and the MCP ecosystem.",
                        base=BASE, path="/blog", img="discovery",
                        schema=json.dumps({"@context": "https://schema.org", "@type": "Blog",
-                                          "name": "Neuronto Blog", "url": f"{BASE}/blog"}),
+                                          "name": "Neuronto ARD Registry Blog", "url": f"{BASE}/blog"}),
                        style=style + CSS)
     html += ('<p class="kick">Writing</p><h1>Agent discovery, measured</h1>'
              '<p class="stand">What we find when we actually test the agent web, and how to '

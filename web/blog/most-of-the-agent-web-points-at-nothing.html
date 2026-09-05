@@ -10,8 +10,8 @@
 <link rel="ard" href="https://neuronto.com/.well-known/ard.json">
 <link rel="ai-catalog" href="https://neuronto.com/.well-known/ai-catalog.json">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Most of the agent web points at nothing | ARD index quality">
 <meta property="og:site_name" content="Neuronto ARD Registry">
+<meta property="og:title" content="Most of the agent web points at nothing | ARD index quality">
 <meta property="og:description" content="We probed registered agent endpoints: on one chain, one of 55 answered. Discovery without verification builds an index of dead links.">
 <meta property="og:url" content="https://neuronto.com/blog/most-of-the-agent-web-points-at-nothing">
 <meta property="og:image" content="https://neuronto.com/img/what-is-ard.jpg">
@@ -66,7 +66,7 @@ nav .wrap{display:flex;align-items:center;gap:15px;width:100%}
 @media(max-width:860px){.navlinks{display:none}.navsearch{min-width:0;flex:1}}
 @media(max-width:600px){.nav-cta{display:none}}
 
-/* hero, editorial */
+/* hero , editorial */
 .hero{padding:86px 0 56px;max-width:820px}
 .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mut);margin:0 0 22px;display:flex;align-items:center;gap:10px}
@@ -78,7 +78,7 @@ h1.display em{font-style:normal;color:var(--mut);font-weight:600}
 .lede b{color:var(--fg);font-weight:500}
 .heroBtns{display:flex;gap:9px;flex-wrap:wrap}
 
-.searchWrap{max-width:700px;margin:44px 0 0}
+.searchWrap{max-width:780px;margin:46px 0 0}
 .bigsearch{display:flex;align-items:center;gap:11px;background:var(--panel);
   border:1px solid var(--line2);border-radius:10px;padding:0 15px;height:50px;
   transition:border-color .15s,box-shadow .15s}
@@ -86,6 +86,66 @@ h1.display em{font-style:normal;color:var(--mut);font-weight:600}
 .bigsearch input{flex:1;background:0;border:0;outline:0;color:var(--fg);font-family:inherit;
   font-size:15px;font-weight:300}
 .bigsearch input::placeholder{color:var(--mut)}
+/* ── Hero search ─────────────────────────────────────────────────────────
+   The homepage's primary object, so it is scaled as one. `--hero` is a
+   modifier rather than a change to `.bigsearch` because the console's audit
+   box is the same component at its original size and must stay there. */
+.bigsearch--hero{
+  height:clamp(58px,7.2vw,74px);
+  border-radius:16px;
+  padding:0 9px 0 20px;
+  gap:14px;
+  background:linear-gradient(180deg,#111114 0%,#0B0B0D 100%);
+  border-color:#232329;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.028),0 20px 44px -26px rgba(0,0,0,.95);
+  transition:border-color .18s ease,box-shadow .18s ease;
+}
+.bigsearch--hero:focus-within{
+  border-color:#3B3B45;
+  box-shadow:0 0 0 4px rgba(250,250,250,.05),inset 0 1px 0 rgba(255,255,255,.05),
+             0 22px 50px -26px rgba(0,0,0,1);
+}
+.bigsearch--hero>svg{flex:none;width:18px;height:18px}
+/* The field is the positioning context for the animated hint, and it carries
+   the type scale so the input and the hint can never drift apart. */
+.hsField{position:relative;flex:1;min-width:0;display:flex;align-items:center;
+  font-size:clamp(16px,1.5vw,19px);font-weight:300;letter-spacing:-.011em}
+/* 16px is a floor, not a preference: iOS Safari zooms the viewport when a
+   focused input is set smaller, and never zooms back out. */
+.bigsearch--hero input{width:100%;flex:1;background:0;border:0;outline:0;color:var(--fg);
+  font-family:inherit;font-size:inherit;font-weight:inherit;letter-spacing:inherit}
+.bigsearch--hero input::placeholder{color:var(--mut)}
+/* Shown only once the animation takes over; before then the input's own
+   placeholder is doing the job, so no script means no empty box. */
+.hsType{display:none;position:absolute;inset:0;align-items:center;pointer-events:none;
+  color:var(--mut);font:inherit;letter-spacing:inherit;white-space:nowrap;overflow:hidden;
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
+          mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent)}
+.hsType.on{display:flex}
+.hsCaret{width:1.5px;height:1.15em;margin-left:2px;background:var(--fg2);border-radius:1px;
+  animation:hsBlink 1.06s steps(1,end) infinite;flex:none}
+/* A caret that blinks while characters are arriving reads as a stutter, so it
+   goes solid for exactly as long as the phrase is being written. */
+.hsType.writing .hsCaret{animation:none;opacity:1}
+@keyframes hsBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.bigsearch--hero .btn{flex:none;height:clamp(44px,5.6vw,56px);padding:0 clamp(16px,2vw,22px);
+  border-radius:11px;font-size:clamp(13px,1.1vw,15px)}
+.bigsearch--hero .btn svg{display:none}
+.exs .ex{font-size:11.5px;padding:6px 13px}
+
+@media(max-width:560px){
+  /* The word "Search" costs about 90px of a 360px screen. An arrow says the
+     same thing in 44, which is what the hint needs to stay unclipped. */
+  .bigsearch--hero{padding:0 7px 0 16px;gap:11px;border-radius:14px}
+  .bigsearch--hero .btn{padding:0;width:46px;justify-content:center}
+  .bigsearch--hero .btn span{display:none}
+  .bigsearch--hero .btn svg{display:block;width:17px;height:17px}
+}
+@media(prefers-reduced-motion:reduce){
+  .hsCaret{animation:none}
+  .bigsearch--hero{transition:none}
+}
+
 .exs{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
 .ex{font-family:var(--mono);font-size:11px;color:var(--mut);background:0;border:1px solid var(--line);
   border-radius:99px;padding:4px 11px;cursor:pointer;transition:.15s}
@@ -106,14 +166,14 @@ h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
 .prose p{margin:0 0 1.05rem}
 .prose b,.prose strong{color:var(--fg);font-weight:500}
 
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(206px,1fr));gap:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(206px,100%),1fr));gap:12px}
 .card{border:1px solid var(--line);border-radius:var(--r);padding:17px 18px 12px;background:var(--panel)}
 .card .k{font-size:12.5px;color:var(--fg2)}
 .card .v{font-size:29px;font-weight:500;letter-spacing:-.03em;margin:5px 0 12px;
   font-variant-numeric:tabular-nums;line-height:1}
 .spark{display:block;width:100%;height:54px}
 
-.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:11px}
+.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(310px,100%),1fr));gap:11px}
 .qbox{border:1px solid var(--line);border-radius:var(--r);padding:19px 21px;background:var(--panel)}
 .qbox h3{font-size:14.5px;font-weight:500;margin:0 0 8px;color:var(--fg)}
 .qbox p{margin:0;color:var(--fg2);font-size:13.5px;font-weight:300;line-height:1.6}
@@ -140,6 +200,10 @@ h3{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
   font-family:var(--mono);font-size:11px;color:var(--mut)}
 .tick{border:1px solid var(--line);border-radius:99px;padding:3px 9px}
 .tick.on{color:var(--fg2);border-color:var(--line2)}.tick.off{color:var(--dim)}
+.fedopt{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);white-space:nowrap;cursor:pointer;user-select:none}
+.fedopt input{accent-color:var(--fg2);margin:0}
+.fedopt:hover{color:var(--fg2)}
+.tick.more{cursor:pointer;text-decoration:underline dotted}
 .tick.hi{color:#09090A;background:#FAFAFA;border-color:#FAFAFA}
 .sc{font-family:var(--mono);font-size:15px;font-weight:500;width:38px;text-align:right;flex:none}
 .badge{font-family:var(--mono);font-size:10px;color:var(--fg2);border:1px solid var(--line2);
@@ -422,28 +486,11 @@ th,td,.dsc,p.src{font-size:12.5px}
 </head>
 <body>
 <nav><div class="wrap">
-  <a class="brand" href="/">
-    <img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
-    <span class="wm">neuronto</span>
-  </a>
-  <div class="navlinks"><div class="ng"><button type="button" class="ngt" aria-expanded="false">Discover<svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="ngp"><div class="ngp-in"><a href="/tools/"><span class="ni">Tools by capability</span><span class="nd">25 pages of verified tools, grouped by what they do</span></a><a href="/ard-publishers"><span class="ni">Publishers</span><span class="nd">Every domain verified to serve an ARD manifest</span></a><a href="/ard-registries"><span class="ni">ARD registries</span><span class="nd">Every public registry, compared and measured</span></a><a href="/adoption"><span class="ni">Adoption</span><span class="nd">Who publishes a manifest, and on which path</span></a></div></div></div><div class="ng"><button type="button" class="ngt" aria-expanded="false">Publish<svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="ngp"><div class="ngp-in"><a href="/submit"><span class="ni">Submit to the index</span><span class="nd">An MCP endpoint or a domain, verified before listing</span></a><a href="/publish"><span class="ni">Publishing guide</span><span class="nd">Write a manifest and be found, in about ten minutes</span></a><a href="/ard-manifest-generator"><span class="ni">Manifest generator</span><span class="nd">Build one from what your domain already serves</span></a><a href="/badge"><span class="ni">Badge</span><span class="nd">Show what was verified about your resources</span></a></div></div></div><div class="ng"><button type="button" class="ngt" aria-expanded="false">Verify<svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="ngp"><div class="ngp-in"><a href="/console"><span class="ni">Free audit</span><span class="nd">Can agents discover your domain, and who outranks you</span></a><a href="/ard-conformance"><span class="ni">Conformance</span><span class="nd">The official test, and how to run it on anything</span></a><a href="/bench"><span class="ni">ARD-Bench</span><span class="nd">Retrieval measured head to head across registries</span></a></div></div></div><div class="ng"><button type="button" class="ngt" aria-expanded="false">Learn<svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="ngp"><div class="ngp-in"><a href="/what-is-ard"><span class="ni">What is ARD</span><span class="nd">The specification, in plain terms</span></a><a href="/blog"><span class="ni">Writing</span><span class="nd">What we measured, and what it turned out to mean</span></a><a href="/api-docs"><span class="ni">API</span><span class="nd">Every endpoint, with schemas</span></a><a href="/published"><span class="ni">Where we are</span><span class="nd">Source, dataset, packages and registry entries</span></a></div></div></div></div>
-  <form class="navsearch" action="/tools" method="get" role="search">
-    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5"
-      fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 11l3.5 3.5"
-      stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-    <input id="navq" name="q" placeholder="Search tools" aria-label="Search tools"
-           autocomplete="off" spellcheck="false">
-  </form>
-  <a class="btn btn--w nav-cta" href="/console">Free audit</a>
-  <div class="navquick">
-    <a href="/tools/">Tools</a><a href="/submit">Submit</a><a href="/console">Audit</a>
-  </div>
-  <button type="button" class="burger" aria-label="Menu" aria-expanded="false">
-    <span></span><span></span></button>
-</div>
-<div class="mobmenu"><div class="wrap"><div class="msgrid"><div class="ms"><h4>Discover</h4><a href="/tools/">Tools by capability</a><a href="/ard-publishers">Publishers</a><a href="/ard-registries">ARD registries</a><a href="/adoption">Adoption</a></div><div class="ms"><h4>Publish</h4><a href="/submit">Submit to the index</a><a href="/publish">Publishing guide</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/badge">Badge</a></div><div class="ms"><h4>Verify</h4><a href="/console">Free audit</a><a href="/ard-conformance">Conformance</a><a href="/bench">ARD-Bench</a></div><div class="ms"><h4>Learn</h4><a href="/what-is-ard">What is ARD</a><a href="/blog">Writing</a><a href="/api-docs">API</a><a href="/published">Where we are</a></div></div>
-  <a class="btn btn--w" href="/console" style="margin-top:18px">Free audit</a>
-</div></div></nav>
+  <a class="brand" href="/"><img src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true">
+    <span class="wm">neuronto</span></a>
+  <div class="navlinks"><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/blog">Blog</a></div>
+  <a class="btn btn--w nav-cta" href="/console" style="margin-left:auto">Free audit</a>
+</div></nav>
 <div class="wrap"><article class="art">
 <p class="kick">Index quality, original measurement</p>
 <h1>Most of the agent web points at nothing</h1>
@@ -515,77 +562,9 @@ your endpoints answer, alongside which registries return you.</p>
 <pre>claude mcp add --transport http neuronto <b>https://neuronto.com/mcp</b></pre>
 <div class="row"><a class="btn btn--w" href="/publish">How to publish</a>
 <a class="btn btn--g" href="/console">Audit your domain</a></div>
-</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/half-of-mcp-servers-dont-answer"><div class="t">We asked 7,708 MCP servers to say hello. 46% couldn't.</div><div class="d">We ran a standard initialize handshake against every MCP endpoint in the public registri…</div></a><a class="pc" href="/blog/how-ai-agents-discover-tools"><div class="t">How AI agents discover tools at runtime</div><div class="d">Agents can only use what someone wired in beforehand. Agentic Resource Discovery changes…</div></a><a class="pc" href="/blog/why-every-ard-registry-gives-a-different-answer"><div class="t">Why every ARD registry gives you a different answer</div><div class="d">We asked all four public Agentic Resource Discovery registries the same 26 queries. Thei…</div></a></div></article></div>
+</div><h2>Keep reading</h2><div class="cards3"><a class="pc" href="/blog/how-many-mcp-servers-are-there"><div class="t">How many MCP servers are there?</div><div class="d">A census of the Model Context Protocol ecosystem: 8,753 MCP servers indexed across every…</div></a><a class="pc" href="/blog/why-your-mcp-server-returns-404"><div class="t">Why your MCP server returns 404</div><div class="d">The eight failure modes we saw across 8,593 MCP endpoints, with how often each one occur…</div></a><a class="pc" href="/blog/122-servers-have-a-tool-called-search"><div class="t">122 servers have a tool called search</div><div class="d">Across 97,472 verified tools, the most common names collide hard: 122 publishers ship a …</div></a></div></article></div>
 <footer><div class="wrap">
-  <div class="fgrid">
-    <div class="fg"><h4>Discover</h4><a href="/tools/">Tools by capability</a><a href="/ard-publishers">Publishers</a><a href="/ard-registries">ARD registries</a><a href="/adoption">Adoption</a></div><div class="fg"><h4>Publish</h4><a href="/submit">Submit to the index</a><a href="/publish">Publishing guide</a><a href="/ard-manifest-generator">Manifest generator</a><a href="/badge">Badge</a></div><div class="fg"><h4>Verify</h4><a href="/console">Free audit</a><a href="/ard-conformance">Conformance</a><a href="/bench">ARD-Bench</a></div><div class="fg"><h4>Learn</h4><a href="/what-is-ard">What is ARD</a><a href="/blog">Writing</a><a href="/api-docs">API</a><a href="/published">Where we are</a></div>
-    <div class="fg">
-      <h4>Contact</h4>
-      <a href="/published">Where we are published</a>
-      <a href="https://github.com/neuronto/agentic-resource-discovery">Source</a>
-      <a href="/.well-known/ard.json">ard.json</a>
-      <a href="/llms.txt">llms.txt</a>
-      <div class="femail"><span>Write to us</span>
-        <img src="/img/contact.png" alt="Contact address for Neuronto"
-             width="149" height="17" loading="lazy"></div>
-    </div>
-  </div>
-  <div class="fnote">An Agentic Resource Discovery registry, index and publisher.
-  Relevance scores are semantic only and are never a trust, compliance or safety rating.
-  A tool listed as verified was read from that server's own tools/list; verification is a
-  statement about reachability and capability, never about trustworthiness.</div>
+  <div class="fl"><a href="/">Index</a><a href="/what-is-ard">What is ARD</a><a href="/tools/">Tools</a><a href="/ard-publishers">Publishers</a><a href="/bench">Benchmark</a><a href="/adoption">Adoption</a><a href="/publish">Publish</a><a href="/submit">Submit</a><a href="/console">Console</a><a href="/registries">Registries</a><a href="/blog">Blog</a><a href="/published">Published</a><a href="/.well-known/ard.json">ard.json</a><a href="/llms.txt">llms.txt</a><a href="/api-docs">API</a><a href="https://github.com/neuronto/agentic-resource-discovery">source</a></div>
+  <div>An Agentic Resource Discovery registry, index and publisher.</div>
 </div></footer>
-<script>
-(function(){try{
- if(navigator.doNotTrack==="1"||navigator.msDoNotTrack==="1"||navigator.globalPrivacyControl)return;
- var t0=Date.now(),mx=0,done=false;
- function depth(){var h=document.documentElement.scrollHeight-innerHeight;
-   return h>0?Math.min(100,Math.round(scrollY/h*100)):100;}
- addEventListener("scroll",function(){var d=depth();if(d>mx)mx=d;},{passive:true});
- function send(t,x){
-   if(t==="end"){if(done)return;done=true;}
-   var o={t:t,p:location.pathname,r:document.referrer||"",vw:innerWidth,vh:innerHeight,
-          tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),
-          lang:(navigator.language||"").slice(0,5)};
-   for(var k in x)o[k]=x[k];
-   var s=JSON.stringify(o);
-   if(navigator.sendBeacon){navigator.sendBeacon("/e",new Blob([s],{type:"application/json"}));}
-   else{fetch("/e",{method:"POST",body:s,keepalive:true,headers:{"content-type":"application/json"}});}
- }
- addEventListener("load",function(){send("view",{lt:Math.round(performance.now())});});
- function bye(){send("end",{d:Math.round((Date.now()-t0)/1000),s:mx});}
- addEventListener("pagehide",bye);
- document.addEventListener("visibilitychange",function(){
-   if(document.visibilityState==="hidden")bye();});
-}catch(e){}})();
-</script>
-<script>
-(function(){
- var b=document.querySelector('.burger'), m=document.querySelector('.mobmenu');
- if(b&&m){b.addEventListener('click',function(){
-   var open=m.classList.toggle('open');
-   b.setAttribute('aria-expanded',open?'true':'false');
-   document.body.style.overflow=open?'hidden':'';
- });}
- // On a touch device hover never fires, so the trigger toggles its own panel.
- if(window.matchMedia('(hover: none)').matches){
-   document.querySelectorAll('.ngt').forEach(function(t){
-     t.addEventListener('click',function(e){
-       e.preventDefault();
-       var p=t.parentElement, was=p.classList.contains('on');
-       document.querySelectorAll('.ng.on').forEach(function(x){x.classList.remove('on');
-         x.querySelector('.ngt').setAttribute('aria-expanded','false');});
-       if(!was){p.classList.add('on');t.setAttribute('aria-expanded','true');}
-     });
-   });
- }
- document.addEventListener('keydown',function(e){
-   if(e.key!=='Escape')return;
-   document.querySelectorAll('.ng.on').forEach(function(x){x.classList.remove('on');});
-   if(m&&m.classList.contains('open')){m.classList.remove('open');
-     b.setAttribute('aria-expanded','false');document.body.style.overflow='';}
-   if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
- });
-})();
-</script>
 </body></html>
