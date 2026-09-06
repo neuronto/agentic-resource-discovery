@@ -79,6 +79,8 @@ def _init(domain: str) -> int:
         print("#   " + line, file=sys.stderr)
     print(f"#\n# Then: ard-publish validate .well-known/ard.json", file=sys.stderr)
     print(f"# And once it is live:  ard-publish submit {domain}", file=sys.stderr)
+    print(f"# Last step, once indexed: add the badge, {REGISTRY}/badge?domain={domain}",
+          file=sys.stderr)
     return 0
 
 
@@ -88,6 +90,8 @@ def _validate(path: str) -> int:
         print("valid, publishable")
         print("\nnext: serve it, then `ard-publish submit <your-domain>` so a registry "
               "has actually seen it. Publishing and being indexed are different things.",
+              file=sys.stderr)
+        print(f"last step, once indexed: add the badge, {REGISTRY}/badge?domain=<your-domain>",
               file=sys.stderr)
         return 0
     print(f"{len(problems)} problem(s):")
@@ -144,6 +148,8 @@ def _generate(domain: str) -> int:
     if d.get("hosted_at"):
         print(f"# also hosted at {d['hosted_at']} until you serve your own", file=sys.stderr)
     print(f"#\n# Then: ard-publish submit {domain}", file=sys.stderr)
+    for line in (d.get("how_to_adopt") or [])[-1:]:
+        print(f"# {line}", file=sys.stderr)
     return 0
 
 
@@ -162,6 +168,8 @@ def _submit(target: str) -> int:
         host = target.split("//")[-1].split("/")[0] if "//" in target else target
         print(f"\nnext: ard-publish check {host}   (which registries return you, and who "
               f"outranks you)", file=sys.stderr)
+        if d.get("next"):
+            print(f"\n{d['next']}", file=sys.stderr)
         return 0
     sub = d.get("submission") or {}
     if st == "pending" and sub:

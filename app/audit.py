@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from . import config
+from . import badge, config
 from .normalize import media_family
 
 HEADERS = {"user-agent": config.USER_AGENT, "accept": "application/json,*/*"}
@@ -269,8 +269,9 @@ def recommendations(disc: dict, conf: dict, cov: list[dict], domain: str = "") -
     """The next actions, most valuable first."""
     out = []
     if not disc["manifest"]:
-        return ["Serve an ARD manifest at /.well-known/ard.json. Nothing else "
-                "matters until a consumer can fetch one."]
+        return badge.with_last(
+            ["Serve an ARD manifest at /.well-known/ard.json. Nothing else "
+             "matters until a consumer can fetch one."], domain, False)
     if not disc["paths"]["well_known"]["found"] and disc["paths"]["legacy"]["found"]:
         out.append("Your manifest is only on the predecessor path. A conformant "
                    "consumer MUST fetch /.well-known/ard.json and MAY ignore "
@@ -324,7 +325,10 @@ def recommendations(disc: dict, conf: dict, cov: list[dict], domain: str = "") -
                        ". These have no submission path we could find, so they will reach "
                        "you on their own crawl schedule or not at all. What you control is "
                        "being conformant, reachable, and served on every discovery path.")
-    return out or ["Nothing outstanding. Re-run after any change to your catalogue."]
+    if not out:
+        out.append("Nothing outstanding. Re-run after any change to your catalogue.")
+    # The badge is the last step on every surface, indexed or not (badge.step).
+    return badge.with_last(out, domain, bool(here and here["indexed"]))
 
 
 async def run(domain: str, local_hits: int = 0) -> dict:

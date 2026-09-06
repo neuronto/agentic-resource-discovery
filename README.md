@@ -242,7 +242,7 @@ If your MCP server is in the index, a badge states what we verified: how many to
 server returned to `tools/list`, and whether the endpoint answers.
 
 ```markdown
-[![Neuronto verified tools](https://neuronto.com/badge/your.publisher.id.svg)](https://neuronto.com/console?domain=your.publisher.id)
+[![your.publisher.id on the Neuronto ARD Registry](https://neuronto.com/badge/your.publisher.id.svg)](https://neuronto.com/ard-publishers/your.publisher.id)
 ```
 
 The publisher id is the publisher segment of your URN, or your domain. The badge is a
@@ -335,6 +335,12 @@ satisfies the specification entry by entry, **which registries actually return y
 **who is returned instead of you** for the queries you asked to be found for, with what
 those entries have that you may not. Free, no signup. There is a browser version at
 [/console](https://neuronto.com/console).
+
+**Last step, whichever way you came in: add the badge.** Once a registry returns you, put
+it on your README or site. It states what was observed, the verified tool count and whether
+your endpoint answered, corrects itself when that changes, is free, and changes nothing
+about your indexing or ranking. Every response above ends with the same sentence and the
+paste-ready snippet; the [badge page](https://neuronto.com/badge) has the formats.
 
 ## Private entries
 

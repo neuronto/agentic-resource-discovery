@@ -1322,11 +1322,10 @@ async def audit_endpoint(body: dict) -> JSONResponse:
             + audit.competition_advice(comp)
         if hits:
             report["badge"] = badge.snippet(report["domain"])
-            report["recommendations"].append(
-                "Your resources are indexed and verified here, so you can show that on your "
-                "own site if you want to: " + f"{config.PUBLIC_BASE}/badge?domain={report['domain']}"
-                + ". It states the verified tool count and whether your endpoint answered, it "
-                "corrects itself, and displaying it changes nothing about your indexing.")
+        # Competition advice was appended after run() had already ended with the
+        # badge step, so re-seat it. Last means last on every surface.
+        report["recommendations"] = badge.with_last(
+            report["recommendations"], report["domain"], bool(hits))
     except Exception:
         pass
     # The audit fetched and validated the manifest, which is everything a
@@ -1541,6 +1540,9 @@ async def manifest_build(body: dict) -> JSONResponse:
             f"Serve this JSON yourself at https://{host}/.well-known/ard.json, or",
             f"point at ours: add to robots.txt   Agentmap: {config.PUBLIC_BASE}/m/{host}.json",
             "Serving it on your own domain is stronger: it is your statement, not ours.",
+            (f"Then index it: POST {{\"domain\": \"{host}\"}} to {config.PUBLIC_BASE}/submit, "
+             f"or run: ard-publish submit {host}"),
+            badge.step(host, False),
         ],
     })
 
@@ -1608,8 +1610,10 @@ async def claim_verify(body: dict) -> JSONResponse:
     # Our first verified third-party publisher published a DNS TXT record to
     # prove they owned their domain, which is close to the highest-friction
     # thing anyone can be asked for short of payment, and we never asked them
-    # for an img tag. The badge is also the only distribution mechanism in this
-    # ecosystem with evidence behind it, so not asking was the expensive half.
+    # for an img tag.
+    # Same precedent as /audit: one COUNT on the request connection.
+    hits = db().execute("SELECT COUNT(*) FROM entries WHERE publisher=?",
+                        (host,)).fetchone()[0]
     return JSONResponse({
         "domain": host, "verified": True, "api_key": key,
         "grants": [f"read and write private entries for {host}",
@@ -1624,6 +1628,7 @@ async def claim_verify(body: dict) -> JSONResponse:
             "links_to": ("your own page on this index, so it sends your reader "
                          "somewhere about you rather than to us"),
         },
+        "next": badge.step(host, bool(hits)),
     })
 
 
@@ -1939,9 +1944,8 @@ def adoption_endpoint(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Verification badges. Measured mechanism: 2,107 Glama badges sit in one
-# awesome-list README, 60.5% of its entries, while its directory pages rank for
-# nothing. The badge is the distribution channel; the pages never were.
+# Verification badges. A publisher embeds one; it states what was observed
+# about their resources and corrects itself when that stops being true.
 # ---------------------------------------------------------------------------
 
 @app.get("/badge/{publisher}.svg", include_in_schema=False)
@@ -2230,11 +2234,10 @@ def publisher_moved(host: str):
 def feed():
     """What changed in the agentic web, as a feed.
 
-    The one distribution mechanism we can run perpetually without asking anyone
-    for anything. Glama posts every newly indexed server; we publish something
-    they cannot, because it comes from probing rather than listing: an endpoint
-    that started answering, a server that gained or lost tools, a domain that
-    began publishing a manifest. A feed of verification events, not of listings.
+    A feed of verification events rather than of listings, because it comes from
+    probing rather than from a submission queue: an endpoint that started
+    answering, a server that gained or lost tools, a domain that began publishing
+    a manifest. It reports what changed about a resource, not that one was added.
     """
     conn = db()
     rows = conn.execute(
@@ -2300,20 +2303,18 @@ async def submit_endpoint(body: dict, request: Request = None) -> JSONResponse:
     resp = await _submit(b, source="http" if request is not None else "mcp", probe=probe)
     try:
         d = json.loads(bytes(resp.body).decode() or "{}")
-        # A successful submission is the one moment the publisher is looking at
-        # us, so it is the only place the badge is offered. Stated as an option,
-        # with what it says, and never as a condition of being indexed.
+        # A successful submission is one of the moments the publisher is looking
+        # at us, so it ends with the badge, the same sentence every surface ends
+        # with (badge.step). Never a condition of being indexed.
         if resp.status_code < 400 and d.get("status") == "indexed":
             host = (d.get("identifier") or "").split(":")[2] if (d.get("identifier") or "").count(":") > 2 else ""
             host = host or str(b.get("domain") or "").strip().lower()
             if host:
                 d["badge"] = {
                     **badge.snippet(host),
-                    "optional": ("entirely optional and changes nothing about your indexing "
-                                 "or ranking. It states what we verified, and it corrects "
-                                 "itself when that changes"),
                     "customise": f"{config.PUBLIC_BASE}/badge?domain={host}",
                 }
+                d["next"] = badge.step(host, True)
                 resp = JSONResponse(d, status_code=resp.status_code)
         _emit_submit(b, resp.status_code, d, probe=probe)
     except Exception:
@@ -2984,6 +2985,8 @@ tool names and input schemas are then searchable at
       for its tool list, so the index records what your servers actually expose.</li>
   <li>You get a page at <code>{B}/ard-publishers/&lt;your-domain&gt;</code> and become
       searchable through <code>/search</code> and the MCP endpoint.</li>
+  <li>Last step: add the badge from <a href="/badge">{B}/badge</a>. It states what was
+      verified, corrects itself, is free, and changes nothing about your indexing or ranking.</li>
 </ol>
 
 <h2 style="margin-top:30px;font-size:20px">Skills, APIs and agents</h2>

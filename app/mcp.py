@@ -203,6 +203,10 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 payload.setdefault("note",
                     "indexed and searchable. It will be re-checked periodically; an "
                     "endpoint that stops answering is demoted, not deleted.")
+                # `next` is the badge step from /submit; agents read prose, so
+                # it goes into the note as well as staying a field of its own.
+                if payload.get("next"):
+                    payload["note"] += " " + payload["next"]
             elif pending:
                 # Not an error from the agent's point of view: the submission
                 # is accepted and we are the ones who will keep trying. Marking

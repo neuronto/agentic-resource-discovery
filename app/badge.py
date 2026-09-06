@@ -1,17 +1,12 @@
 """Verification badges.
 
-The one distribution mechanism proven to work in this ecosystem, measured
-rather than assumed: punkpeye/awesome-mcp-servers carries 2,107 Glama score
-badges across 3,483 entries, 60.5% of the whole list, while Smithery is
-mentioned twice and PulseMCP zero. Glama did not win by having pages, its
-directory ranks for nothing; it won because maintainers paste its badge into
-their own READMEs. Every embed is a durable backlink from a repository we do
-not control, and it is pull rather than push: people add it because it makes
-their server look credible.
+A publisher can paste this into their own README or site. It states what was
+observed about their resources and nothing more: we completed a handshake with
+the endpoint and read its tool list back, so the badge carries that count and
+whether the endpoint answered. Not an opaque score, and not a rating we compute.
 
-Ours says something Glama's cannot: not an opaque score but evidence. We
-handshook with the endpoint and read its tool list back. The badge states the
-count and whether the endpoint answers, and nothing else.
+It is free, it is never a condition of being indexed or of any position in
+results, and it corrects itself when what it states stops being true.
 
 Never trust language. "verified" here means reachability and capability were
 observed; the badge must never read as an endorsement, a safety rating or a
@@ -151,6 +146,44 @@ def render(conn: sqlite3.Connection, publisher: str, theme: str = "auto") -> str
     return _svg("ARD Registry", "indexed", theme)
 
 
+STEP_PREFIX = "Last step"
+
+
+def step(domain: str, indexed: bool) -> str:
+    """The last step, on every surface that speaks to a publisher.
+
+    One sentence, one place. Every response, page and CLI command that tells a
+    publisher what to do next ends with this, indexed or not: indexed gets the
+    paste-ready snippet, not yet indexed gets the address to come back to.
+
+    The clause that never leaves it: the badge changes nothing about indexing
+    or ranking. That is what keeps a free badge from ever reading as a paid one.
+    """
+    B = config.PUBLIC_BASE
+    dom = (domain or "").strip().lower() or "<your-domain>"
+    tail = ("It states what was observed, the verified tool count and whether your "
+            "endpoint answered, corrects itself when that changes, is free, and changes "
+            "nothing about your indexing or ranking.")
+    if indexed:
+        sn = snippet(dom)
+        return (f"{STEP_PREFIX}: add the badge to your README or site. Markdown: "
+                f"{sn['markdown']} HTML and other formats: {B}/badge?domain={dom}. {tail}")
+    return (f"{STEP_PREFIX}, once you are indexed: add the badge to your README or site "
+            f"from {B}/badge?domain={dom}. {tail}")
+
+
+def with_last(recs: list, domain: str, indexed: bool) -> list:
+    """`recs` with the badge step as the final item and nowhere else.
+
+    Callers append their own advice after the audit has already ended with the
+    step; this re-seats it. Last means last by construction, not by ordering
+    discipline.
+    """
+    kept = [r for r in (recs or []) if not str(r).startswith(STEP_PREFIX)]
+    kept.append(step(domain, indexed))
+    return kept
+
+
 def snippet(publisher: str, theme: str = "auto") -> dict:
     """Paste-ready embeds.
 
@@ -181,4 +214,10 @@ def snippet(publisher: str, theme: str = "auto") -> dict:
         "image": img,
         "link": href,
         "alt": alt,
+        # Every surface suggests the badge as the last step, so every surface
+        # also says, in a field a machine can read, that it is not a condition
+        # of anything. Suggesting is not requiring.
+        "optional": ("entirely optional and changes nothing about your indexing "
+                     "or ranking. It states what we verified, and it corrects "
+                     "itself when that changes"),
     }
