@@ -40,7 +40,12 @@ from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, event
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
-              docs_url="/api-docs", redoc_url=None)
+              docs_url="/api-docs", redoc_url=None,
+              # A catalogue that ingests this document needs a base URL and a
+              # licence; without `servers` it shipped as [] and resolved to nothing.
+              servers=[{"url": config.PUBLIC_BASE}],
+              license_info={"name": "Apache-2.0",
+                            "url": "https://www.apache.org/licenses/LICENSE-2.0"})
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"],
                    expose_headers=["X-Response-Time-Ms", "X-RateLimit-Limit",
@@ -725,6 +730,53 @@ def _manifest() -> dict:
 
 
 CACHE = {"Cache-Control": "public, max-age=900"}
+
+@app.get("/apis.json", include_in_schema=False)
+@app.get("/.well-known/apis.json", include_in_schema=False)
+def apis_json():
+    """APIs.json (apisjson.org), the index format API catalogues read first.
+
+    The same facts as /.well-known/ard.json, in the vocabulary a different set of
+    readers understands. Property types follow what the format's own reference
+    index publishes, which is wider than the written 0.23 vocabulary (it names
+    MCPServer and MCPServerCard). No maintainer address: an identity and a URL.
+    """
+    B = config.PUBLIC_BASE
+    tags = ["Agentic Resource Discovery", "ARD", "MCP", "A2A", "API Discovery", "Registry"]
+    return JSONResponse({
+        "aid": "neuronto",
+        "name": "Neuronto ARD Registry",
+        "type": "Index",
+        "description": ("Agentic Resource Discovery (ARD) index. One search covers this "
+                        "index and every other public ARD registry, and results carry the "
+                        "tools each MCP server actually exposes, read from its own tools/list."),
+        "tags": tags,
+        "created": "2026-08-31",
+        "modified": time.strftime("%Y-%m-%d", time.gmtime()),
+        "url": f"{B}/apis.json",
+        "specificationVersion": "0.23",
+        "apis": [{
+            "aid": "neuronto:ard-registry",
+            "name": "Neuronto ARD Registry API",
+            "description": ("Search, explore and audit Agentic Resource Discovery entries: "
+                            "MCP servers, A2A agents, OpenAPI services and documentation. "
+                            "REST, MCP and A2A answer from one index. No key, no signup."),
+            "humanURL": B,
+            "baseURL": B,
+            "tags": tags,
+            "properties": [
+                {"type": "OpenAPI",          "url": f"{B}/openapi.json"},
+                {"type": "Documentation",    "url": f"{B}/api-docs"},
+                {"type": "MCPServer",        "url": f"{B}/mcp"},
+                {"type": "MCPServerCard",    "url": f"{B}/.well-known/mcp/server-card.json"},
+                {"type": "Website",          "url": B},
+                {"type": "GitHubRepository", "url": "https://github.com/neuronto/agentic-resource-discovery"},
+                {"type": "License",          "url": "https://www.apache.org/licenses/LICENSE-2.0"},
+            ],
+        }],
+        "maintainers": [{"FN": "Neuronto", "url": B}],
+    }, headers={"Cache-Control": "public, max-age=3600"})
+
 
 @app.get("/.well-known/ard.json", include_in_schema=False)
 def ard_json(): return JSONResponse(_manifest(), headers=CACHE)
