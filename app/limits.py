@@ -224,8 +224,9 @@ def too_many(rule: str, retry_after: int, headers: dict, verified: bool) -> dict
     }
     if not verified:
         out["raiseTheLimit"] = (
-            f"prove you own a domain and send the key as a bearer token: "
-            f"POST {config.PUBLIC_BASE}/claim. Verified callers get {vlimit} per {per}.")
+            f"nothing is needed to be listed or found here: submitting and being searched "
+            f"are open. This limit is only about volume, and a domain key raises it to "
+            f"{vlimit} per {per}: POST {config.PUBLIC_BASE}/claim.")
     return out
 
 

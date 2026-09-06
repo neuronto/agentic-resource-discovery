@@ -900,8 +900,8 @@ Three interfaces, same index. Pick whichever you already speak.
 
 ## Rules of the road
 
-- Anonymous: 60 requests an hour. With a domain key: 300. Prove a domain with
-  a DNS TXT record at {B}/claim to get one.
+- Anonymous: 60 requests an hour. With a domain key: 300. Nothing is required to
+  be listed or found; the key is only for volume and for private entries ({B}/claim).
 - `score` is semantic relevance only. It is not a trust, safety or quality
   rating, and must not be presented to a user as one.
 - `verified` reports what we fetched: whether the endpoint answered and what
