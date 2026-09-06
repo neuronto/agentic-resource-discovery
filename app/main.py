@@ -2150,6 +2150,11 @@ def privacy_page(request: Request):
             "with_api_key": "not recorded. the query is replaced with a placeholder",
             "why": f"powers {config.PUBLIC_BASE}/demand, scoped to a publisher's own domain",
         },
+        "submissions": ("a submission records the user agent of the client that made it, "
+                        "truncated to 120 characters, alongside the domain and the result. "
+                        "A submission is a deliberate act about a domain you control, not "
+                        "anonymous reading, and the question it answers is which tool "
+                        "submitted a given entry. Nothing else about the request is kept"),
         "query_leaves_the_machine": [
             "to the other public ARD registries when federating, cached 30 minutes then deleted",
             "to an embedding provider, to vectorise the query for semantic retrieval",
@@ -2316,7 +2321,8 @@ async def submit_endpoint(body: dict, request: Request = None) -> JSONResponse:
     and retried on a fixed schedule for about two and a half days."""
     b = body or {}
     probe = _is_probe(request)
-    resp = await _submit(b, source="http" if request is not None else "mcp", probe=probe)
+    resp = await _submit(b, source="http" if request is not None else "mcp", probe=probe,
+                         client=_client(request))
     try:
         d = json.loads(bytes(resp.body).decode() or "{}")
         # A successful submission is one of the moments the publisher is looking
@@ -2511,7 +2517,8 @@ async def _index_verified(url: str, res: dict, dry: bool = False) -> tuple[dict,
     raise _Busy()
 
 
-async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSONResponse:
+async def _submit(body: dict, source: str = "http", probe: bool = False,
+                  client: str | None = None) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
 
     `{"domain": "..."}` fetches the ARD manifest and indexes everything it
@@ -2560,7 +2567,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
         # index write, no event. The probes still run, because the point is to
         # see what they would find. `submissions.record` and `_not_indexed`
         # both accept a missing id, so a None here threads through cleanly.
-        sid = None if dry else submissions.open("endpoint", endpoint, source, probe)
+        sid = None if dry else submissions.open("endpoint", endpoint, source, probe,
+                                                client=client)
         import httpx as _httpx
 
         # The URL itself is only worth a handshake if it names something below
@@ -2753,7 +2761,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
             "error": "invalid_request",
             "detail": "/submit connects to the host you name, from our network, and indexes what answers, so it only accepts publicly routable addresses. This name does not resolve to one."})
 
-    sid = None if dry else submissions.open("domain", host, source, probe)
+    sid = None if dry else submissions.open("domain", host, source, probe,
+                                            client=client)
     conn = db()
     before = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                           (host,)).fetchone()[0]
@@ -2871,6 +2880,24 @@ async def _submit(body: dict, source: str = "http", probe: bool = False) -> JSON
         "note": ("fetched live from your domain, not taken from this form. Endpoint "
                  "reachability is probed separately and is not a trust or safety rating"),
     })
+
+
+def _client(request) -> str | None:
+    """The submitting tool, for the submission record only.
+
+    A submission is a deliberate act by a publisher about their own domain, so
+    recording which client made it is proportionate and it is the question we
+    could not answer without reading the proxy log by hand. Anonymous reading is
+    untouched: analytics still stores no address and still uses the agent only
+    as an input to a rotating session hash.
+    """
+    if request is None:
+        return None
+    try:
+        ua = (request.headers.get("user-agent") or "").strip()
+    except Exception:
+        return None
+    return ua[:120] or None
 
 
 def _small(x, n: int = 600):

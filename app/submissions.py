@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   evidence      TEXT,                   -- json: what the other side returned
   entry_key     TEXT,
   tools         INTEGER,
+  client        TEXT,                   -- user agent of the submitter, truncated
   history       TEXT NOT NULL DEFAULT '[]'  -- json: one line per attempt
 );
 CREATE INDEX IF NOT EXISTS idx_sub_due ON submissions(status, next_at);
@@ -103,7 +104,8 @@ def new_id() -> str:
     return secrets.token_hex(6)
 
 
-def open(kind: str, target: str, source: str, probe: bool = False) -> str | None:
+def open(kind: str, target: str, source: str, probe: bool = False,
+         client: str | None = None) -> str | None:
     """Record the intent. Returns the submission id, reusing an open one for the
     same target so a publisher who retries by hand joins the queue they are
     already in rather than starting a second one."""
@@ -112,6 +114,10 @@ def open(kind: str, target: str, source: str, probe: bool = False) -> str | None
         return None
     now = int(time.time())
     try:
+        # Older databases predate the column.
+        cols = {r[1] for r in c.execute('PRAGMA table_info(submissions)')}
+        if 'client' not in cols:
+            c.execute('ALTER TABLE submissions ADD COLUMN client TEXT')
         row = c.execute("""SELECT id FROM submissions
                            WHERE kind=? AND target=? AND status='pending'
                            ORDER BY created DESC LIMIT 1""", (kind, target)).fetchone()
@@ -122,9 +128,10 @@ def open(kind: str, target: str, source: str, probe: bool = False) -> str | None
             return row["id"]
         sid = new_id()
         c.execute("""INSERT INTO submissions(id,kind,target,source,probe,created,updated,
-                                             status,attempts,next_at,claimed_until)
-                     VALUES(?,?,?,?,?,?,?,'pending',0,?,?)""",
-                  (sid, kind, target, source, 1 if probe else 0, now, now, now, now + CLAIM_S))
+                                             status,attempts,next_at,claimed_until,client)
+                     VALUES(?,?,?,?,?,?,?,'pending',0,?,?,?)""",
+                  (sid, kind, target, source, 1 if probe else 0, now, now, now, now + CLAIM_S,
+                   (client or "")[:120] or None))
         c.commit()
         return sid
     except Exception:
