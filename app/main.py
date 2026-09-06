@@ -2220,9 +2220,16 @@ def publisher_page(host: str):
     if not h or len(h) > 100 or not all(c.isalnum() or c in ".-_" for c in h):
         return JSONResponse(status_code=404, content={"error": "not_found"})
     html_ = render.cached(f"pub-{h}", 1800, lambda: catalog.render_publisher(db(), h))
-    if not html_:
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+    if html_:
+        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+    # Not verified. The traffic that lands here is a browser following a link we
+    # put in our own /submit response, so answer with a page saying what would
+    # change that, not with an API error. The status stays 404: these must not
+    # be indexed as publisher pages.
+    return HTMLResponse(
+        render.cached(f"pubx-{h}", 900,
+                      lambda: catalog.render_unverified_publisher(db(), h)),
+        status_code=404, headers={"Cache-Control": "public, max-age=900"})
 
 
 # The pages launched at /publishers and were submitted to IndexNow there. The
