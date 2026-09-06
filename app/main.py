@@ -369,7 +369,16 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
             "error": "invalid_request",
             "detail": "query must be an object with a `text` field (spec 5.3.2), "
                       "for example {\"query\": {\"text\": \"read a pdf\"}}."})
-    text = (q.get("text") or "").strip()
+    raw_text = q.get("text")
+    # A wrong type here used to reach .strip() and raise, which answered 500 and
+    # told the caller it was our fault. It is theirs, and the message says which.
+    if raw_text is not None and not isinstance(raw_text, str):
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_request",
+            "detail": ("query.text must be a string (spec 5.3.2), got "
+                       f"{type(raw_text).__name__}. For example "
+                       "{\"query\": {\"text\": \"read a pdf\"}}.")})
+    text = (raw_text or "").strip()
     if not text:
         return JSONResponse(status_code=400, content={
             "error": "invalid_request",

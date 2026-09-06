@@ -146,6 +146,34 @@ def server_card() -> dict:
     }
 
 
+def _arg_str(args: dict, key: str) -> tuple[str, str | None]:
+    """A tool argument that must be a string, or a message saying it is not.
+
+    Anything unstringy used to reach .strip() and raise, and the agent got a 500
+    saying the fault was ours. An agent that reads 500 concludes the server is
+    broken and repeats the identical call; told the argument is the wrong type,
+    it can fix the call, which is the only useful thing to do with this error.
+    """
+    v = args.get(key)
+    if v is None:
+        return "", None
+    if not isinstance(v, str):
+        return "", f"`{key}` must be a string, got {type(v).__name__}"
+    return v.strip(), None
+
+
+def _arg_int(args: dict, key: str, default: int, lo: int, hi: int) -> tuple[int, str | None]:
+    """Same, for a bounded whole number. int("ten") raised the same way."""
+    v = args.get(key)
+    if v is None or v == "":
+        return default, None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return default, f"`{key}` must be a whole number, got {type(v).__name__}"
+    return max(lo, min(n, hi)), None
+
+
 def _text(payload: Any) -> dict:
     return {"content": [{"type": "text",
                          "text": json.dumps(payload, ensure_ascii=False, indent=2)}]}
@@ -247,12 +275,14 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 "federates": [u[1] for u in config.UPSTREAMS]})}
 
         if name == "find_tool":
-            q = (args.get("query") or "").strip()
-            if not q:
+            q, bad = _arg_str(args, "query")
+            if not bad and not q:
+                bad = "query is required"
+            limit, bad2 = _arg_int(args, "limit", 10, 1, 50)
+            bad = bad or bad2
+            if bad:
                 return 200, {"jsonrpc": "2.0", "id": rid,
-                             "result": {**_text({"error": "query is required"}),
-                                        "isError": True}}
-            limit = max(1, min(int(args.get("limit") or 10), 50))
+                             "result": {**_text({"error": bad}), "isError": True}}
             with_schema = bool(args.get("with_schema"))
             from . import tools_index
             hits = tools_index.search_tools(conn, q, limit)
@@ -264,13 +294,15 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                          "score is semantic relevance only, not a trust or safety rating")})}
 
         if name == "find_resource":
-            q = (args.get("query") or "").strip()
-            if not q:
+            q, bad = _arg_str(args, "query")
+            if not bad and not q:
+                bad = "query is required"
+            limit, bad2 = _arg_int(args, "limit", 8, 1, 50)
+            bad = bad or bad2
+            if bad:
                 return 200, {"jsonrpc": "2.0", "id": rid,
-                             "result": {**_text({"error": "query is required"}),
-                                        "isError": True}}
+                             "result": {**_text({"error": bad}), "isError": True}}
             kind = args.get("kind") or "any"
-            limit = max(1, min(int(args.get("limit") or 8), 50))
             mode = "auto" if args.get("federate", True) else "none"
             flt = None
             if kind and kind != "any":
