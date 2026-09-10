@@ -23,6 +23,26 @@ from .normalize import dedupe_key, media_family, normalize_identifier
 
 _HEADERS = {"content-type": "application/json", "user-agent": config.USER_AGENT}
 
+# One client per worker, reused by every search. Each fan-out used to open a new
+# client, so every search paid a fresh TCP and TLS handshake to every registry
+# inside a 500 ms timeout: WellKnown answers in ~135 ms on a reused connection
+# and ~400 ms on a new one, which is the difference between answering and being
+# reported as a timeout. Rebuilt if the event loop changes (tests run several).
+_client: httpx.AsyncClient | None = None
+_client_loop = None
+
+
+def _shared_client() -> httpx.AsyncClient:
+    global _client, _client_loop
+    loop = asyncio.get_running_loop()
+    if _client is None or _client_loop is not loop or _client.is_closed:
+        _client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=64, max_keepalive_connections=16,
+                                keepalive_expiry=300),
+            follow_redirects=True)
+        _client_loop = loop
+    return _client
+
 
 # ── circuit breaker ─────────────────────────────────────────────────────────
 # Per upstream, per worker process: {"fails": consecutive failures,
@@ -93,12 +113,14 @@ def _semaphore() -> asyncio.Semaphore:
     return _sem
 
 
-async def _one(client: httpx.AsyncClient, up: tuple, text: str, page_size: int) -> dict:
+async def _one(client: httpx.AsyncClient, up: tuple, text: str, page_size: int,
+               timeout: float | None = None) -> dict:
     uid, name, url, source = up
     t0 = time.perf_counter()
     try:
         r = await client.post(url, json={"query": {"text": text}, "pageSize": page_size},
-                              headers=_HEADERS, timeout=config.UPSTREAM_TIMEOUT_S)
+                              headers=_HEADERS,
+                              timeout=timeout or config.UPSTREAM_TIMEOUT_S)
         ms = int((time.perf_counter() - t0) * 1000)
         if r.status_code != 200:
             return {"id": uid, "name": name, "source": source, "ok": False,
@@ -162,13 +184,15 @@ async def fan_out(text: str, page_size: int = 20,
     try:
         skipped = [up for up in config.UPSTREAMS if not breaker_allows(up[0])]
         live = [up for up in config.UPSTREAMS if up not in skipped]
-        limits = httpx.Limits(max_connections=len(live) + 2,
-                              max_keepalive_connections=len(live) + 2)
-        # Not `async with`: stragglers keep running after the budget, so the
-        # client has to outlive this function and is closed by whoever finishes
-        # last.
-        client = httpx.AsyncClient(limits=limits, follow_redirects=True)
-        tasks = [asyncio.create_task(_one(client, up, text, page_size)) for up in live]
+        client = _shared_client()
+        # Each upstream's own timeout sits just inside the window, so a hang is
+        # recorded as that upstream's failure before our deadline, not after it.
+        # A caller who asked for a longer window gets proportionally longer ones.
+        up_timeout = config.UPSTREAM_TIMEOUT_S
+        if budget > config.FEDERATION_BUDGET_MS / 1000.0:
+            up_timeout = max(up_timeout, budget - 0.2)
+        tasks = [asyncio.create_task(_one(client, up, text, page_size, timeout=up_timeout))
+                 for up in live]
         done, pending = await asyncio.wait(tasks, timeout=budget) if tasks else (set(), set())
     finally:
         # Released as soon as the budget window closes. Stragglers finishing in
@@ -180,7 +204,15 @@ async def fan_out(text: str, page_size: int = 20,
         try:
             r = d.result()
             out.append(r)
-            breaker_record(r["id"], bool(r.get("ok")))
+            # Slower than a short window is not a failure. On 2026-09-10 GitHub
+            # Agent Finder answered every query in ~2.5 s and Hugging Face Discover
+            # in ~1.7 s; counting their 0.5 s timeouts as failures kept opening
+            # both circuits, so even a caller with a longer window found them
+            # "paused". A timeout counts only when the window was long enough to
+            # mean something. Errors and refusals always count.
+            slow_only = str(r.get("error") or "").endswith("Timeout") and up_timeout < 2.0
+            if not slow_only:
+                breaker_record(r["id"], bool(r.get("ok")))
             if r.get("ok") and r.get("results"):
                 fedcache.put(r["id"], text, r["results"])
         except Exception:
@@ -222,13 +254,12 @@ async def fan_out(text: str, page_size: int = 20,
         # create_task return value can be garbage collected mid-flight. That is
         # exactly what happened first time here, and the symptom was a cache
         # that quietly never filled for the one upstream it exists for.
-        t = asyncio.create_task(_finish(client, pending, text))
+        t = asyncio.create_task(_finish(pending, text))
         _running.add(t)
         t.add_done_callback(_running.discard)
     else:
         for p in pending:
             p.cancel()
-        await client.aclose()
     return out
 
 
@@ -238,8 +269,8 @@ _MAX_FINISHERS = int(os.getenv("NEURONTO_FED_FINISHERS", "8"))
 _running: set = set()
 
 
-async def _finish(client: httpx.AsyncClient, pending: set, text: str) -> None:
-    """Let the slow ones land, keep what they said, then close the client.
+async def _finish(pending: set, text: str) -> None:
+    """Let the slow ones land and keep what they said.
 
     Nothing here can affect the response that has already been returned. Its
     only job is to make the next caller's answer more complete.
@@ -262,11 +293,6 @@ async def _finish(client: httpx.AsyncClient, pending: set, text: str) -> None:
             p.cancel()
     except Exception:
         pass
-    finally:
-        try:
-            await client.aclose()
-        except Exception:
-            pass
 
 
 _FINISH_GRACE_S = float(os.getenv("NEURONTO_FED_FINISH_GRACE", "8"))

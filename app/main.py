@@ -147,6 +147,7 @@ def _warm_all() -> None:
                 continue
     finally:
         render.release_warm()
+        render.checkpoint()
     if built:
         print(f"page cache: warmed {built} page(s)", flush=True)
 
@@ -426,7 +427,21 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     # every request on the worker, so it goes to a thread with its own conn.
     owner = await asyncio.to_thread(
         lambda: publisher.domain_for_key(store.tls_conn(), auth))
-    out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner)
+    # A caller that already has something on screen (the homepage paints this
+    # index first) may wait longer for the other registries. Asked for with a
+    # header rather than a body field, because the body is the spec's schema,
+    # and clamped both ways: never shorter than the default, never longer than
+    # FEDERATION_BUDGET_MAX_MS, since a fan-out holds a slot for its window.
+    budget_ms = None
+    raw_budget = request.headers.get("x-neuronto-budget-ms")
+    if raw_budget and mode == "auto":
+        try:
+            budget_ms = max(config.FEDERATION_BUDGET_MS,
+                            min(int(raw_budget), config.FEDERATION_BUDGET_MAX_MS))
+        except ValueError:
+            budget_ms = None
+    out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner,
+                              budget_ms=budget_ms)
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
     # The homepage asks twice for one search: this index first, because it
@@ -455,6 +470,7 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
         # a failing upstream is quietly serving a smaller index than it claims.
         payload["federation"] = {
             "mode": mode,
+            "budget_ms": budget_ms or config.FEDERATION_BUDGET_MS,
             "registries": [{"name": f["name"], "source": f["source"],
                             "ok": f["ok"], "ms": f["ms"],
                             "results": len(f["results"]),
@@ -2566,6 +2582,26 @@ async def _index_verified(url: str, res: dict, dry: bool = False) -> tuple[dict,
     raise _Busy()
 
 
+def _invalidate_after_submit(body) -> None:
+    """Forget what a submission may have changed.
+
+    Aggregate pages go stale and rebuild behind the next request; the submitted
+    host's own publisher page is removed so its next view shows the change. This
+    used to delete every cached page, including on a dry run, which put a fifteen
+    second rebuild of /tools in front of whoever arrived next.
+    """
+    catalog.invalidate_publishers()
+    raw = ""
+    if isinstance(body, dict):
+        for field in ("domain", "endpoint", "url"):
+            v = body.get(field)
+            if isinstance(v, str) and v.strip():
+                raw = v.strip()
+                break
+    h = raw.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].strip().lower()
+    render.invalidate([f"pub-{h}", f"pubx-{h}"] if h else [])
+
+
 async def _submit(body: dict, source: str = "http", probe: bool = False,
                   client: str | None = None) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
@@ -2687,7 +2723,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
                                                  detail=detail, evidence=None, busy=True)
                         return _not_indexed("busy", row, domain=mhost, reason="busy",
                                             detail=detail, evidence=None)
-                    catalog.invalidate_publishers(); render.invalidate()
+                    _invalidate_after_submit(body)
                 row = submissions.record(sid, indexed=True, reason="indexed", tools=0)
                 out = {
                     "status": "indexed",
@@ -2756,7 +2792,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
                             "auth_required": bool(res["auth"]),
                             "identifier": ent["identifier"], "_key": key})
         if not dry:
-            catalog.invalidate_publishers(); render.invalidate()
+            _invalidate_after_submit(body)
         first = indexed[0]
         row = submissions.record(sid, indexed=True, reason="indexed",
                                  entry_key=first.get("_key"),
@@ -2850,7 +2886,8 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
                 raise
     after = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
                          (host,)).fetchone()[0]
-    catalog.invalidate_publishers(); render.invalidate()
+    if not dry:
+        _invalidate_after_submit(body)
 
     if not path and after == 0:
         # No manifest is not the same as nothing to index. Most MCP developers
@@ -2883,7 +2920,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
                                 "verified_tools": len(w["_raw"]["tools"]),
                                 "identifier": ent["identifier"]})
             if not dry:
-                catalog.invalidate_publishers(); render.invalidate()
+                _invalidate_after_submit(body)
             srow = submissions.record(sid, indexed=True, reason="indexed",
                                       tools=sum(i["verified_tools"] for i in indexed))
             return JSONResponse({

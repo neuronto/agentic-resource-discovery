@@ -46,7 +46,7 @@ def test_success_resets_partial_failures():
         F.breaker_record("z", False)
     check("a success in between resets the streak", F.breaker_allows("z"))
 
-async def _fake_one(client, up, text, page_size, delay=0.3):
+async def _fake_one(client, up, text, page_size, timeout=None, delay=0.3):
     await asyncio.sleep(delay)
     return {"id": up[0], "name": up[1], "source": up[3], "ok": True, "ms": 300,
             "results": [{"key": f"k-{up[0]}", "identifier": f"urn:{up[0]}", "url": None,
@@ -71,9 +71,9 @@ async def _run_semaphore_test():
 
 async def _run_breaker_skips_dead_upstream():
     F._breaker.clear(); F._sem = None
-    async def dead(client, up, text, page_size):
+    async def dead(client, up, text, page_size, timeout=None):
         return {"id": up[0], "name": up[1], "source": up[3], "ok": False, "ms": 1,
-                "error": "ReadTimeout", "results": []}
+                "error": "ConnectError", "results": []}
     orig_one, orig_ups = F._one, config.UPSTREAMS
     F._one = dead
     config.UPSTREAMS = [("d", "Dead", "http://d", "http://d")]
@@ -85,11 +85,49 @@ async def _run_breaker_skips_dead_upstream():
         F._one, config.UPSTREAMS = orig_one, orig_ups
     check("dead upstream is skipped and labelled", out[0]["error"] == "circuit open")
 
+async def _run_client_reuse_and_budget():
+    F._breaker.clear(); F._sem = None
+    seen = []
+    async def spy(client, up, text, page_size, timeout=None):
+        seen.append((id(client), timeout))
+        return {"id": up[0], "name": up[1], "source": up[3], "ok": True, "ms": 1, "results": []}
+    orig_one, orig_ups = F._one, config.UPSTREAMS
+    F._one = spy
+    config.UPSTREAMS = [("s", "S", "http://s", "http://s")]
+    try:
+        await F.fan_out("q", 5)
+        await F.fan_out("q", 5, budget_ms=2500)
+    finally:
+        F._one, config.UPSTREAMS = orig_one, orig_ups
+    check("one client is reused across searches", len(seen) == 2 and seen[0][0] == seen[1][0])
+    check("the default window keeps the short upstream timeout",
+          seen[0][1] == config.UPSTREAM_TIMEOUT_S)
+    check("a longer window gives each upstream a longer timeout", 2.0 < (seen[1][1] or 0) < 2.5)
+
+async def _run_short_timeout_is_not_a_failure():
+    F._breaker.clear(); F._sem = None
+    async def slow(client, up, text, page_size, timeout=None):
+        return {"id": up[0], "name": up[1], "source": up[3], "ok": False, "ms": 500,
+                "error": "ReadTimeout", "results": []}
+    orig_one, orig_ups = F._one, config.UPSTREAMS
+    F._one = slow
+    config.UPSTREAMS = [("t", "Slow", "http://t", "http://t")]
+    try:
+        for _ in range(config.FED_BREAKER_FAILS + 2):
+            await F.fan_out("q", 5)
+        out = await F.fan_out("q", 5)
+    finally:
+        F._one, config.UPSTREAMS = orig_one, orig_ups
+    check("a timeout inside the short window never opens the circuit",
+          out[0].get("error") != "circuit open")
+
 if __name__ == "__main__":
     test_breaker_opens_after_n_failures()
     test_breaker_half_open_probe_then_close()
     test_success_resets_partial_failures()
     asyncio.run(_run_semaphore_test())
     asyncio.run(_run_breaker_skips_dead_upstream())
+    asyncio.run(_run_client_reuse_and_budget())
+    asyncio.run(_run_short_timeout_is_not_a_failure())
     print(f"  {PASS} passed, {FAIL} failed")
     raise SystemExit(1 if FAIL else 0)

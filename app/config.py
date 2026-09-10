@@ -42,6 +42,15 @@ PAGE_SIZE_MAX     = 100
 # nothing but a 1.9 s wait on every federated search. 700 leaves headroom over
 # the slowest live leg (~500 ms) and halves the latency.
 FEDERATION_BUDGET_MS = _i("NEURONTO_FED_BUDGET_MS", 700)
+# The longest window a caller may ask for with `x-neuronto-budget-ms`. The
+# homepage paints this index first and only then waits for every registry, so
+# it can afford to wait longer than an API caller who blocks on the whole
+# answer. Measured 2026-09-10, one query at a time: Desvela ~40 ms, WellKnown
+# ~135 ms on a reused connection and ~400 ms on a new one, Hugging Face
+# Discover ~1.7 s (answering again), GitHub Agent Finder ~2.5 s, ARD Registry
+# Hub ~3.5 s. At 700 ms three of the five never make it; at 2.5 s four usually
+# do. Bounded, because a fan-out holds an in-flight slot for its whole window.
+FEDERATION_BUDGET_MAX_MS = _i("NEURONTO_FED_BUDGET_MAX_MS", 2500)
 # Well under the budget on purpose: an upstream that hangs must surface as
 # ITS timeout (a breaker failure) before OUR budget expires (not one).
 UPSTREAM_TIMEOUT_S   = float(os.getenv("NEURONTO_UPSTREAM_TIMEOUT", "0.5"))

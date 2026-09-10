@@ -431,7 +431,7 @@ def _attach_verification(entry: dict, row: sqlite3.Row) -> None:
 
 async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
                  page_size: int, mode: str, use_dense: bool | None = None,
-                 owner_domain: str | None = None) -> dict:
+                 owner_domain: str | None = None, budget_ms: int | None = None) -> dict:
     """Run a search in the requested federation mode (§5.4).
 
     `none`       our index only, lexical only. The fast path, tens of ms.
@@ -494,7 +494,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         dense_task = asyncio.ensure_future(
             _dense_keys(conn, text, max(page_size, 20) * 3))
 
-    ups = await federation.fan_out(text, page_size=max(page_size, 20))
+    ups = await federation.fan_out(text, page_size=max(page_size, 20), budget_ms=budget_ms)
 
     dense_order: list[str] = []
     dense_state = "off"
