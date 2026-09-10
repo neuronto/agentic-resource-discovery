@@ -46,18 +46,25 @@ PROBE_QUERIES = [
 ]
 
 
-async def from_mcp_registry(conn, max_pages: int = 120) -> dict:
-    """Ingest the official MCP Registry.
+async def from_mcp_registry(conn, max_pages: int = 1000) -> dict:
+    """Ingest the official MCP Registry: the latest version of every server.
 
     Each server becomes an ARD entry typed with the conformant MCP media type.
     We synthesise representativeQueries from the description when the registry
     has none, because an entry without them is one no semantic index can rank.
+
+    It used to read 120 pages of every version of every server, sorted by name.
+    The last runs before 2026-09-10 logged exactly 12,000 rows: the same first
+    names on every run, while servers later in the alphabet, which is most of
+    what was published each week, never arrived. `version=latest` returns one
+    row per server, so the whole registry fits in a few hundred pages, and the
+    result says whether the walk reached the end.
     """
-    n = 0
+    n = pages = deprecated = 0
     cursor = None
     async with httpx.AsyncClient(headers=HEADERS, timeout=25) as client:
         for _ in range(max_pages):
-            url = "https://registry.modelcontextprotocol.io/v0/servers?limit=100"
+            url = "https://registry.modelcontextprotocol.io/v0/servers?limit=100&version=latest"
             if cursor:
                 url += f"&cursor={cursor}"
             try:
@@ -70,10 +77,16 @@ async def from_mcp_registry(conn, max_pages: int = 120) -> dict:
             servers = d.get("servers") or []
             if not servers:
                 break
+            pages += 1
             for s in servers:
                 sv = s.get("server") or s
                 name = sv.get("name") or ""
                 if not name:
+                    continue
+                official = ((s.get("_meta") or {})
+                            .get("io.modelcontextprotocol.registry/official") or {})
+                status = official.get("status")
+                if status == "deleted":
                     continue
                 remotes = sv.get("remotes") or []
                 url_ = (remotes[0].get("url") if remotes else None) or \
@@ -93,16 +106,20 @@ async def from_mcp_registry(conn, max_pages: int = 120) -> dict:
                     "url": url_,
                     "description": desc,
                     "version": sv.get("version"),
-                    "tags": ["mcp", "mcp-registry"],
+                    # Deprecated servers stay findable, labelled, because a caller
+                    # may still depend on one; the registry is the one who says so.
+                    "tags": ["mcp", "mcp-registry"] + (["deprecated"] if status == "deprecated" else []),
                     "representativeQueries": _queries_from(desc, sv.get("title") or name),
                 }
                 if store.upsert_entry(conn, entry, "mcp-registry"):
                     n += 1
+                    deprecated += status == "deprecated"
             conn.commit()
             cursor = (d.get("metadata") or {}).get("nextCursor")
             if not cursor:
                 break
-    return {"source": "mcp-registry", "entries": n}
+    return {"source": "mcp-registry", "entries": n, "pages": pages,
+            "deprecated": deprecated, "complete": not cursor}
 
 
 def _queries_from(desc: str, name: str) -> list[str]:
@@ -281,7 +298,7 @@ def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
 
 
 async def crawl_domains(conn, domains: list[str], concurrency: int | None = None,
-                        skip_seen_hours: int = 168) -> dict:
+                        skip_seen_hours: int = 168, max_seconds: float | None = None) -> dict:
     """Fetch the well-known paths across a domain list.
 
     This is where an index is actually won. The only other general crawler in
@@ -291,6 +308,11 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
     Resumable by design: a run over hundreds of thousands of domains will be
     interrupted, and re-fetching what we checked yesterday wastes the budget that
     should go on domains we have never seen.
+
+    `max_seconds` stops it between chunks. A crawl holds the index lock for as
+    long as it runs, and one that ran six hours made the six-hourly ingest give
+    up waiting twice in one day, so the index went unrefreshed. Stopping early
+    loses nothing: the next run skips what this one recorded.
     """
     import itertools, random
 
@@ -330,11 +352,18 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
         if len(pending) >= 400:
             _flush(conn, pending)
 
+    stopped = False
+    t_end = time.monotonic() + max_seconds if max_seconds else None
     try:
         # Chunked so a very large seed list does not build hundreds of thousands
         # of coroutine objects before a single request goes out.
         CH = 2000
         for i in range(0, len(todo), CH):
+            if t_end is not None and time.monotonic() >= t_end:
+                stopped = True
+                print(f"    time box reached at {i}/{len(todo)}; the next run resumes from here",
+                      flush=True)
+                break
             batch = todo[i:i + CH]
             await asyncio.gather(*(one(d, clients[j % len(clients)])
                                    for j, d in enumerate(batch)))
@@ -346,4 +375,4 @@ async def crawl_domains(conn, domains: list[str], concurrency: int | None = None
             await c_.aclose()
     return {"considered": len(domains), "crawled": checked,
             "skipped_recent": len(domains) - len(todo),
-            "publishers_found": found, "entries": entries}
+            "publishers_found": found, "entries": entries, "stopped_early": stopped}

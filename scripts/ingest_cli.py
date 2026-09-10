@@ -39,10 +39,13 @@ async def main() -> None:
     if cmd == "crawl":
         src = Path(sys.argv[2])
         conc = int(sys.argv[3]) if len(sys.argv) > 3 else None
+        # Optional time box in seconds, so a scheduled crawl gives the index lock back.
+        secs = float(sys.argv[4]) if len(sys.argv) > 4 else None
         doms = [l.strip() for l in src.read_text().splitlines() if l.strip()
                 and not l.startswith("#")]
         print(f"crawling {len(doms)} domains", flush=True)
-        print("crawl:", await ingest.crawl_domains(conn, doms, concurrency=conc), flush=True)
+        print("crawl:", await ingest.crawl_domains(conn, doms, concurrency=conc, max_seconds=secs),
+              flush=True)
     if cmd in ("liveness", "all"):
         print("liveness:", await liveness.sweep(conn, limit=_num(2, 400)), flush=True)
     if cmd in ("introspect", "all"):
