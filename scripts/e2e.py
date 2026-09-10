@@ -2061,6 +2061,70 @@ def t_hero_search_cannot_zoom_ios_on_focus():
     assert float(m.group(1)) >= 16, f"hero input floor is {m.group(1)}px, must be >= 16"
 
 
+def _media_refs(h):
+    import re as _re
+    return sorted(set(_re.findall(r"(/media/[a-z0-9][a-z0-9._-]+)", h)))
+
+
+def t_hero_film_never_loads_before_the_page():
+    """The film is decoration. A src in the markup makes every browser, phones
+    included, fetch megabytes before the headline paints, so the sources carry
+    data-src and a script attaches them after load. It must also stay muted,
+    inline and out of the accessibility tree, and the search box must survive."""
+    import re as _re
+    s, h = _html("/")
+    assert s == 200, s
+    m = _re.search(r'<video[^>]*id="heroFilm"[^>]*>', h)
+    assert m, "the hero film element is missing"
+    tag = m.group(0)
+    for need in ("muted", "playsinline", "loop", 'preload="none"', 'aria-hidden="true"'):
+        assert need in tag, f"hero film lost {need}"
+    assert not _re.search(r"\ssrc=", tag), "the film has a src in the markup, so it downloads before first paint"
+    block = h[m.start(): h.find("</video>", m.start())]
+    assert "data-src=" in block, "the film has no deferred sources"
+    assert not _re.search(r"<source[^>]*\ssrc=", block), "a source has a real src, so it loads before first paint"
+    assert 'class="bigsearch bigsearch--hero"' in h, "hero search lost its modifier"
+
+
+def t_hero_media_answers_byte_ranges():
+    """Safari refuses to play a <video> unless a Range request comes back as 206
+    with a matching Content-Range. The edge does that from its own copy, but not
+    for the first visitor behind an empty cache, so the origin must as well.
+    Every media file the homepage names is checked, read from the page itself."""
+    import urllib.request as _u
+    s, h = _html("/")
+    refs = _media_refs(h)
+    assert refs, "the homepage names no /media/ files"
+    kinds = {"mp4": "video/mp4", "webm": "video/webm", "webp": "image/webp", "avif": "image/avif"}
+    for path in refs:
+        req = _u.Request(BASE + path, headers={"User-Agent": "neuronto-e2e/1.0", "Range": "bytes=0-99"})
+        r = _u.urlopen(req, timeout=40)
+        body = r.read()
+        assert r.status == 206, f"{path}: a Range request answered {r.status}, Safari will not play it"
+        cr = r.headers.get("Content-Range", "")
+        assert cr.startswith("bytes 0-99/"), f"{path}: Content-Range is {cr!r}"
+        assert len(body) == 100, f"{path}: asked for 100 bytes, got {len(body)}"
+        ext = path.rsplit(".", 1)[-1]
+        assert r.headers.get("Content-Type", "").startswith(kinds[ext]), \
+            f"{path}: served as {r.headers.get('Content-Type')}"
+        cc = r.headers.get("Cache-Control", "")
+        assert "immutable" in cc and "max-age=31536000" in cc, f"{path}: Cache-Control is {cc!r}"
+
+
+def t_media_route_refuses_what_it_should():
+    """A route that reads files by name is a traversal waiting to happen. An
+    unknown or disallowed name is a 404; a traversal attempt may also be stopped
+    earlier by the edge, which is refusal all the same."""
+    import urllib.request as _u, urllib.error as _ue
+    for path, allowed in (("/media/nope.mp4", (404,)), ("/media/x.py", (404,)),
+                          ("/media/.env", (404,)), ("/media/..%2Fmain.py", (400, 403, 404))):
+        try:
+            _u.urlopen(_u.Request(BASE + path, headers={"User-Agent": "neuronto-e2e/1.0"}), timeout=20)
+            raise AssertionError(f"{path} was served")
+        except _ue.HTTPError as err:
+            assert err.code in allowed, f"{path}: answered {err.code}"
+
+
 def t_every_search_shortcut_returns_something():
     """The shortcuts under the hero are one tap from an empty results page if
     the index drifts away from them. Each is run rather than eyeballed."""

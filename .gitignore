@@ -62,3 +62,7 @@ presence/
 # optionally and the core does not know what is in it. It never leaves this
 # machine, and nothing under app/ may import from it.
 commercial/
+
+# Generated media for the homepage film. Deployed with the site, never versioned:
+# megabytes of video in history would be paid for by every clone, forever.
+web/media/

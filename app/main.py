@@ -1786,6 +1786,55 @@ def image(name: str):
                     headers={"Cache-Control": "public, max-age=604800, immutable"})
 
 
+# The homepage film and its still. Two things here are load bearing. Byte ranges:
+# Safari will not play a <video> whose server answers a Range request with the
+# whole file, and the edge only answers ranges itself once it holds a copy, so
+# the first visitor behind an empty cache would get a film that never starts.
+# And every name carries a content hash, so a year of caching is safe: a new cut
+# is a new name, never a stale copy served under an old one.
+_MEDIA = WEB / "media"
+_MEDIA_TYPES = {"mp4": "video/mp4", "webm": "video/webm", "webp": "image/webp",
+                "avif": "image/avif", "jpg": "image/jpeg"}
+_MEDIA_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
+_MEDIA_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+@app.api_route("/media/{name}", methods=["GET", "HEAD"], include_in_schema=False)
+def media(name: str, request: Request):
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    f = _MEDIA / name
+    if not _MEDIA_NAME.match(name) or ".." in name or ext not in _MEDIA_TYPES or not f.is_file():
+        return JSONResponse(status_code=404, headers={"Cache-Control": "no-store"},
+                            content={"error": "not_found"})
+    size = f.stat().st_size
+    kind = _MEDIA_TYPES[ext]
+    base = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=31536000, immutable"}
+    head = request.method == "HEAD"
+    m = _MEDIA_RANGE.match(request.headers.get("range", "").strip())
+    if m and (m.group(1) or m.group(2)):
+        if m.group(1):
+            start = int(m.group(1))
+            end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+        else:
+            # a suffix range, the last N bytes
+            start, end = max(size - int(m.group(2)), 0), size - 1
+        if start >= size or start > end:
+            return Response(status_code=416, headers={**base, "Content-Range": f"bytes */{size}"})
+        length = end - start + 1
+        headers = {**base, "Content-Range": f"bytes {start}-{end}/{size}",
+                   "Content-Length": str(length)}
+        if head:
+            return Response(status_code=206, media_type=kind, headers=headers)
+        with f.open("rb") as fh:
+            fh.seek(start)
+            body = fh.read(length)
+        return Response(body, status_code=206, media_type=kind, headers=headers)
+    if head:
+        return Response(status_code=200, media_type=kind,
+                        headers={**base, "Content-Length": str(size)})
+    return Response(f.read_bytes(), media_type=kind, headers=base)
+
+
 # ---------------------------------------------------------------------------
 # Tool-level search. The complement to /search: when an agent already knows the
 # shape of the call it needs, the server hosting it is an implementation
