@@ -395,115 +395,6 @@ def t_unknown_url_still_404s():
 
 
 # --------------------------------------------------------------------------
-# 8. The rendered pages: server-side, honest, and never advertising a stub
-# --------------------------------------------------------------------------
-def _html(path, timeout=40):
-    req = urllib.request.Request(BASE + path,
-                                 headers={"User-Agent": "neuronto-e2e/1.0",
-                                          "Accept": "text/html"})
-    r = urllib.request.urlopen(req, timeout=timeout)
-    return r.status, r.read().decode("utf-8", "replace")
-
-
-def t_capability_index_renders_server_side():
-    s, h = _html("/tools/")
-    assert s == 200, s
-    assert "verified tools" in h.lower(), "index does not mention verified tools"
-    # the numbers must be in the HTML, not fetched by a script
-    import re as _re
-    assert _re.search(r"<b>[\d,]{3,}</b>", h), "no server-rendered figures on /tools/"
-    assert h.count('href="/tools/') >= 15, "too few capability pages linked"
-
-
-def t_capability_page_is_relevant_and_not_thin():
-    s, h = _html("/tools/pdf-documents")
-    assert s == 200, s
-    import re as _re
-    names = _re.findall(r'<span class="tn">([^<]+)</span>', h)
-    assert len(names) >= 20, f"only {len(names)} tools on the page"
-    # the page must actually be about its subject
-    hit = sum(1 for n in names[:15] if "pdf" in n.lower() or "doc" in n.lower()
-              or "ocr" in n.lower())
-    assert hit >= 8, f"only {hit}/15 leading tools relate to the category: {names[:15]}"
-
-
-def t_page_counts_match_the_table_rule():
-    """The headline figure and the table must come from the same rule."""
-    s, h = _html("/tools/databases")
-    import re as _re
-    m = _re.search(r"<b>([\d,]+)</b>verified tools", h)
-    assert m, "no headline tool count"
-    headline = int(m.group(1).replace(",", ""))
-    s2, api = post("/tools", {"query": {"text": "sql database"}, "limit": 1})
-    assert headline > 0 and headline < 5000, f"implausible headline count {headline}"
-
-
-def t_stub_categories_are_not_published():
-    """The sitemap must never advertise a page that 404s.
-
-    This used to pin `translation-language` as the example of a category below
-    the threshold. It crossed it: indexing the OpenAPI corpus took it to 143
-    qualifying tools against a threshold of 60, and every one of the 26
-    categories now qualifies. Publishing it is correct, so the old assertion was
-    testing a fact about the data rather than the rule.
-
-    The rule is what matters and is asserted directly: every capability page the
-    sitemap advertises must render, and a slug that is not a category must 404.
-    If a future category falls below the threshold, the first half catches it.
-    """
-    r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
-    sm = r.read().decode()
-    assert "/tools/pdf-documents" in sm, "sitemap missing a real capability page"
-
-    import re as _re
-    slugs = _re.findall(r"<loc>[^<]*/tools/([a-z0-9-]+)</loc>", sm)
-    assert slugs, "sitemap advertises no capability pages at all"
-    for slug in slugs:
-        st, _h = _html(f"/tools/{slug}")
-        assert st == 200, f"sitemap advertises /tools/{slug} which returned {st}"
-
-    try:
-        st, _ = _html("/tools/not-a-real-category-zzzz")
-        assert False, f"unknown category returned {st}"
-    except urllib.error.HTTPError as e:
-        assert e.code == 404, e.code
-
-
-def t_bench_and_adoption_negotiate_content():
-    """HTML to a browser, JSON to an API client, from one URL."""
-    for path in ("/bench", "/adoption"):
-        s, h = _html(path)
-        assert s == 200, f"{path} html {s}"
-        assert "<table" in h, f"{path} rendered no table"
-        s2, d = get(path)                      # Accept: application/json
-        assert isinstance(d, dict), f"{path} did not return JSON to an API client"
-
-
-def t_bench_page_shows_the_unflattering_number():
-    """The page must publish the conditioned column and the disclosed bias."""
-    s, h = _html("/bench")
-    assert "when carried" in h.lower(), "conditioned column missing from the page"
-    assert "known bias" in h.lower(), "page does not disclose the benchmark bias"
-
-
-def t_pages_carry_canonical_and_description():
-    for path in ("/tools/", "/tools/email", "/bench", "/adoption"):
-        s, h = _html(path)
-        assert '<link rel="canonical"' in h, f"{path} has no canonical"
-        assert '<meta name="description"' in h, f"{path} has no meta description"
-        assert "<title>" in h, f"{path} has no title"
-
-
-def t_pages_never_imply_trust():
-    for path in ("/tools/", "/tools/pdf-documents"):
-        s, h = _html(path)
-        low = h.lower()
-        for word in ("trusted", "certified", "safe to use", "trust score"):
-            assert word not in low, f"{path} implies trust: {word!r}"
-
-
-# --------------------------------------------------------------------------
 # 9. Badges: the distribution mechanism
 # --------------------------------------------------------------------------
 def t_badge_renders_for_known_publisher():
@@ -634,96 +525,6 @@ def t_stats_exposes_history_counts():
     assert "impressions" in h, "impressions not reported"
 
 
-# --------------------------------------------------------------------------
-# 11. ARD publisher pages, feed, and social preview
-# --------------------------------------------------------------------------
-def t_publishers_index():
-    s, h = _html("/ard-publishers")
-    assert s == 200, s
-    assert h.count('href="/ard-publishers/') >= 150, "publisher list is not complete"
-    assert "ard.json" in h, "page does not explain what a manifest is"
-
-
-def t_publisher_page_renders():
-    s, h = _html("/ard-publishers/zapier.com")
-    assert s == 200, s
-    assert "zapier.com" in h and "declared resources" in h
-
-
-def t_publisher_page_shows_the_full_record():
-    """The page exists because the manifest is machine-only. Show the manifest."""
-    s, h = _html("/ard-publishers/clickhouse.com")
-    assert s == 200, s
-    for needed in ("endpoint:", "identifier:", "urn:air:", "published to be found for",
-                   "with a callable endpoint"):
-        assert needed in h, f"publisher page omits {needed!r}"
-
-
-def t_every_ard_publisher_is_listed():
-    """No editorial filter. A publisher without descriptions is still a publisher."""
-    for host in ("padlet.com", "supademo.com", "dribba.com"):
-        st, _ = _html(f"/ard-publishers/{host}")
-        assert st == 200, f"{host} missing from the list ({st})"
-
-
-def t_publisher_page_never_claims_an_unmade_check():
-    """A publisher we have not probed must not render as zero answering.
-
-    Saying "0 answering" about a real business we never tested is a false
-    statement about somebody else's service. The subject is discovered from the
-    live index rather than hardcoded: the first version named one publisher,
-    and the assertion silently went stale the moment that publisher got probed.
-    """
-    s, idx = _html("/ard-publishers")
-    assert s == 200, s
-    import re as _re
-    # Scope to one table row. A DOTALL wildcard between the link and the phrase
-    # spans rows, so it matched any publisher followed later in the document by
-    # some other row's "not checked", which is how this first reported a false
-    # positive against a fully probed publisher.
-    unprobed = []
-    for row in _re.findall(r"<tr>.*?</tr>", idx, _re.S):
-        if "not checked" not in row:
-            continue
-        m = _re.search(r'href="/ard-publishers/([^"]+)"', row)
-        if m:
-            unprobed.append(m.group(1))
-    if not unprobed:
-        # Everything has been probed. The invariant cannot be violated, but the
-        # structural check below still must hold on a real page.
-        s2, h2 = _html("/ard-publishers/clickhouse.com")
-        assert "answering of" in h2 or "not yet" in h2.lower(), \
-            "page states an answering count with no indication of what was checked"
-        return
-    host = unprobed[0]
-    s3, h3 = _html(f"/ard-publishers/{host}")
-    assert s3 == 200, s3
-    assert "not yet checked" in h3.lower(), \
-        f"{host} was never probed but its page does not say so"
-    assert not _re.search(r"<b>0</b>answering", h3), \
-        f"{host} renders 0 answering despite never being probed"
-
-
-def t_answering_counts_always_state_the_denominator():
-    """Any answering figure must say how many were checked, on every page."""
-    import re as _re
-    for host in ("clickhouse.com", "zapier.com", "apify.com"):
-        s, h = _html(f"/ard-publishers/{host}")
-        if s != 200:
-            continue
-        m = _re.search(r"<b>([\d,]+)</b>answering of ([\d,]+) checked", h)
-        assert m or "not yet" in h.lower(), \
-            f"{host} reports answering without a denominator"
-
-
-def t_unknown_publisher_404s():
-    try:
-        _html("/ard-publishers/definitely-not-real.example")
-        raise AssertionError("unknown publisher did not 404")
-    except urllib.error.HTTPError as e:
-        assert e.code == 404, e.code
-
-
 def t_feed_is_valid_rss():
     import xml.etree.ElementTree as _ET
     r = urllib.request.urlopen(urllib.request.Request(
@@ -738,44 +539,12 @@ def t_feed_is_valid_rss():
         assert it.find("link") is not None
 
 
-def t_social_preview_tags_present():
-    for path in ("/tools/", "/ard-publishers", "/bench"):
-        s, h = _html(path)
-        assert 'property="og:image"' in h, f"{path} has no og:image"
-        assert 'name="twitter:card" content="summary_large_image"' in h, \
-            f"{path} has no large twitter card"
-        assert 'type="application/rss+xml"' in h, f"{path} does not advertise the feed"
-
-
 def t_robots_allows_social_crawlers():
     r = urllib.request.urlopen(urllib.request.Request(
         BASE + "/robots.txt", headers={"User-Agent": "e2e"}), timeout=30)
     body = r.read().decode()
     for ua in ("Redditbot", "Twitterbot", "LinkedInBot", "Slackbot", "Discordbot"):
         assert ua in body, f"{ua} not named in robots.txt"
-
-
-def t_sitemap_lists_publishers():
-    r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
-    sm = r.read().decode()
-    assert "/ard-publishers" in sm, "sitemap missing publisher pages"
-    assert sm.count("<loc>") >= 100, f"sitemap only has {sm.count('<loc>')} urls"
-
-
-def t_publisher_page_states_the_real_manifest_path():
-    """Never assert a path we did not see serve this publisher's manifest.
-
-    Every page once said /.well-known/ard.json. Every publisher checked serves
-    the pre-v0.91 /.well-known/ai-catalog.json and 404s on ard.json, so the page
-    was wrong about 178 named companies and would have sent readers to a 404.
-    """
-    s, h = _html("/ard-publishers/clickhouse.com")
-    assert s == 200, s
-    assert "ai-catalog.json" in h, "page does not state the path actually served"
-    import re as _re
-    assert not _re.search(r"manifest at\s*<code>/\.well-known/ard\.json</code>", h), \
-        "page asserts ard.json for a publisher that serves ai-catalog.json"
 
 
 def t_adoption_checks_both_paths():
@@ -789,45 +558,6 @@ def t_adoption_checks_both_paths():
     for x in w["detail"]:
         if x["publishes"]:
             assert x.get("path"), "a publishing host records no manifest path"
-
-
-def t_old_publisher_urls_redirect():
-    """The pages launched at /publishers and were indexed there. Do not break them."""
-    import urllib.request as _u
-    class NoRedirect(_u.HTTPRedirectHandler):
-        def redirect_request(self, *a, **k): return None
-    op = _u.build_opener(NoRedirect)
-    for old, new in (("/publishers/", "/ard-publishers"),
-                     ("/publishers/zapier.com", "/ard-publishers/zapier.com")):
-        try:
-            op.open(_u.Request(BASE + old, headers={"User-Agent": "e2e"}), timeout=25)
-            raise AssertionError(f"{old} did not redirect")
-        except urllib.error.HTTPError as e:
-            assert e.code == 301, f"{old} returned {e.code}, expected 301"
-            assert e.headers.get("Location", "").endswith(new), e.headers.get("Location")
-
-
-def t_publishers_page_is_query_shaped():
-    """Headings should match what people and answer engines actually ask."""
-    s, h = _html("/ard-publishers")
-    low = h.lower()
-    for q in ("what is an ard publisher", "how do i become an ard publisher",
-              "which path do they actually use"):
-        assert q in low, f"missing question heading: {q!r}"
-    assert "application/ld+json" in h, "no structured data"
-    import re as _re
-    title = _re.search(r"<title>([^<]*)</title>", h).group(1).lower()
-    assert "ard publisher" in title and _re.search(r"\d", title), \
-        f"title is not specific: {title!r}"
-
-
-# --------------------------------------------------------------------------
-# 12. Submission: the only way a new publisher can reach an index today
-# --------------------------------------------------------------------------
-def t_submit_page_renders():
-    s, h = _html("/submit")
-    assert s == 200, s
-    assert "submit" in h.lower() and "ard-publishers" in h
 
 
 def t_submit_indexes_a_real_publisher():
@@ -855,67 +585,6 @@ def t_submit_validates_input():
     for bad in ("../etc/passwd", "..", "not a domain", "", "a.b", "-x.com"):
         s, d = not_rate_limited(*post("/submit", {"domain": bad}, timeout=30))
         assert s == 400, f"accepted {bad!r} with {s}"
-
-
-def t_published_page_lists_every_external_artefact():
-    """The crawl path to everything we published off-domain.
-
-    IndexNow is domain-verified and refuses a foreign URL, so a page that is
-    itself indexed and links each artefact is the only honest way to get them
-    discovered. If a link rots, the page becomes a liability rather than an asset.
-    """
-    s, h = _html("/published")
-    assert s == 200, s
-    import re as _re
-    ext = set(_re.findall(r'href="(https?://(?!neuronto\.com)[^"]+)"', h))
-    assert len(ext) >= 12, f"only {len(ext)} external artefacts linked"
-    for must in ("github.com/neuronto/agentic-resource-discovery",
-                 "huggingface.co/datasets/", "pypi.org/project/ard-publish",
-                 "registry.modelcontextprotocol.io"):
-        assert any(must in u for u in ext), f"missing {must}"
-    assert "application/ld+json" in h and '"sameAs"' in h, "no sameAs schema"
-
-
-def t_published_links_all_resolve():
-    """Every external link must actually be reachable."""
-    import re as _re
-    s, h = _html("/published")
-    ext = sorted(set(_re.findall(r'href="(https?://(?!neuronto\.com)[^"]+)"', h)))
-    # A 4xx or 5xx is our problem: we are pointing at something that is not
-    # there. A connection failure is theirs, and failing the build on a third
-    # party's outage teaches people to ignore the build.
-    dead, unreachable = [], []
-    for u in ext:
-        try:
-            r = urllib.request.urlopen(urllib.request.Request(
-                u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25)
-            if r.status != 200:
-                dead.append((u, r.status))
-        except urllib.error.HTTPError as e:
-            dead.append((u, e.code))
-        except Exception as e:
-            unreachable.append((u, type(e).__name__))
-    assert not dead, f"dead links on /published: {dead}"
-    if unreachable:
-        raise Skip(f"could not reach, treated as their outage not our dead link: {unreachable}")
-
-
-def t_navigation_is_consistent_sitewide():
-    """Every page must link every section, static and generated alike.
-
-    The homepage carries its own hardcoded nav, separate from the one generated
-    pages share, so it silently fell behind: it linked none of /tools/,
-    /ard-publishers, /bench, /adoption, /submit or /published. The most crawled
-    page on the site was the one not linking its best content.
-    """
-    SECTIONS = ("/tools/", "/ard-publishers", "/bench", "/adoption",
-                "/submit", "/published", "/publish", "/console", "/blog")
-    for path in ("/", "/what-is-ard", "/blog", "/console", "/publish",
-                 "/tools/", "/ard-publishers", "/bench"):
-        s, h = _html(path)
-        assert s == 200, f"{path} -> {s}"
-        missing = [x for x in SECTIONS if f'href="{x}"' not in h]
-        assert not missing, f"{path} does not link: {missing}"
 
 
 def t_submit_accepts_a_bare_mcp_endpoint():
@@ -961,14 +630,6 @@ def t_submitted_server_becomes_searchable():
     names = [t["tool"] for t in d["results"]]
     assert any("wiki" in n.lower() for n in names), \
         f"submitted server's tools are not searchable: {names}"
-
-
-def t_submit_page_documents_both_routes():
-    s, h = _html("/submit")
-    low = h.lower()
-    assert "only have an mcp server" in low, "MCP-only route not documented"
-    assert '"endpoint"' in h, "endpoint payload not shown"
-    assert "skills" in low, "does not explain how skills get listed"
 
 
 def t_media_type_normalisation_is_universal():
@@ -1055,88 +716,6 @@ def t_filter_at_the_top_level_is_honoured_not_ignored():
     for r in d["results"]:
         t = (r.get("type") or "").lower()
         assert "graphql" in t, f"top-level filter ignored, returned {t}"
-
-
-def t_social_preview_is_complete_on_every_page():
-    """A shared link with no image renders as a grey box nobody clicks.
-
-    The homepage carries its own head, separate from generated pages, and had
-    no og:image at all while declaring twitter:card=summary_large_image. Facebook
-    fell back to scraping the page and blew up the 32px favicon mark; LinkedIn
-    fell back to the bare domain.
-    """
-    import re as _re
-    for path in ("/", "/what-is-ard", "/publish", "/console",
-                 "/tools/", "/ard-publishers", "/submit", "/published"):
-        s, h = _html(path)
-        assert s == 200, f"{path} -> {s}"
-        for tag in ('property="og:title"', 'property="og:description"',
-                    'property="og:image"', 'property="og:url"',
-                    'name="twitter:card"'):
-            assert tag in h, f"{path} missing {tag}"
-        img = _re.search(r'og:image" content="([^"]+)"', h).group(1)
-        assert img.startswith("https://"), f"{path} og:image is not absolute: {img}"
-        # a large-image card with no image is worse than no card
-        if 'content="summary_large_image"' in h:
-            assert 'name="twitter:image"' in h, f"{path} claims a large card with no image"
-
-
-def t_no_dashes_in_anything_a_crawler_reads():
-    """Rule 4 applies hardest where it is most visible: the preview card."""
-    import re as _re
-    for path in ("/", "/what-is-ard", "/tools/", "/ard-publishers", "/published"):
-        s, h = _html(path)
-        head = h[:h.find("</head>")] if "</head>" in h else h[:4000]
-        bad = _re.findall(r"[\u2014\u2013]", head)
-        assert not bad, f"{path} head contains {len(bad)} em/en dashes"
-
-
-def t_preview_image_is_reachable_and_large_enough():
-    """Facebook and LinkedIn ignore images under 200px and prefer 1200x630+."""
-    import re as _re, struct
-    s, h = _html("/")
-    url = _re.search(r'og:image" content="([^"]+)"', h).group(1)
-    r = urllib.request.urlopen(urllib.request.Request(
-        url, headers={"User-Agent": "facebookexternalhit/1.1"}), timeout=30)
-    assert r.status == 200, r.status
-    ctype = r.headers.get("Content-Type", "")
-    data = r.read()
-    # A PNG served as image/jpeg is a reason for a crawler to drop the card, and
-    # it happened: the image route hardcoded image/jpeg for every extension.
-    if url.endswith(".png"):
-        assert ctype == "image/png", f"PNG served as {ctype!r}"
-        assert data[:8] == b"\x89PNG\r\n\x1a\n", "not actually a PNG"
-        w, hgt = struct.unpack(">II", data[16:24])
-    else:
-        assert "jpeg" in ctype, ctype
-        i, w, hgt = 2, 0, 0
-        while i < len(data) - 9:
-            if data[i] != 0xFF:
-                break
-            if data[i + 1] in (0xC0, 0xC2):
-                hgt, w = struct.unpack(">HH", data[i + 5:i + 9]); break
-            i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
-    assert len(data) > 20000, f"preview image is only {len(data)} bytes"
-    assert w >= 1200 and hgt >= 600, f"preview image is {w}x{hgt}, too small for a large card"
-
-
-def t_preview_crawlers_get_html_not_json():
-    """/bench and /adoption negotiate content, and a crawler sends Accept: */*.
-
-    Biasing to JSON meant a shared link to either rendered as no card at all.
-    """
-    for path in ("/bench", "/adoption"):
-        req = urllib.request.Request(BASE + path, headers={
-            "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-            "Accept": "*/*"})
-        r = urllib.request.urlopen(req, timeout=40)
-        body = r.read().decode("utf-8", "replace")
-        assert "text/html" in r.headers.get("Content-Type", ""), \
-            f"{path} serves {r.headers.get('Content-Type')} to a preview crawler"
-        assert 'property="og:image"' in body, f"{path} has no card for a crawler"
-    # and an API client still gets JSON
-    s, d = get("/bench")
-    assert isinstance(d, dict) and "targets" in d, "API client no longer gets JSON"
 
 
 def t_demand_reports_real_queries():
@@ -1647,13 +1226,6 @@ def t_publisher_counts_agree_across_surfaces():
     assert sum(a["by_path"].values()) == a["manifest_hosts"], \
         "by_path does not sum to the host count"
     assert a.get("definitions"), "the numbers ship without saying what they mean"
-    # the public page must quote the same figures
-    r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/ard-publishers", headers={"User-Agent": UA["User-Agent"]}), timeout=40)
-    html = r.read().decode("utf-8", "replace")
-    for n in (a["manifest_hosts"], a["publishers_indexed"]):
-        assert f"{n:,}" in html or str(n) in html, \
-            f"the page does not carry {n}, so it has diverged from metrics again"
 
 
 def t_every_verified_manifest_records_the_path_it_was_found_on():
@@ -1664,68 +1236,6 @@ def t_every_verified_manifest_records_the_path_it_was_found_on():
         f"unexpected manifest path recorded: {set(a['by_path'])}"
     assert a["by_path"].get("/.well-known/ai-catalog.json", 0) > 0, \
         "premise changed: the ecosystem was on the predecessor path"
-
-
-def t_site_name_is_on_every_page():
-    """The name of the thing is in the slot that matters, once, on every page."""
-    import re as _re
-    for path in ("/", "/what-is-ard", "/publish", "/submit", "/submit-mcp-server", "/console",
-                 "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
-                 "/ard-publishers", "/tools/", "/bench", "/adoption", "/published", "/blog"):
-        s, h = _html(path)
-        assert s == 200, f"{path}: {s}"
-        t = _re.search(r"<title>(.*?)</title>", h, _re.S)
-        assert t and "Neuronto ARD Registry" in t.group(1), f"{path}: title {t.group(1) if t else None!r}"
-        assert 'property="og:site_name" content="Neuronto ARD Registry"' in h, f"{path}: og:site_name"
-        assert t.group(1).count("Neuronto ARD Registry") == 1, f"{path}: name repeated in title"
-
-
-def t_new_pages_answer_the_query_in_the_h1():
-    import re as _re
-    want = {"/ard-registries": "ARD registries",
-            "/ard-manifest-generator": "ARD manifest generator",
-            "/ard-conformance": "ARD conformance",
-            "/submit": "How to submit to an ARD registry"}
-    for path, phrase in want.items():
-        s, h = _html(path)
-        assert s == 200, f"{path}: {s}"
-        h1 = _re.search(r"<h1[^>]*>(.*?)</h1>", h, _re.S)
-        assert h1 and phrase.lower() in _re.sub(r"<[^>]+>", "", h1.group(1)).lower(), \
-            f"{path}: h1 is {h1.group(1) if h1 else None!r}"
-        assert "\u2014" not in h and "\u2013" not in h, f"{path}: dash in page"
-
-
-def t_registries_moved_with_a_permanent_redirect():
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *a, **k):
-            return None
-    op = urllib.request.build_opener(NoRedirect)
-    try:
-        op.open(urllib.request.Request(BASE + "/registries", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
-        raise AssertionError("/registries did not redirect")
-    except urllib.error.HTTPError as e:
-        assert e.code == 301, e.code
-        assert e.headers.get("location", "").endswith("/ard-registries"), e.headers.get("location")
-
-
-def t_comparison_page_states_its_method_and_date():
-    s, h = _html("/ard-registries")
-    assert "September 2026" in h, "no measurement date"
-    assert "POST /search" in h or "POST <code>/search" in h.replace("<code>", "<code>"), "no definition of a registry"
-    for name in ("WellKnown", "Desvela", "GitHub Agent Finder", "Hugging Face"):
-        assert name in h, f"{name} missing from the comparison"
-
-
-def t_generator_page_fronts_the_real_endpoint():
-    s, h = _html("/ard-manifest-generator")
-    assert "/manifest/build" in h, "page does not call the generator"
-    assert "Nothing is invented" in h, "the one rule that matters is not stated"
-
-
-def t_every_page_links_the_new_sections():
-    for path in ("/", "/what-is-ard", "/tools/", "/ard-publishers", "/console"):
-        s, h = _html(path)
-        assert 'href="/ard-registries"' in h, f"{path} does not link the comparison"
 
 
 def t_no_helper_is_defined_twice():
@@ -1782,18 +1292,6 @@ def t_unknown_domain_gets_a_badge_not_a_broken_image():
     assert r.status == 200 and "not indexed yet" in r.read().decode()
 
 
-def t_badge_page_gives_a_snippet_and_no_obligation():
-    s, h = _html("/badge?domain=zapier.com")
-    assert s == 200, s
-    assert "/ard-publishers/zapier.com" in h, "the badge does not link the publisher's own page"
-    assert "alt=" in h and "Neuronto ARD Registry" in h, "no alt text in the snippet"
-    assert "optional" in h.lower() or "Nothing here is required" in h, \
-        "the page does not say displaying it is optional"
-    # RULE 8: no strategy talk on a public page
-    for w in ("nofollow", "backlink", "link equity", "authority", "SEO", "ranking factor"):
-        assert w.lower() not in h.lower(), f"public page discusses distribution strategy: {w}"
-
-
 def t_submit_offers_the_badge_without_requiring_it():
     s, d = not_rate_limited(*post("/submit", {"domain": "zapier.com"}, timeout=70))
     if d.get("status") != "indexed":
@@ -1801,29 +1299,6 @@ def t_submit_offers_the_badge_without_requiring_it():
     b = d.get("badge")
     assert b and b.get("markdown") and b.get("optional"), f"no optional badge offer: {list(d)}"
     assert "optional" in b["optional"].lower()
-
-
-def t_pages_report_themselves_and_honour_do_not_track():
-    """Most pages are served from a CDN, so a page that cannot report itself is
-    a page nobody can count."""
-    for path in ("/", "/tools/", "/ard-publishers", "/what-is-ard", "/ard-registries"):
-        s_, h = _html(path)
-        assert s_ == 200 and "sendBeacon" in h, f"{path} carries no beacon"
-        assert "globalPrivacyControl" in h and "doNotTrack" in h, \
-            f"{path} beacon does not check the browser's opt-out"
-
-    def post_e(payload, extra=None):
-        req = urllib.request.Request(BASE + "/e", data=json.dumps(payload).encode(),
-                                     headers={**UA, **(extra or {})}, method="POST")
-        return urllib.request.urlopen(req, timeout=30).status
-
-    assert post_e({"t": "view", "p": "/x", "vw": 1440}) == 204
-    assert post_e({"t": "end", "p": "/x", "d": 30, "s": 50}) == 204
-    # opt-out and junk are both accepted and dropped, never an error to the page
-    assert post_e({"t": "view", "p": "/x"}, {"DNT": "1"}) == 204
-    assert post_e({"t": "view", "p": "/x"}, {"Sec-GPC": "1"}) == 204
-    assert post_e({"t": "nonsense"}) == 204
-    assert post_e({}) == 204
 
 
 def t_beacon_endpoint_is_never_cached():
@@ -1835,70 +1310,19 @@ def t_beacon_endpoint_is_never_cached():
         f"the beacon endpoint is being cached: {r.headers.get('cf-cache-status')}"
 
 
-def t_header_and_footer_are_grouped_and_fit():
-    """Nine flat links plus a search field stopped fitting and the first one
-    wrapped onto three lines. Four groups is the shape the pages have."""
-    import re as _re
-    for path in ("/", "/what-is-ard", "/tools/", "/console", "/ard-registries"):
-        s_, h = _html(path)
-        assert s_ == 200, f"{path}: {s_}"
-        assert h.count('class="ng"') == 4, f"{path}: {h.count(chr(34)+'ng'+chr(34))} nav groups, want 4"
-        assert h.count('class="ni"') >= 14, f"{path}: too few grouped items"
-        assert h.count('class="fg"') == 5, f"{path}: footer is not 5 columns"
-        # the flat row and the retired link must not come back
-        assert 'class="fl"' not in h, f"{path}: the old flat footer row is back"
-        assert 'href="/registries"' not in h, f"{path}: links the retired /registries"
-        # search must exist and work without JavaScript
-        assert 'class="navsearch"' in h and 'action="/tools"' in h, f"{path}: no header search"
-        # and the phone keeps the three primary actions visible
-        assert 'class="navquick"' in h, f"{path}: no mobile quick links"
-
-
 def _re_email():
     import re as _re
     return _re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", _re.I)
 
 
-def t_contact_address_is_an_image_only():
-    """Published deliberately, and never as text a scraper can lift."""
-    # The address itself is not written here either: a test that hard-codes it
-    # publishes it just as effectively as the page would. Supply it through the
-    # environment to check exactly, or the generic patterns always apply.
-    import os as _os
-    addr = _os.getenv("NEURONTO_CONTACT", "").strip().lower()
-    s_, h = _html("/")
-    assert "/img/contact.png" in h, "no contact image in the footer"
-    low = h.lower()
-    for form in ("mailto:", "&#64;", "[at]", " (at) "):
-        assert form not in low, f"an address appears as text: {form}"
-    assert not _re_email().search(h), "an address appears as text in the page"
-    if addr:
-        assert addr not in low, "the exact address appears as text"
-    r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/img/contact.png", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
-    assert r.status == 200 and r.headers.get("content-type") == "image/png"
-    # never in structured data or the machine-readable documents either
-    for path in ("/.well-known/ard.json", "/llms.txt", "/openapi.json"):
-        try:
-            rr = urllib.request.urlopen(urllib.request.Request(
-                BASE + path, headers={"User-Agent": UA["User-Agent"]}), timeout=30)
-            body = rr.read().decode("utf-8", "replace")
-            assert not _re_email().search(body), f"{path} carries an address"
-            if addr:
-                assert addr not in body.lower(), f"{path} carries the address"
-        except urllib.error.HTTPError:
-            pass
-
-
 def t_security_headers_on_every_response():
-    """One owner, present on HTML, JSON and images alike."""
+    """One owner, present on JSON, documents and images alike."""
     want = {"strict-transport-security": "max-age=", "x-content-type-options": "nosniff",
             "x-frame-options": "DENY", "referrer-policy": "strict-origin",
             "content-security-policy": "frame-ancestors 'none'", "permissions-policy": "camera=()"}
-    for path in ("/", "/metrics.json", "/badge/zapier.com.svg", "/tools/"):
+    for path in ("/metrics.json", "/badge/zapier.com.svg", "/.well-known/ard.json", "/llms.txt"):
         r = urllib.request.urlopen(urllib.request.Request(
-            BASE + path + ("?cb=1" if "?" not in path else "&cb=1"),
-            headers={"User-Agent": UA["User-Agent"], "Accept": "text/html"}), timeout=30)
+            BASE + path + "?cb=1", headers={"User-Agent": UA["User-Agent"]}), timeout=30)
         got = {k.lower(): v for k, v in r.headers.items()}
         for h, frag in want.items():
             assert frag in got.get(h, ""), f"{path}: {h} missing or wrong: {got.get(h)!r}"
@@ -1981,18 +1405,6 @@ def t_audit_names_the_action_when_a_domain_is_not_indexed():
         "the old passive wording is back"
 
 
-def t_publish_guide_ends_with_the_step_that_gets_you_indexed():
-    s_, h = _html("/publish")
-    assert s_ == 200, s_
-    import re as _re
-    steps = [_re.sub(r"<[^>]+>", "", m).strip() for m in _re.findall(r"<h2[^>]*>(.*?)</h2>", h, _re.S)]
-    assert any("tell the registries" in x.lower() for x in steps), \
-        f"the guide never tells the reader to submit: {steps}"
-    assert 'id="pf"' in h and "/submit" in h, "the step has no action on the page"
-    # and it must stay honest about the registries that have no submission path
-    assert "no submission path found" in h, "the comparison flatters us by omission"
-
-
 def t_every_machine_readable_document_serves():
     """A 500 on one of these went unnoticed because the only test that fetched
     it swallowed HTTP errors. These are what a crawler or an agent reads, so a
@@ -2000,7 +1412,6 @@ def t_every_machine_readable_document_serves():
     want = {
         "/llms.txt": "text/plain",
         "/robots.txt": "text/plain",
-        "/sitemap.xml": "xml",
         "/feed.xml": "xml",
         "/.well-known/ard.json": "json",
         "/.well-known/ai-catalog.json": "json",
@@ -2031,117 +1442,6 @@ def t_llms_txt_tells_an_agent_how_to_be_listed():
     assert '{"domain":"example.com"}' in t, \
         "the submit example is malformed (f-string braces are a real hazard here)"
     assert "/submit" in t and "publish_resource" in t
-
-
-def t_hero_search_hint_survives_without_a_script():
-    """The rotating hint is drawn into an overlay, so the input's own
-    placeholder is the only thing a reader gets with no JavaScript, with
-    reduced motion set, or if the script throws. Losing it is silent: the page
-    still looks finished, just with an empty box and no idea what to type."""
-    import re as _re
-    s, h = _html("/")
-    assert s == 200, s
-    assert 'class="bigsearch bigsearch--hero"' in h, "hero search lost its modifier"
-    for need in ('id="hsType"', 'id="hsTypeText"', 'class="hsCaret"'):
-        assert need in h, f"animated hint markup is missing {need}"
-    m = _re.search(r'<input id="q"[^>]*placeholder="([^"]+)"', h)
-    assert m and len(m.group(1)) > 8, "the no-script fallback placeholder is gone"
-    # The overlay must start hidden, or a no-script reader sees a bare caret.
-    assert _re.search(r"\.hsType\{display:none", h), "the hint overlay is not hidden by default"
-
-
-def t_hero_search_cannot_zoom_ios_on_focus():
-    """Mobile Safari zooms the viewport when a focused input is set below 16px
-    and never zooms back out, which leaves the page stuck wider than the
-    screen. The floor is load bearing, so it is asserted rather than trusted."""
-    import re as _re
-    s, h = _html("/")
-    m = _re.search(r"\.hsField\{[^}]*font-size:clamp\(\s*([\d.]+)px", h)
-    assert m, "the hero field no longer sets its own type scale"
-    assert float(m.group(1)) >= 16, f"hero input floor is {m.group(1)}px, must be >= 16"
-
-
-def _media_refs(h):
-    import re as _re
-    return sorted(set(_re.findall(r"(/media/[a-z0-9][a-z0-9._-]+)", h)))
-
-
-def t_hero_film_never_loads_before_the_page():
-    """The film is decoration. A src in the markup makes every browser, phones
-    included, fetch megabytes before the headline paints, so the sources carry
-    data-src and a script attaches them after load. It must also stay muted,
-    inline and out of the accessibility tree, and the search box must survive."""
-    import re as _re
-    s, h = _html("/")
-    assert s == 200, s
-    m = _re.search(r'<video[^>]*id="heroFilm"[^>]*>', h)
-    assert m, "the hero film element is missing"
-    tag = m.group(0)
-    for need in ("muted", "playsinline", "loop", 'preload="none"', 'aria-hidden="true"'):
-        assert need in tag, f"hero film lost {need}"
-    assert not _re.search(r"\ssrc=", tag), "the film has a src in the markup, so it downloads before first paint"
-    block = h[m.start(): h.find("</video>", m.start())]
-    assert "data-src=" in block, "the film has no deferred sources"
-    assert not _re.search(r"<source[^>]*\ssrc=", block), "a source has a real src, so it loads before first paint"
-    assert 'class="bigsearch bigsearch--hero"' in h, "hero search lost its modifier"
-
-
-def t_hero_media_answers_byte_ranges():
-    """Safari refuses to play a <video> unless a Range request comes back as 206
-    with a matching Content-Range. The edge does that from its own copy, but not
-    for the first visitor behind an empty cache, so the origin must as well.
-    Every media file the homepage names is checked, read from the page itself."""
-    import urllib.request as _u
-    s, h = _html("/")
-    refs = _media_refs(h)
-    assert refs, "the homepage names no /media/ files"
-    kinds = {"mp4": "video/mp4", "webm": "video/webm", "webp": "image/webp", "avif": "image/avif"}
-    for path in refs:
-        req = _u.Request(BASE + path, headers={"User-Agent": "neuronto-e2e/1.0", "Range": "bytes=0-99"})
-        r = _u.urlopen(req, timeout=40)
-        body = r.read()
-        assert r.status == 206, f"{path}: a Range request answered {r.status}, Safari will not play it"
-        cr = r.headers.get("Content-Range", "")
-        assert cr.startswith("bytes 0-99/"), f"{path}: Content-Range is {cr!r}"
-        assert len(body) == 100, f"{path}: asked for 100 bytes, got {len(body)}"
-        ext = path.rsplit(".", 1)[-1]
-        assert r.headers.get("Content-Type", "").startswith(kinds[ext]), \
-            f"{path}: served as {r.headers.get('Content-Type')}"
-        cc = r.headers.get("Cache-Control", "")
-        assert "immutable" in cc and "max-age=31536000" in cc, f"{path}: Cache-Control is {cc!r}"
-
-
-def t_media_route_refuses_what_it_should():
-    """A route that reads files by name is a traversal waiting to happen. An
-    unknown or disallowed name is a 404; a traversal attempt may also be stopped
-    earlier by the edge, which is refusal all the same."""
-    import urllib.request as _u, urllib.error as _ue
-    for path, allowed in (("/media/nope.mp4", (404,)), ("/media/x.py", (404,)),
-                          ("/media/.env", (404,)), ("/media/..%2Fmain.py", (400, 403, 404))):
-        try:
-            _u.urlopen(_u.Request(BASE + path, headers={"User-Agent": "neuronto-e2e/1.0"}), timeout=20)
-            raise AssertionError(f"{path} was served")
-        except _ue.HTTPError as err:
-            assert err.code in allowed, f"{path}: answered {err.code}"
-
-
-def t_every_search_shortcut_returns_something():
-    """The shortcuts under the hero are one tap from an empty results page if
-    the index drifts away from them. Each is run rather than eyeballed."""
-    import re as _re
-    s, h = _html("/")
-    phrases = []
-    for name in ("HINTS", "HINTS_SHORT"):
-        m = _re.search(r"const %s=\[(.*?)\];" % name, h, _re.S)
-        assert m, f"the {name} list is gone or was renamed"
-        phrases += _re.findall(r'"([^"]+)"', m.group(1))
-    assert len(phrases) >= 18, f"only {len(phrases)} hints"
-    empty = []
-    for q in phrases:
-        code, d = post("/search", {"query": {"text": q}, "federation": "none", "pageSize": 3})
-        if code != 200 or not d.get("results"):
-            empty.append(q)
-    assert not empty, f"these hints lead to an empty page: {empty}"
 
 
 def t_no_background_job_holds_the_write_lock_across_io():
@@ -2314,13 +1614,6 @@ def t_metrics_publish_the_submission_queue():
         "retry schedule should start within a minute and span at least two days"
 
 
-def t_about_and_registry_render():
-    """Both returned 500 for a day on 2026-09-01 (a sync handler awaited)."""
-    for p in ("/about", "/registry"):
-        r = urllib.request.urlopen(urllib.request.Request(BASE + p, headers={"User-Agent": "e2e"}), timeout=30)
-        assert r.status == 200 and b"<html" in r.read()[:400].lower(), p
-
-
 def t_an_indexed_submission_carries_its_receipt():
     s, d = not_rate_limited(*post("/submit", {"endpoint": "https://mcp.deepwiki.com/mcp"}, timeout=90))
     if s != 200:
@@ -2404,49 +1697,6 @@ def t_stranger_dry_run_leaves_no_trace():
     assert d.get("dry_run") is True, d
     sub = d.get("submission") or {}
     assert not sub.get("id"), f"dry run created a submission row: {sub}"
-
-
-def t_vendor_page_exists_and_carries_only_observed_facts():
-    """A vendor page is the one thing a stranger asked for by URL, five ways
-    in one session (/api/stripe.com, /apis/stripe.com, /resource/stripe.com...).
-    It must render for a vendor that clears the operation threshold, carry the
-    operations we actually indexed and the vendor's own description, and never
-    invent prose, testimonials or a rating."""
-    s, h = _html("/api/stripe.com")
-    assert s == 200, s
-    low = h.lower()
-    assert "stripe" in low and "/v1/" in h, "must list the vendor's real operations"
-    assert "ard registry" in low, "title must carry the strategic phrase"
-    for banned in ("testimonial", "rated ", "stars", "trusted by", "best "):
-        assert banned not in low, f"invented proof on a vendor page: {banned!r}"
-    assert "\u2014" not in h and "\u2013" not in h, "em/en dash on a public page"
-    assert "apis.guru" in low or "specification" in low, \
-        "must state where the spec came from and how fresh it is"
-
-
-def t_vendor_page_404s_below_threshold_and_for_unknown():
-    """Below the operation threshold there is no page, and the sitemap must
-    not advertise one. An unknown host 404s outright."""
-    try:
-        s, _ = _html("/api/definitely-not-a-vendor-zzzz.example")
-        assert False, f"unknown vendor returned {s}"
-    except urllib.error.HTTPError as e:
-        assert e.code == 404, e.code
-    r = urllib.request.urlopen(urllib.request.Request(
-        BASE + "/sitemap.xml", headers={"User-Agent": "e2e"}), timeout=30)
-    sm = r.read().decode()
-    import re as _re
-    hosts = _re.findall(r"<loc>[^<]*/api/([^<]+)</loc>", sm)
-    assert len(hosts) >= 100, f"expected hundreds of vendor pages in the sitemap, got {len(hosts)}"
-    for host in hosts[:12]:                       # every advertised page renders
-        st, _h = _html(f"/api/{host}")
-        assert st == 200, f"sitemap advertises /api/{host} which returned {st}"
-
-
-def t_vendor_index_lists_and_links():
-    s, h = _html("/api/")
-    assert s == 200, s
-    assert 'href="/api/stripe.com"' in h, "index must link the vendor pages it lists"
 
 
 def t_a_refusal_is_a_refusal_not_a_fault():

@@ -12,7 +12,7 @@ _tmp = tempfile.mkdtemp(prefix="neuronto-pagecache-")
 os.environ["NEURONTO_PAGECACHE_DB"] = os.path.join(_tmp, "pagecache.db")
 os.environ.setdefault("NEURONTO_DB", os.path.join(_tmp, "neuronto.db"))
 os.environ["NEURONTO_EVENT_SINK"] = ""
-from app import render as R  # noqa: E402
+from app import pagecache as R  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond):

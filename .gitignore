@@ -66,3 +66,7 @@ commercial/
 # Generated media for the homepage film. Deployed with the site, never versioned:
 # megabytes of video in history would be paid for by every clone, forever.
 web/media/
+
+# The website: every page, its assets and build scripts. A separate private
+# repository checked out here; the registry never depends on it.
+website/

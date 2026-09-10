@@ -22,6 +22,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import sqlite3
 import threading
 import urllib.parse
@@ -34,9 +35,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
-from . import (a2a, adoption, audit, badge, bench, catalog, config, embed, events,
+from . import (a2a, adoption, audit, badge, bench, config, directory, embed, events,
                federation, ingest, liveness, limits, publisher, reliability,
-               render, resolve, safety, search, state, store, submissions, tools_index)
+               pagecache, resolve, safety, search, state, store, submissions, tools_index)
 from .normalize import media_family
 
 app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Index", version="1.0.0",
@@ -93,7 +94,6 @@ async def _rate_limit(request: Request, call_next):
 events.install(app)
 
 _conn: sqlite3.Connection | None = None
-WEB = Path(__file__).resolve().parent.parent / "web"
 
 
 def db() -> sqlite3.Connection:
@@ -101,21 +101,20 @@ def db() -> sqlite3.Connection:
     return store.tls_conn()
 
 
-# The expensive pages, with the TTL each is served at. Warmed on startup and
-# refreshed on a timer, so the first visitor after a deploy is never the one who
-# pays for a 22 second build.
+# The expensive pages are a deployment's to list. Each callable in WARMERS returns
+# (key, ttl, build) triples; the website registers one. Warmed on startup and
+# refreshed on a timer, so the first visitor after a deploy never pays for a build.
+WARMERS: list = []
+
+
 def _warmable():
-    return [
-        ("home",        600,  _render_home),
-        ("tools-index", 1800, lambda: catalog.render_index(db())),
-        ("pubs-index",  1800, lambda: catalog.render_publishers_index(db())),
-        ("published",   3600, lambda: catalog.render_published(db())),
-        ("adoption-html", 3600, lambda: catalog.render_adoption(adoption.report(db()))),
-    ] + [(f"cat-{slug}", 1800, (lambda sl: lambda: catalog.render_category(db(), sl))(slug))
-         # Largest categories first: they are the slowest to build and the most
-         # likely to be opened, so they should be the first to stop being stale.
-         for slug, _n in sorted(catalog.published(db()).items(),
-                                key=lambda kv: -kv[1])]
+    out = []
+    for provider in WARMERS:
+        try:
+            out.extend(provider())
+        except Exception:
+            continue
+    return out
 
 
 def _warm_all() -> None:
@@ -125,29 +124,29 @@ def _warm_all() -> None:
     warming is background work and must never be the reason a real request
     waits, which on a two core box it otherwise is.
     """
-    if not render.claim_warm(f"pid{os.getpid()}"):
+    if not pagecache.claim_warm(f"pid{os.getpid()}"):
         return
     built = 0
     try:
         # The category map first: every category page and the sitemap read it,
         # and it is the single most expensive thing the request path can touch.
         try:
-            if render.warm_value("published-map", 1800,
-                                 lambda: catalog._compute_published(db())):
+            if pagecache.warm_value("published-map", 1800,
+                                 lambda: directory._compute_published(db())):
                 built += 1
-                catalog.published(db(), refresh=False)
+                directory.published(db(), refresh=False)
         except Exception:
             pass
         for key, ttl, build in _warmable():
             try:
-                if render.warm(key, ttl, build):
+                if pagecache.warm(key, ttl, build):
                     built += 1
                     time.sleep(0.12)
             except Exception:
                 continue
     finally:
-        render.release_warm()
-        render.checkpoint()
+        pagecache.release_warm()
+        pagecache.checkpoint()
     if built:
         print(f"page cache: warmed {built} page(s)", flush=True)
 
@@ -177,6 +176,11 @@ def _find_shadowed() -> list[str]:
     return sorted(f"{m} {p}" for (m, p), n in seen.items() if n > 1)
 
 
+# A second instance sharing the same index (staging, a one-off check) must not run
+# the warm, the refresher or the submission retrier a second time.
+BACKGROUND = os.getenv("NEURONTO_BACKGROUND", "1") != "0"
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     db()
@@ -186,7 +190,8 @@ async def _startup() -> None:
               + ", ".join(SHADOWED_PATHS), flush=True)
     # In a thread: warming touches every tool row and would otherwise block the
     # event loop, and therefore every request, for the whole of startup.
-    threading.Thread(target=_warm_all, name="page-warm", daemon=True).start()
+    if BACKGROUND:
+        threading.Thread(target=_warm_all, name="page-warm", daemon=True).start()
 
     async def _refresher():
         # Rebuilds ahead of expiry so the stale-while-revalidate path is a
@@ -195,7 +200,8 @@ async def _startup() -> None:
             await asyncio.sleep(600)
             await asyncio.to_thread(_warm_all)
 
-    asyncio.ensure_future(_refresher())
+    if BACKGROUND:
+        asyncio.ensure_future(_refresher())
 
     async def _retrier():
         # Pending submissions come back here until they index or give up.
@@ -209,28 +215,17 @@ async def _startup() -> None:
                 pass
             await asyncio.sleep(SUBMIT_RETRY_EVERY_S)
 
-    asyncio.ensure_future(_retrier())
+    if BACKGROUND:
+        asyncio.ensure_future(_retrier())
 
 
-# Set here and nowhere else. The policy allows exactly what the pages use:
-# their own inline scripts and styles, Google Fonts, and the CDN the API
-# documentation page loads its viewer from. Nothing may frame these pages.
-# Set here and nowhere else. It allows exactly what these pages actually load:
-# their own inline scripts and styles, Google Fonts, the CDN the API reference
-# loads its viewer from, and the tag manager running at the edge together with
-# the analytics tool it injects. The first version omitted the last of those and
-# silently broke it; a policy that blocks a tool the site is meant to be using
-# is a bug in the policy.
+# Set here and nowhere else. The engine serves JSON and one HTML document, the API
+# reference, whose viewer loads from a CDN. A deployment that adds pages extends
+# this policy when it registers them.
 _CSP = ("default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
-        "https://static.cloudflareinsights.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net "
-        "; "
-        "font-src 'self' data: https://fonts.gstatic.com; "
-        "img-src 'self' data: https:; "
-        "connect-src 'self' "
-        "https://static.cloudflareinsights.com https://cloudflareinsights.com; "
-        "frame-src; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; "
         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
 _SECURITY = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
@@ -842,35 +837,11 @@ def robots():
     lines = ["User-agent: *", "Allow: /", ""]
     for ua in social:
         lines += [f"User-agent: {ua}", "Allow: /", ""]
-    lines += [f"Sitemap: {B}/sitemap.xml",
-              f"Agentmap: {B}/.well-known/ard.json", ""]
+    if any(getattr(r, "path", None) == "/sitemap.xml" for r in app.router.routes):
+        lines.append(f"Sitemap: {B}/sitemap.xml")
+    lines += [f"Agentmap: {B}/.well-known/ard.json", ""]
     return PlainTextResponse("\n".join(lines),
                              headers={"Cache-Control": "public, max-age=300"})
-
-@app.get("/sitemap.xml", include_in_schema=False)
-def sitemap():
-    B = config.PUBLIC_BASE
-    urls = ["/", "/what-is-ard", "/publish", "/submit-mcp-server",
-            "/ard-registries", "/ard-manifest-generator", "/ard-conformance",
-            "/badge", "/connect", "/privacy", "/state-of-mcp", "/console", "/blog",
-            # The capability pages and the two measurement pages. These carry
-            # the verified tool surface, which exists on no other site, so they
-            # are the pages most worth discovering.
-            "/tools/", "/bench", "/adoption", "/submit", "/published"]
-    urls += [f"/connect/{s_}" for s_ in catalog.CLIENTS] + ["/connect/frameworks"]
-    urls += [f"/tools/{slug}" for slug in catalog.published(db())]
-    urls += ["/api/"] + [f"/api/{v['host']}" for v in catalog.vendor_hosts(db())]
-    urls += ["/ard-publishers"] + [f"/ard-publishers/{p['publisher']}"
-                                   for p in catalog.publisher_list(db())]
-    blog = WEB / "blog"
-    if blog.exists():
-        urls += sorted(f"/blog/{p.stem}" for p in blog.glob("*.html")
-                       if p.stem != "index")
-    body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-            + "\n".join(f"  <url><loc>{B}{u}</loc></url>" for u in urls)
-            + "\n</urlset>\n")
-    return Response(body, media_type="application/xml")
 
 @app.get("/agents.md", include_in_schema=False)
 def agents_md():
@@ -1064,99 +1035,36 @@ def _x(v) -> str:
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-def _fmt(n: int) -> str:
-    return f"{int(n or 0):,}"
-
-
-def _render_home() -> str:
-    """Serve the page with its numbers already in the HTML.
-
-    Everything on this page used to be drawn client side, which meant any
-    consumer that does not execute JavaScript - most answer-engine crawlers
-    among them - saw empty tables and concluded the index was empty. The figures
-    that are the whole argument have to survive without a script running.
-    """
-    f = WEB / "index.html"
-    if not f.exists():
-        return "<h1>Neuronto</h1><p>Agentic Resource Discovery index.</p>"
-    html = f.read_text(encoding="utf-8")
-    conn = db()
-    c = store.counts(conn)
-    pubs = store.top_publishers(conn, 12)
-
-    cards = "".join(
-        f'<div class="card"><div class="k">{k}</div><div class="v">{v}</div></div>'
-        for k, v in (("Resources indexed", _fmt(c["entries"])),
-                     ("Publishers", _fmt(c["publishers"])),
-                     ("Verified live", _fmt(c["live"])),
-                     ("Registries federated", _fmt(len(config.UPSTREAMS) + 1))))
-
-    rows = "".join(
-        f'<tr><td><div class="cellflex"><div><div class="nm">{p["publisher"]}</div>'
-        f'<div class="ds">{" · ".join(p["kinds"])}</div></div></div></td>'
-        f'<td class="num">{_fmt(p["entries"])}</td>'
-        f'<td class="num">{_fmt(p["live"])}</td>'
-        f'<td class="num">{len(p["kinds"])}</td></tr>' for p in pubs)
-
-    sentence = (f'{_fmt(c["entries"])} resources from {_fmt(c["publishers"])} '
-                f'publishers, {_fmt(c["live"])} verified to respond')
-
-    # Composition of the index, rendered server side for the same reason as the
-    # figures above: a consumer that does not run JavaScript is exactly the one
-    # deciding whether this index is worth citing.
-    KINDS = {
-        "mcp-server": "MCP servers an agent can connect to and call as tools",
-        "skill":      "Skills and agent skill bundles",
-        "a2a-agent":  "A2A agents with a published agent card",
-        "openapi":    "REST APIs described by an OpenAPI document",
-        "registry":   "Other ARD registries, which is how federation is discovered",
-        "catalog":    "Nested catalogues pointing at further entries",
-        "agent":      "Agent descriptors that are not A2A cards: ACP, OASF, AgentFacts",
-        "webmcp":     "Tools a web page exposes to a browser agent, W3C WebMCP",
-        "plugin":     "Plugin manifests, including the OpenAI-era ai-plugin.json",
-        "graphql":    "GraphQL APIs",
-        "dataset":    "Published datasets",
-        "doc":        "Machine-readable documentation such as llms.txt",
-        "package":    "Published packages",
-        "other":      "Resources whose type is outside the named set",
-    }
-    kinds = "".join(
-        f'<tr><td class="nm">{k}</td><td class="num">{_fmt(n)}</td>'
-        f'<td style="color:var(--mut)">{KINDS.get(k, "")}</td></tr>'
-        for k, n in c["families"].items() if n)
-
-    SRC = {"mcp-registry": "Official MCP Registry", "wellknown": "WellKnown",
-           "huggingface": "Hugging Face Discover", "github": "GitHub Agent Finder",
-           "desvela": "Desvela", "crawl": "Our own crawl of the discovery paths"}
-    sources = "".join(
-        f'<tr><td class="nm">{SRC.get(k, k)}</td><td class="num">{_fmt(n)}</td></tr>'
-        for k, n in c["sources"].items())
-
-    return (html.replace("<!--SSR_CARDS-->", cards)
-                .replace("<!--SSR_PUBS-->", rows)
-                .replace("<!--SSR_N-->", _fmt(c["entries"]))
-                .replace("<!--SSR_SENT-->", sentence)
-                .replace("<!--SSR_KINDS-->", kinds)
-                .replace("<!--SSR_SOURCES-->", sources)
-                .replace("<!--SSR_TOTAL-->",
-                         f'{_fmt(c["entries"])} entries · {_fmt(c["publishers"])} publishers'))
-
-
 # The homepage, the submit page and the console are the most-requested HTML we
 # serve and none of them carried a Cache-Control header, so no browser, proxy or
 # CDN could hold any of them. They are read-only and change a few times a day.
 PAGE_CACHE = {"Cache-Control": "public, max-age=900"}
 
 
-@app.get("/", include_in_schema=False)
-def home():
-    # Built from live counts, so it is cached like the other aggregate pages
-    # rather than rendered per request; crawlers reach the origin for it.
-    return HTMLResponse(render.cached("home", 600, _render_home), headers=PAGE_CACHE)
+# Pages a deployment serves in place of a JSON answer, by name. Empty in the open
+# source registry, which answers every route with data; a website registers its
+# views here, and each route that has a page form asks before answering.
+VIEWS: dict[str, Any] = {}
 
-@app.get("/about", include_in_schema=False)
-@app.get("/registry", include_in_schema=False)
-def _pages(): return home()
+
+@app.get("/", include_in_schema=False)
+def home(request: Request):
+    view = VIEWS.get("home")
+    if view is not None:
+        return view(request)
+    B = config.PUBLIC_BASE
+    c = store.counts(db())
+    return JSONResponse({
+        "name": "Neuronto ARD Registry",
+        "what": "an Agentic Resource Discovery (ARD) registry and index",
+        "entries": c["entries"], "publishers": c["publishers"],
+        "manifest": f"{B}/.well-known/ard.json",
+        "search": {"method": "POST", "url": f"{B}/search"},
+        "tools": f"{B}/tools?q=<task>",
+        "mcp": f"{B}/mcp", "a2a": f"{B}/a2a",
+        "openapi": f"{B}/openapi.json", "reference": f"{B}/api-docs",
+        "llms": f"{B}/llms.txt", "agents": f"{B}/agents.md",
+    }, headers={"Cache-Control": "public, max-age=300"})
 
 
 # ─────────────────────────── MCP wrapper (§5.3.5) ───────────────────────────
@@ -1267,26 +1175,6 @@ def a2a_no_stream() -> Response:
                                    "data": {"card": "/.well-known/agent-card.json"}}},
                         status_code=405,
                         headers={"Allow": "POST", "Cache-Control": "no-store"})
-
-
-# ─────────────────────────── brand assets ──────────────────────────────────
-
-_MARK = (WEB / "mark.svg")
-
-@app.get("/favicon.svg", include_in_schema=False)
-@app.get("/icon.svg", include_in_schema=False)
-def favicon_svg():
-    if _MARK.exists():
-        return Response(_MARK.read_text(encoding="utf-8"), media_type="image/svg+xml",
-                        headers={"Cache-Control": "public, max-age=604800"})
-    return Response(status_code=404)
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-def favicon_ico():
-    # Browsers still probe /favicon.ico. Point them at the vector rather than
-    # shipping a bitmap that would only ever look worse.
-    return Response(status_code=301, headers={"Location": "/favicon.svg"})
 
 
 # ─────────────────────── Publisher analytics (Console) ─────────────────────
@@ -1747,110 +1635,6 @@ else:
         print(f"commercial layer failed to load: {type(_e).__name__}: {_e}", flush=True)
 
 
-@app.get("/console", include_in_schema=False)
-def console_page():
-    f = WEB / "console.html"
-    if f.exists():
-        return HTMLResponse(f.read_text(encoding="utf-8"), headers=PAGE_CACHE)
-    return HTMLResponse(_render_home(), headers=PAGE_CACHE)
-
-
-# IndexNow. Bing, Yandex, Seznam and Naver accept a push rather than waiting to
-# crawl, and Bing is what ChatGPT's search reads, so this is the shortest path
-# from "published" to "citable". Google does not participate; it gets the
-# sitemap and the crawl.
-INDEXNOW_KEY = "888578862bc02c46e40d0914ace6f376"
-
-
-@app.get("/" + INDEXNOW_KEY + ".txt", include_in_schema=False)
-def indexnow_key_file():
-    """Ownership is proved by serving the key at the site root."""
-    return PlainTextResponse(INDEXNOW_KEY)
-
-
-# Guide pages. We ranked for our own name and nothing else because we had no
-# page that answered the questions a publisher actually types. Each of these is
-# one real question, answered in its first paragraph.
-GUIDES = {
-    "what-is-ard": "what-is-ard.html",
-    "publish": "publish.html",
-    "submit-mcp-server": "submit-mcp-server.html",
-    "ard-registries": "ard-registries.html",
-    "ard-manifest-generator": "ard-manifest-generator.html",
-    "ard-conformance": "ard-conformance.html",
-}
-
-
-@app.get("/registries", include_in_schema=False)
-def registries_redirect():
-    # The comparison moved to a name that says what it is.
-    return RedirectResponse("/ard-registries", status_code=301)
-
-
-@app.get("/img/{name}", include_in_schema=False)
-def image(name: str):
-    f = WEB / "img" / name
-    if "/" in name or ".." in name or not f.exists():
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    # Derive the type from the extension. Serving a PNG as image/jpeg is not
-    # cosmetic: preview crawlers fetch og:image and validate it, and a mismatched
-    # content type is a reason to drop the card.
-    kind = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-            "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif"}.get(
-        name.rsplit(".", 1)[-1].lower(), "application/octet-stream")
-    return Response(f.read_bytes(), media_type=kind,
-                    headers={"Cache-Control": "public, max-age=604800, immutable"})
-
-
-# The homepage film and its still. Two things here are load bearing. Byte ranges:
-# Safari will not play a <video> whose server answers a Range request with the
-# whole file, and the edge only answers ranges itself once it holds a copy, so
-# the first visitor behind an empty cache would get a film that never starts.
-# And every name carries a content hash, so a year of caching is safe: a new cut
-# is a new name, never a stale copy served under an old one.
-_MEDIA = WEB / "media"
-_MEDIA_TYPES = {"mp4": "video/mp4", "webm": "video/webm", "webp": "image/webp",
-                "avif": "image/avif", "jpg": "image/jpeg"}
-_MEDIA_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
-_MEDIA_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
-
-
-@app.api_route("/media/{name}", methods=["GET", "HEAD"], include_in_schema=False)
-def media(name: str, request: Request):
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    f = _MEDIA / name
-    if not _MEDIA_NAME.match(name) or ".." in name or ext not in _MEDIA_TYPES or not f.is_file():
-        return JSONResponse(status_code=404, headers={"Cache-Control": "no-store"},
-                            content={"error": "not_found"})
-    size = f.stat().st_size
-    kind = _MEDIA_TYPES[ext]
-    base = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=31536000, immutable"}
-    head = request.method == "HEAD"
-    m = _MEDIA_RANGE.match(request.headers.get("range", "").strip())
-    if m and (m.group(1) or m.group(2)):
-        if m.group(1):
-            start = int(m.group(1))
-            end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
-        else:
-            # a suffix range, the last N bytes
-            start, end = max(size - int(m.group(2)), 0), size - 1
-        if start >= size or start > end:
-            return Response(status_code=416, headers={**base, "Content-Range": f"bytes */{size}"})
-        length = end - start + 1
-        headers = {**base, "Content-Range": f"bytes {start}-{end}/{size}",
-                   "Content-Length": str(length)}
-        if head:
-            return Response(status_code=206, media_type=kind, headers=headers)
-        with f.open("rb") as fh:
-            fh.seek(start)
-            body = fh.read(length)
-        return Response(body, status_code=206, media_type=kind, headers=headers)
-    if head:
-        return Response(status_code=200, media_type=kind,
-                        headers={**base, "Content-Length": str(size)})
-    return Response(f.read_bytes(), media_type=kind, headers=base)
-
-
 # ---------------------------------------------------------------------------
 # Tool-level search. The complement to /search: when an agent already knows the
 # shape of the call it needs, the server hosting it is an implementation
@@ -1882,7 +1666,7 @@ def tools_endpoint(body: dict) -> JSONResponse:
 
 
 @app.get("/tools")
-async def tools_get(q: str | None = Query(None),
+async def tools_get(request: Request, q: str | None = Query(None),
                     limit: int = Query(20, ge=1, le=100),
                     withSchema: bool = Query(False)):
     """With `q`, the JSON search API. Without it, the human capability index.
@@ -1893,55 +1677,12 @@ async def tools_get(q: str | None = Query(None),
     if q:
         return tools_endpoint({"query": {"text": q}, "limit": limit,
                                      "withSchema": withSchema})
-    html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/tools/", include_in_schema=False)
-def tools_index_slash():
-    html_ = render.cached("tools-index", 1800, lambda: catalog.render_index(db()))
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/tools/{slug}", include_in_schema=False)
-def tools_category(slug: str):
-    if slug not in catalog.published(db()):
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    html_ = render.cached(f"cat-{slug}", 1800,
-                          lambda: catalog.render_category(db(), slug))
-    if not html_:
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/api", include_in_schema=False)
-@app.get("/api/", include_in_schema=False)
-def vendor_index():
-    """Every API vendor with a page. Registered above the /{slug} catch-all so
-    the bare /api is ours and not a guide lookup for a page called "api"."""
-    html_ = render.cached("api-index", 1800, lambda: catalog.render_vendor_index(db()))
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/api/{host}", include_in_schema=False)
-def vendor_page(host: str):
-    """One vendor's indexed API surface.
-
-    The URL a stranger guessed five ways before this existed. Gated on
-    `catalog.MIN_OPS` so it is a page about something, never a doorway, and it
-    carries only what the vendor wrote or a probe observed.
-    """
-    h = _host_arg(host)
-    if not h or not catalog._vendor_ok(db(), h):
-        return JSONResponse(status_code=404, content={
-            "error": "not_found",
-            "detail": f"no API page for {host!r}. Pages exist for vendors with at least "
-                      f"{catalog.MIN_OPS} documented operations indexed; the list is at /api/. "
-                      "To search every indexed operation: POST /search."})
-    html_ = render.cached(f"api-{h}", 1800, lambda: catalog.render_vendor(db(), h))
-    if not html_:
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
+    view = VIEWS.get("tools-index")
+    if view is not None:
+        return view(request)
+    return JSONResponse({"categories": directory.published(db()),
+                         "search": f"{config.PUBLIC_BASE}/tools?q=<task>"},
+                        headers={"Cache-Control": "public, max-age=1800"})
 
 
 # ---------------------------------------------------------------------------
@@ -1985,10 +1726,9 @@ def bench_endpoint(request: Request):
         return JSONResponse(status_code=404,
                             content={"error": "no_run_yet",
                                      "detail": "no benchmark has been run on this index"})
-    if _wants_html(request):
-        html_ = render.cached("bench-html", 900, lambda: catalog.render_bench(got))
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=900",
-                                            "Vary": "Accept"})
+    view = VIEWS.get("bench")
+    if view is not None and _wants_html(request):
+        return view(request, got)
     return JSONResponse(got, headers={"Cache-Control": "public, max-age=900",
                                       "Vary": "Accept"})
 
@@ -2008,11 +1748,9 @@ def adoption_alias():
 @app.get("/adoption")
 def adoption_endpoint(request: Request):
     rep = adoption.report(db())
-    if _wants_html(request):
-        html_ = render.cached("adoption-html", 3600,
-                              lambda: catalog.render_adoption(rep))
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
-                                            "Vary": "Accept"})
+    view = VIEWS.get("adoption")
+    if view is not None and _wants_html(request):
+        return view(request, rep)
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=3600",
                                       "Vary": "Accept"})
 
@@ -2046,11 +1784,9 @@ def connect_client_page(slug: str, request: Request):
     # Handled inside the slug route rather than as its own path, so it cannot
     # depend on which route FastAPI matches first.
     if slug == "frameworks":
-        if _wants_html(request):
-            html_ = render.cached("connect-frameworks-html", 3600,
-                                  catalog.render_frameworks_page)
-            return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
-                                                "Vary": "Accept"})
+        view = VIEWS.get("connect-frameworks")
+        if view is not None and _wants_html(request):
+            return view(request)
         B = config.PUBLIC_BASE
         return JSONResponse({
             "endpoint": f"{B}/mcp",
@@ -2060,14 +1796,12 @@ def connect_client_page(slug: str, request: Request):
             "without_mcp": {"npm": "neuronto", "rest": f"{B}/search"},
             "html": f"{B}/connect/frameworks",
         }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
-    if slug not in catalog.CLIENTS:
+    if slug not in directory.CLIENTS:
         return Response(status_code=404)
-    if _wants_html(request):
-        html_ = render.cached(f"connect-{slug}-html", 3600,
-                              lambda: catalog.render_client_page(slug))
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
-                                            "Vary": "Accept"})
-    c = catalog.CLIENTS[slug]
+    view = VIEWS.get("connect-client")
+    if view is not None and _wants_html(request):
+        return view(request, slug)
+    c = directory.CLIENTS[slug]
     B = config.PUBLIC_BASE
     return JSONResponse({
         "client": c["name"], "kind": c["kind"],
@@ -2087,12 +1821,10 @@ def state_of_mcp(request: Request):
     browser, and the limitations travel inside the payload rather than in a
     footnote, so a reader who quotes the number also gets its caveats.
     """
-    rep = render.cached("state-of-mcp", 900, lambda: state.report(db()))
-    if _wants_html(request):
-        html_ = render.cached("state-of-mcp-html", 900,
-                              lambda: catalog.render_state_page(rep))
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=900",
-                                            "Vary": "Accept"})
+    rep = pagecache.cached("state-of-mcp", 900, lambda: state.report(db()))
+    view = VIEWS.get("state-of-mcp")
+    if view is not None and _wants_html(request):
+        return view(request, rep)
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=900",
                                       "Vary": "Accept"})
 
@@ -2117,7 +1849,7 @@ def reliability_report(request: Request, entry: str = Query("", max_length=400))
                 "error": "not_found",
                 "detail": "no entry with that key. Keys come from /search results."})
         return JSONResponse({"entry": entry, **r})
-    rep = render.cached("reliability", 900, lambda: reliability.corpus(db()))
+    rep = pagecache.cached("reliability", 900, lambda: reliability.corpus(db()))
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=900"})
 
 
@@ -2137,7 +1869,7 @@ def tool_safety(request: Request, entry: str = Query("", max_length=400)):
     """
     if entry:
         return JSONResponse(safety.for_entry(db(), entry))
-    rep = render.cached("tool-safety", 3600, lambda: safety.scan_corpus(db()))
+    rep = pagecache.cached("tool-safety", 3600, lambda: safety.scan_corpus(db()))
     return JSONResponse(rep, headers={"Cache-Control": "public, max-age=3600"})
 
 
@@ -2199,11 +1931,10 @@ def liveness_feed(dead: int = Query(0, ge=0, le=1),
 @app.get("/privacy", include_in_schema=False)
 @app.get("/privacy-policy", include_in_schema=False)
 def privacy_page(request: Request):
-    """What we receive, keep and forward. See catalog.render_privacy_page."""
-    if _wants_html(request):
-        html_ = render.cached("privacy-html", 3600, catalog.render_privacy_page)
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
-                                            "Vary": "Accept"})
+    """What we receive, keep and forward. A deployment may also serve it as a page."""
+    view = VIEWS.get("privacy")
+    if view is not None and _wants_html(request):
+        return view(request)
     return JSONResponse({
         "accounts": "none. no signup, no payment, no personal data requested",
         "ip_addresses": "not stored. the analytics table has no column for one",
@@ -2232,11 +1963,10 @@ def privacy_page(request: Request):
 
 @app.get("/connect", include_in_schema=False)
 def connect_page(request: Request):
-    """Copy-paste setup for every client. See catalog.render_connect_page."""
-    if _wants_html(request):
-        html_ = render.cached("connect-html", 3600, catalog.render_connect_page)
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600",
-                                            "Vary": "Accept"})
+    """Copy-paste setup for every client. A deployment may also serve it as a page."""
+    view = VIEWS.get("connect")
+    if view is not None and _wants_html(request):
+        return view(request)
     B = config.PUBLIC_BASE
     return JSONResponse({
         "endpoint": f"{B}/mcp",
@@ -2260,9 +1990,9 @@ def connect_page(request: Request):
 @app.get("/badge/", include_in_schema=False)
 def badge_help(request: Request, domain: str = Query("", max_length=100)):
     """The badge, and the snippet for it, for whoever asks."""
-    if _wants_html(request):
-        return HTMLResponse(catalog.render_badge_page(db(), domain),
-                            headers={"Cache-Control": "public, max-age=900"})
+    view = VIEWS.get("badge")
+    if view is not None and _wants_html(request):
+        return view(request, domain)
     pub = (domain or "your.domain").strip().lower()
     return JSONResponse({
         "what": "a badge stating what we verified about your resources",
@@ -2274,46 +2004,6 @@ def badge_help(request: Request, domain: str = Query("", max_length=100)):
                  "returned to tools/list and whether the endpoint answers. It is "
                  "never a trust, safety or quality rating"),
     })
-
-
-@app.get("/ard-publishers", include_in_schema=False)
-@app.get("/ard-publishers/", include_in_schema=False)
-def publishers_index():
-    html_ = render.cached("pubs-index", 1800,
-                          lambda: catalog.render_publishers_index(db()))
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/ard-publishers/{host}", include_in_schema=False)
-def publisher_page(host: str):
-    h = host.strip().lower()
-    if not h or len(h) > 100 or not all(c.isalnum() or c in ".-_" for c in h):
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    html_ = render.cached(f"pub-{h}", 1800, lambda: catalog.render_publisher(db(), h))
-    if html_:
-        return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=1800"})
-    # Not verified. The traffic that lands here is a browser following a link we
-    # put in our own /submit response, so answer with a page saying what would
-    # change that, not with an API error. The status stays 404: these must not
-    # be indexed as publisher pages.
-    return HTMLResponse(
-        render.cached(f"pubx-{h}", 900,
-                      lambda: catalog.render_unverified_publisher(db(), h)),
-        status_code=404, headers={"Cache-Control": "public, max-age=900"})
-
-
-# The pages launched at /publishers and were submitted to IndexNow there. The
-# canonical slug carries the term now, so the old paths redirect permanently
-# rather than 404 or serve a duplicate.
-@app.get("/publishers", include_in_schema=False)
-@app.get("/publishers/", include_in_schema=False)
-def publishers_moved():
-    return RedirectResponse("/ard-publishers", status_code=301)
-
-
-@app.get("/publishers/{host}", include_in_schema=False)
-def publisher_moved(host: str):
-    return RedirectResponse(f"/ard-publishers/{host}", status_code=301)
 
 
 @app.get("/feed.xml", include_in_schema=False)
@@ -2590,7 +2280,7 @@ def _invalidate_after_submit(body) -> None:
     used to delete every cached page, including on a dry run, which put a fifteen
     second rebuild of /tools in front of whoever arrived next.
     """
-    catalog.invalidate_publishers()
+    directory.invalidate_publishers()
     raw = ""
     if isinstance(body, dict):
         for field in ("domain", "endpoint", "url"):
@@ -2599,7 +2289,7 @@ def _invalidate_after_submit(body) -> None:
                 raw = v.strip()
                 break
     h = raw.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].strip().lower()
-    render.invalidate([f"pub-{h}", f"pubx-{h}"] if h else [])
+    pagecache.invalidate([f"pub-{h}", f"pubx-{h}"] if h else [])
 
 
 async def _submit(body: dict, source: str = "http", probe: bool = False,
@@ -3056,161 +2746,19 @@ def submit_status_for(endpoint: str = Query(None), domain: str = Query(None)) ->
     return JSONResponse(submissions.public(row), headers={"Cache-Control": "no-store"})
 
 
-@app.get("/submit", include_in_schema=False)
-async def submit_page():
-    B = config.PUBLIC_BASE
-    body = f"""
-<div class="pgh">
-  <div class="crumb"><a href="/">Index</a> / Submit</div>
-  <h1>How to submit to an ARD registry</h1>
-  <p class="lede">Two ways into this one, and neither needs an account, an allowlist, a charge or any
-  paid ranking. Give us a <b>domain</b> that serves an ARD manifest and we index everything
-  it declares. Or give us an <b>MCP server URL</b> directly, with no manifest at all, and we
-  handshake with it and read its own tool list.</p>
-</div>
-
-<div class="note" style="max-width:62ch">
-  <form id="f" onsubmit="return go(event)" style="display:flex;gap:8px;flex-wrap:wrap">
-    <input id="d" placeholder="example.com  or  https://your-host/mcp" aria-label="Your domain or MCP endpoint"
-           style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);
-                  border-radius:var(--r);color:var(--fg);padding:10px 12px;font-family:var(--mono)">
-    <button class="btn btn--w" type="submit">Index it</button>
-  </form>
-  <pre id="o" style="margin-top:14px;display:none;white-space:pre-wrap"></pre>
-</div>
-
-<h2 style="margin-top:34px;font-size:20px">How each public ARD registry takes submissions</h2>
-<p class="lede">Checked on 1 September 2026. "Verified" means the registry fetches or handshakes with what you submit
-before listing it, so nothing is taken on the submitter's word.</p>
-<div class="scroll"><table class="tbl"><thead><tr><th>Registry</th><th>How to get listed</th><th>Verified first</th></tr></thead><tbody>
-<tr><td class="nm">Neuronto</td><td><code>POST /submit</code> with an MCP endpoint or a domain; the MCP tool <code>publish_resource</code>; <code>ard-publish submit</code></td><td>yes: handshake for an endpoint, manifest fetch for a domain</td></tr>
-<tr><td class="nm">WellKnown</td><td><code>/submit</code> form on its site</td><td>not stated</td></tr>
-<tr><td class="nm">GitHub Agent Finder</td><td>no submission path found; indexed by its own crawl</td><td>n/a</td></tr>
-<tr><td class="nm">Hugging Face Discover</td><td>no submission path found; indexes Hugging Face Spaces and Skills</td><td>n/a</td></tr>
-<tr><td class="nm">Desvela</td><td>no submission path found; crawls a top-100,000 domain list, so a domain outside it is not seen</td><td>n/a</td></tr>
-<tr><td class="nm">ARD Registry Hub</td><td>no submission path found</td><td>n/a</td></tr>
-</tbody></table></div>
-<p class="lede">Registries federate: a domain indexed here is returned to clients of any registry that
-queries Neuronto, and Neuronto queries every registry above on each federated search. The full
-comparison is at <a href="/ard-registries">ARD registries compared</a>.</p>
-
-<h2 style="margin-top:34px;font-size:20px">I only have an MCP server</h2>
-<p class="lede">Then submit the server itself. Most MCP developers have a repository, a
-package and a running endpoint but no manifest, and requiring one turned all of them away.
-We complete an <code>initialize</code> handshake and read <code>tools/list</code>, which is
-stronger evidence than a manifest claim because your server answered for itself. Your real
-tool names and input schemas are then searchable at
-<a href="/tools/">/tools</a>.</p>
-<pre style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>curl -s -X POST https://neuronto.com/submit \\
-  -H 'content-type: application/json' \\
-  -d '{{"endpoint":"https://your-host/mcp"}}'</code></pre>
-
-<h2 style="margin-top:34px;font-size:20px">What happens when you submit a domain</h2>
-<ol class="lede">
-  <li>We request both well-known manifest paths on your domain, live.</li>
-  <li>Whatever parses as a manifest is indexed immediately, with your declared types,
-      identifiers and representative queries preserved exactly as written.</li>
-  <li>Your endpoints are probed for reachability, and any MCP server among them is asked
-      for its tool list, so the index records what your servers actually expose.</li>
-  <li>You get a page at <code>{B}/ard-publishers/&lt;your-domain&gt;</code> and become
-      searchable through <code>/search</code> and the MCP endpoint.</li>
-  <li>Last step: add the badge from <a href="/badge">{B}/badge</a>. It states what was
-      verified, corrects itself, is free, and changes nothing about your indexing or ranking.</li>
-</ol>
-
-<h2 style="margin-top:30px;font-size:20px">Skills, APIs and agents</h2>
-<p class="lede">A manifest is the only way to list a skill, an OpenAPI service or an A2A
-agent, because unlike an MCP server they cannot be verified by handshake. We index all of
-them: three MCP media types, three A2A spellings, four skill types, plus OpenAPI, docs,
-catalogues and packages, normalised so a filter finds them however you spelled the type.</p>
-
-<h2 style="margin-top:30px;font-size:20px">Do it from the command line</h2>
-<pre style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;overflow-x:auto"><code>curl -s -X POST {B}/submit \\
-  -H 'content-type: application/json' \\
-  -d '{{"domain":"example.com"}}'</code></pre>
-
-<h2 style="margin-top:30px;font-size:20px">What happens when it does not verify</h2>
-<p class="lede">It is kept. A submission that cannot be verified at that moment, for any
-reason, answers <code>202</code> with <code>"status": "pending"</code>, a submission id and
-<code>evidence</code>: the HTTP status, content type and first bytes your endpoint actually
-returned, or the JSON-RPC error it sent, so you can see exactly what we saw. We then retry
-it ourselves on a fixed schedule (1 minute, 5, 15, 1 hour, 4, 12, 24, 24) until it verifies
-or the attempts run out, and <code>GET {B}/submit/status/&lt;id&gt;</code> shows where it
-stands at any time. A refusal caused by us rather than by you, such as the index being busy,
-costs none of those attempts. Submitting again is harmless and joins the same queue. So a
-server that was mid-deploy or a DNS record that had not propagated still ends up indexed
-with no second submission from you, and if every attempt fails you are told that too, with
-the last evidence, rather than left guessing.</p>
-
-<div class="note">
-  Nothing here is taken on your word: the manifest is fetched from your domain, so a
-  submission cannot inject anything you do not actually publish. If no manifest is found you
-  get told which paths were tried, and the submission is retried. Not publishing yet? The
-  <a href="/publish">ten-minute guide</a> and the <a href="/console">free audit</a> both help.
-</div>
-
-<script>
-async function go(e){{
-  e.preventDefault();
-  const d=document.getElementById('d').value.trim(), o=document.getElementById('o');
-  if(!d) return false;
-  o.style.display='block'; o.textContent='fetching '+d+' ...';
-  try{{
-    const body=(d.startsWith('http://')||d.startsWith('https://'))?{{endpoint:d}}:{{domain:d}};
-    const r=await fetch('/submit',{{method:'POST',headers:{{'content-type':'application/json'}},
-      body:JSON.stringify(body)}});
-    const j=await r.json();
-    o.textContent=JSON.stringify(j,null,2);
-  }}catch(err){{ o.textContent=String(err); }}
-  return false;
-}}
-</script>
-"""
-    return HTMLResponse(render.page(
-        "How to submit to an ARD registry",
-        "How to get listed in an Agentic Resource Discovery registry, and how each public "
-        "ARD registry takes submissions. We fetch your manifest live from your domain, or "
-        "handshake with your MCP server: no account, no allowlist, no charge.",
-        body, f"{B}/submit"), headers=PAGE_CACHE)
-
-
-@app.get("/published", include_in_schema=False)
-def published_page():
-    html_ = render.cached("published", 3600, lambda: catalog.render_published(db()))
-    return HTMLResponse(html_, headers={"Cache-Control": "public, max-age=3600"})
-
-
-@app.get("/blog", include_in_schema=False)
-@app.get("/blog/", include_in_schema=False)
-def blog_index():
-    f = WEB / "blog" / "index.html"
-    if not f.exists():
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    # Short, with a long revalidation window. This file changes only when a post
-    # is published, and a thirty minute TTL meant a new post stayed invisible at
-    # the edge for half an hour after the build, which reads as a failed deploy.
-    # stale-while-revalidate keeps the cache useful without that.
-    return HTMLResponse(f.read_text(encoding="utf-8"),
-                        headers={"Cache-Control":
-                                 "public, max-age=300, stale-while-revalidate=1800"})
-
-
-@app.get("/blog/{slug}", include_in_schema=False)
-def blog_post(slug: str):
-    f = WEB / "blog" / f"{slug}.html"
-    if "/" in slug or ".." in slug or not f.exists():
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    return HTMLResponse(f.read_text(encoding="utf-8"),
-                        headers={"Cache-Control": "public, max-age=1800"})
-
-
-@app.get("/{slug}", include_in_schema=False)
-def guide_page(slug: str):
-    name = GUIDES.get(slug)
-    if not name:
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    f = WEB / "pages" / name
-    if not f.exists():
-        return JSONResponse(status_code=404, content={"error": "not_found"})
-    return HTMLResponse(f.read_text(encoding="utf-8"),
-                        headers={"Cache-Control": "public, max-age=1800"})
+# The website, if this deployment has one: every page, its assets and its views.
+# A separate package that is never published, loaded here and nowhere else, and
+# LAST, after every engine route, because it owns the /{slug} guide catch-all and
+# a route registered earlier would shadow the engine's own. Without it this is the
+# complete registry: every route answers with data.
+WEBSITE: list[str] = []
+try:
+    import website as _website
+except ImportError:
+    _website = None
+if _website is not None:
+    try:
+        WEBSITE = _website.register(app, sys.modules[__name__])
+        print(f"website: {len(WEBSITE)} routes", flush=True)
+    except Exception as _e:                      # never take the registry down with it
+        print(f"website failed to load: {type(_e).__name__}: {_e}", flush=True)
