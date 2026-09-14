@@ -119,6 +119,14 @@ curl -sS -X POST https://neuronto.com/search -H 'content-type: application/json'
   -d '{"query":{"text":"crypto token prices","filter":{"pay:protocol":["x402"],"maxPricePerCall":0.01}},"federation":"none"}'
 ```
 
+**Paying for heavy calls.** A self-hosted Neuronto charges nothing. On neuronto.com, the
+calls that do outbound work for the caller, a federated search, an audit or a manifest
+build, are free up to an allowance. Past it, the 429 carries an x402 price in a
+`PAYMENT-REQUIRED` header, and an agent that pays gets the call instead of a wait; a client
+that sends `x-payment-protocol: x402` gets the 402 directly. Only a call that succeeded is
+settled. Submitting a resource, claiming a domain, being listed and position in results are
+never charged. `GET https://neuronto.com/x402` states the live terms.
+
 Terms never change a score, and the registry never handles a payment: the caller pays the
 provider directly.
 
