@@ -1953,7 +1953,13 @@ def privacy_page(request: Request):
     if view is not None and _wants_html(request):
         return view(request)
     return JSONResponse({
-        "accounts": "none. no signup, no payment, no personal data requested",
+        "accounts": "none. no signup and no personal data requested",
+        "payments": ("optional, and only for a call past its free allowance, over x402. A paid call "
+                     "keeps the paying wallet address, the amount and the transaction hash, which the "
+                     "blockchain already makes public, with what was bought: the domain or subject "
+                     "checked, or an anonymous search's query under the rule below. A search made with "
+                     "an API key keeps its query withheld even when paid for. No IP address, card, name "
+                     "or email is involved"),
         "ip_addresses": "not stored. the analytics table has no column for one",
         "session_id": ("truncated sha256 of a daily-rotating salt, address and user agent; "
                        "unlinkable across days. Sec-GPC or DNT yields no session at all"),
