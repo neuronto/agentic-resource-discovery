@@ -109,7 +109,7 @@ def run(base: str, fed: str) -> dict:
 
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    base = args[0] if args else "http://localhost:8700"
+    base = args[0] if args else "https://neuronto.com"
     mode = "both"
     for a in sys.argv[1:]:
         if a.startswith("--fed"):

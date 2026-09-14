@@ -76,7 +76,7 @@ def is_safe_target(host: str) -> bool:
     network, and indexes what answers. Without this it is a server-side request
     forgery primitive: it will probe an internal address and, on success,
     publish internal infrastructure into a public search index. It did:
-    `{"url": "http://172.18.0.1:8700/mcp"}` returned `{"status": "indexed"}`.
+    `{"url": "http://<our own private address>/mcp"}` returned `{"status": "indexed"}`.
 
     Resolving is the point. Rejecting the literal string `127.0.0.1` is easy and
     useless, because a public name can resolve to a private address, and one
