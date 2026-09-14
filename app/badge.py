@@ -43,7 +43,7 @@ def stats_for(conn: sqlite3.Connection, publisher: str) -> tuple | None:
              (SELECT COUNT(*) FROM tools t JOIN entries e2 ON e2.key=t.entry_key
                WHERE lower(e2.publisher)=?) AS tools,
              COUNT(*) AS servers,
-             SUM(CASE WHEN mcp_status LIKE 'ok%' OR mcp_status='auth'
+             SUM(CASE WHEN mcp_status LIKE 'ok%' OR mcp_status IN ('auth', 'payment')
                       THEN 1 ELSE 0 END) AS responding
            FROM entries
            WHERE lower(publisher)=? AND type_family='mcp-server'""",

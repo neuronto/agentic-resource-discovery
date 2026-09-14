@@ -17,10 +17,11 @@ import time
 
 import httpx
 
-from . import config, store
+from . import config, payments, store
 
 
-async def _probe(client: httpx.AsyncClient, url: str) -> tuple[bool, int | None, int]:
+async def _probe(client: httpx.AsyncClient, url: str
+                 ) -> tuple[bool, int | None, int, dict | None]:
     """One endpoint, under a hard deadline.
 
     The timeout below is httpx's budget for a single request, and this client
@@ -37,17 +38,24 @@ async def _probe(client: httpx.AsyncClient, url: str) -> tuple[bool, int | None,
                        follow_redirects=True),
             timeout=config.LIVENESS_DEADLINE_S)
         ms = int((time.perf_counter() - t0) * 1000)
-        return (r.status_code < 500), r.status_code, ms
+        # A 402 is a live server asking to be paid, and for a paid HTTP API this
+        # unpaid GET is the only call we make, so its terms are read here.
+        kind, terms = (payments.classify(r.status_code, r.headers, r.text)
+                       if r.status_code == 402 else (None, None))
+        return (r.status_code < 500), r.status_code, ms, (terms if kind == "payment" else None)
     except Exception:
         # Includes the deadline. "We asked and nothing usable came back inside
         # the time we allow" is the same answer as any other failed probe.
-        return False, None, int((time.perf_counter() - t0) * 1000)
+        return False, None, int((time.perf_counter() - t0) * 1000), None
 
 
-async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
-    """Probe a batch, oldest checks first."""
+async def sweep(conn, limit: int = 400, only_stale: bool = True,
+                rows: list | None = None) -> dict:
+    """Probe a batch, oldest checks first. `rows` of (key, url) probes exactly those."""
     cutoff = int(time.time()) - config.LIVENESS_MAX_AGE_H * 3600
-    if only_stale:
+    if rows is not None:
+        pass
+    elif only_stale:
         rows = conn.execute(
             """SELECT key, url FROM entries
                WHERE url IS NOT NULL AND url != ''
@@ -89,8 +97,8 @@ async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
 
             async def one(key: str, url: str):
                 async with sem:
-                    ok, status, ms = await _probe(client, url)
-                found.append((key, ok, status, ms))
+                    ok, status, ms, pay = await _probe(client, url)
+                found.append((key, ok, status, ms, pay))
             await asyncio.gather(*(one(r["key"], r["url"]) for r in chunk),
                                  return_exceptions=True)
 
@@ -99,8 +107,10 @@ async def sweep(conn, limit: int = 400, only_stale: bool = True) -> dict:
             # to stay open until the last one returned, holding the lock for the
             # length of the whole sweep and refusing anyone trying to submit
             # during it.
-            for key, ok, status, ms in found:
+            for key, ok, status, ms, pay in found:
                 store.mark_liveness(conn, key, ok, status, ms)
+                if pay:
+                    store.mark_payment_live(conn, key, pay)
                 if ok: alive += 1
                 else:  dead += 1
             conn.commit()

@@ -336,7 +336,13 @@ _SEARCH_SCHEMA = {
         "type": "object",
         "properties": {
             "query": {"type": "object", "required": ["text"],
-                      "properties": {"text": {"type": "string"}}},
+                      "properties": {"text": {"type": "string"},
+                                     "filter": {"type": "object", "description": (
+                                         "Structured constraints: `type`, `tags`, `capabilities`, "
+                                         "`publisher`, and payment terms: `pay:protocol` (free, payable, "
+                                         "x402, mpp, card), `maxPricePerCall` or `pay:price` "
+                                         '(dollars per call, e.g. {"lte": 0.01}), `pay:network` '
+                                         "(base, solana, tempo, stripe), `pay:verified` (live).")}}},
             "limit": {"type": "integer", "default": 10},
             "federation": {"type": "string", "enum": ["auto", "none", "referrals"], "default": "auto",
                            "description": "auto (the spec default) fans out to every public ARD registry and fuses; none answers from this index alone in ~60 ms."}},
@@ -574,7 +580,8 @@ def explore_endpoint(body: dict) -> JSONResponse:
     rt = body.get("resultType") or {}
     facets = rt.get("facets") or body.get("facets")
     if not facets:
-        facets = ["type", "type_family", "publisher", "source", "tags", "capabilities"]
+        facets = ["type", "type_family", "publisher", "source", "tags", "capabilities",
+                  "pay:protocol", "pay:network"]
     q = (body.get("query") or {}).get("text") or ""
     conn = db()
     keys = None
@@ -583,7 +590,8 @@ def explore_endpoint(body: dict) -> JSONResponse:
 
     COLUMN = {"type": "type_raw", "type_family": "type_family",
               "publisher": "publisher", "host": "publisher", "source": "sources",
-              "tags": "tags", "capabilities": "capabilities"}
+              "tags": "tags", "capabilities": "capabilities",
+              "pay:protocol": "pay_protocols", "pay:network": "pay_networks"}
     out: dict[str, Any] = {}
     if not isinstance(facets, list):
         facets = [facets]
@@ -609,7 +617,12 @@ def explore_endpoint(body: dict) -> JSONResponse:
             v = r["v"]
             if v is None:
                 continue
-            vals = json.loads(v) if col in ("tags", "capabilities", "sources") else [v]
+            if col in ("tags", "capabilities", "sources"):
+                vals = json.loads(v)
+            elif col in ("pay_protocols", "pay_networks"):
+                vals = v.split(",")
+            else:
+                vals = [v]
             for x in vals:
                 if x:
                     counts[str(x)] = counts.get(str(x), 0) + 1
@@ -875,6 +888,9 @@ Three interfaces, same index. Pick whichever you already speak.
 - A2A (JSON-RPC): POST {B}/a2a, card at {B}/.well-known/agent-card.json
   Method message/send, returns a Message. No tasks, no streaming.
 - REST (ARD v0.91): POST {B}/search with {{"query": {{"text": "..."}}}}
+  Only what you can pay for, under a price: add "filter": {{"pay:protocol": ["x402"],
+  "maxPricePerCall": 0.01}} inside query. Terms come from the publisher's manifest or
+  the endpoint's own 402. You pay the provider directly, never this registry.
 
 ## Publish yourself
 
@@ -1013,6 +1029,7 @@ def stats(days: int = Query(30, ge=7, le=90)):
         (int(time.time()) - 7 * 86400,)).fetchone()
     return {**c, "upstreams": regs,
             "verified": store.tool_counts(conn),
+            "payments": store.payment_counts(conn),
             "history": store.history_counts(conn),
             "dense": embed.status(conn),
             "searches_7d": q["n"] or 0,
@@ -2241,7 +2258,9 @@ async def _index_verified(url: str, res: dict, dry: bool = False) -> tuple[dict,
                         f"{len(res['tools'])} tools exposed."
                         if res["tools"] else
                         f"MCP server at {host}. Requires credentials before listing tools."
-                        if res["auth"] else f"MCP server at {host}."),
+                        if res["auth"] else
+                        f"MCP server at {host}. Requires payment before listing tools."
+                        if res.get("status") == "payment" else f"MCP server at {host}."),
     }
     if dry:
         return entry, None
@@ -2253,6 +2272,7 @@ async def _index_verified(url: str, res: dict, dry: bool = False) -> tuple[dict,
             store.replace_tools(c, key, res["tools"])
         store.mark_introspection(c, key, res["status"], len(res["tools"]),
                                  res["auth"], res.get("server_name"))
+        store.mark_payment_live(c, key, res.get("payment") if res.get("status") == "payment" else None)
         store.mark_liveness(c, key, True, 200, None)
         key_box["key"] = key
 
@@ -2363,7 +2383,7 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
                                   "evidence": {"exception": f"{type(e).__name__}: {str(e)[:160]}",
                                                "stage": "before the request was sent"}}
                 direct_ok = bool(direct) and (direct["status"].startswith("ok")
-                                              or direct["status"] == "auth")
+                                              or direct["status"] in ("auth", "payment"))
                 # The submitted URL answered: index it, and do not go looking
                 # for more. A publisher who named an endpoint gets that endpoint.
                 if direct_ok:

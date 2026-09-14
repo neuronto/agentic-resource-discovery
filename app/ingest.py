@@ -14,6 +14,7 @@ Three sources, in descending order of what they are worth:
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 import json
 import time
@@ -239,6 +240,34 @@ async def fetch_manifest(dom: str, client: httpx.AsyncClient | None = None
     return None, None
 
 
+def _without_placeholder_queries(e: dict) -> dict:
+    """Drop representative queries that carry no signal.
+
+    Generated manifests fill the field with the resource's own name ("Use X"),
+    one line per tag ("agent for crypto"), or the description repeated word for
+    word: in one 172-entry catalogue, 682 of 853 queries were like that. The
+    field is the strongest ranking signal we have, so filler there outranks a
+    publisher who wrote real queries. Everything else is kept as published.
+    """
+    rq = e.get("representativeQueries")
+    if not isinstance(rq, list) or not rq:
+        return e
+    name = str(e.get("displayName") or "").strip().lower()
+    desc = str(e.get("description") or "").strip().lower().rstrip(".")
+    keep = []
+    for q in rq:
+        s = str(q).strip()
+        low = s.lower().rstrip(".")
+        if not s or (desc and low == desc):
+            continue
+        if name and low in (name, f"use {name}", f"try {name}", f"call {name}"):
+            continue
+        if re.fullmatch(r"agent for \S+", low):
+            continue
+        keep.append(s)
+    return e if len(keep) == len(rq) else {**e, "representativeQueries": keep}
+
+
 def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
                    strict: bool = True, source: str = "crawl") -> int:
     """The write half: upsert every entry of a fetched manifest in one
@@ -260,6 +289,7 @@ def index_manifest(conn, dom: str, data: dict, hit_path: str | None,
     for e in data.get("entries") or []:
         if not isinstance(e, dict):
             continue
+        e = _without_placeholder_queries(e)
         try:
             if store.upsert_entry(conn, e, source):
                 got += 1

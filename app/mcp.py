@@ -22,7 +22,7 @@ import json
 from typing import Any
 
 
-from . import config, search, store
+from . import config, payments, search, store
 
 PROTOCOL = "2025-06-18"
 
@@ -35,7 +35,9 @@ TOOLS = [
             "for a task, across this index and every other public ARD registry at once. "
             "Returns ranked matches with a relevance score, the endpoint to connect to, "
             "and which registries carry each result. The score is relevance only and is "
-            "not a trust or safety rating."),
+            "not a trust or safety rating. Filter by payment (free, payable, x402, mpp) and a "
+            "maximum price per call: terms come from the publisher's manifest or the "
+            "endpoint's own 402 answer, and the caller pays the provider directly."),
         "annotations": {"title": "Find an agentic resource", "readOnlyHint": True,
                         "destructiveHint": False, "idempotentHint": True,
                         "openWorldHint": True},
@@ -60,6 +62,19 @@ TOOLS = [
                 "federate": {"type": "boolean", "default": True,
                              "description": "Also query upstream registries live and fuse "
                                             "the rankings. Off is faster."},
+                "payment": {"type": "string",
+                            "enum": ["any", "free", "payable", "x402", "mpp", "card"],
+                            "default": "any",
+                            "description": "Keep only resources with this payment requirement. "
+                                           "'free' means none is known; 'payable' means a price "
+                                           "or a 402 is known."},
+                "max_price_per_call": {"type": "number", "minimum": 0,
+                                       "description": "Most you will pay for one call, in US "
+                                                      "dollars. A resource whose price is unknown "
+                                                      "is excluded."},
+                "network": {"type": "string",
+                            "description": "Payment network, for example base, solana, tempo "
+                                           "or stripe."},
             },
             "required": ["query"],
         },
@@ -272,6 +287,7 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 "servers_introspected": t["introspected"],
                 "servers_with_tools": t["servers_with_tools"],
                 "servers_requiring_auth": t["auth_required"],
+                "payable_resources": store.payment_counts(conn)["payable"],
                 "federates": [u[1] for u in config.UPSTREAMS]})}
 
         if name == "find_tool":
@@ -308,6 +324,13 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             if kind and kind != "any":
                 from .normalize import preferred_type
                 flt = {"type": [preferred_type(kind) or kind]}
+            pay = str(args.get("payment") or "any").strip().lower()
+            if pay != "any":
+                flt = {**(flt or {}), "pay:protocol": [pay]}
+            if args.get("max_price_per_call") is not None:
+                flt = {**(flt or {}), "maxPricePerCall": args.get("max_price_per_call")}
+            if args.get("network"):
+                flt = {**(flt or {}), "pay:network": [str(args.get("network"))]}
             out = await search.search(conn, q, flt, limit, mode)
             results = []
             for e in search.clean(out["results"]):
@@ -325,7 +348,11 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 v = e.get("verification")
                 if v:
                     r["verified"] = {k: v[k] for k in
-                                     ("reachable", "tools", "authRequired") if k in v}
+                                     ("reachable", "tools", "authRequired", "paymentRequired")
+                                     if k in v}
+                pay_terms = payments.summary_from_entry(e)
+                if pay_terms:
+                    r["payment"] = pay_terms
                 results.append(r)
             fed = [f["name"] for f in (out.get("_federated") or []) if f.get("ok")]
             dense = (out.get("_dense") or {}).get("state")
@@ -334,7 +361,10 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
                 "searched": ["Neuronto"] + fed,
                 "retrieval": ("lexical + semantic + federated" if dense == "ok"
                               else "lexical + federated"),
-                "note": "score is semantic relevance only, not a trust or safety rating"})}
+                "note": ("score is semantic relevance only, not a trust or safety rating. "
+                         "`payment` terms come from the publisher's manifest or the endpoint's "
+                         "own 402 answer; pay the provider directly, this registry never "
+                         "handles a payment")})}
 
         return 200, {"jsonrpc": "2.0", "id": rid,
                      "error": {"code": -32601, "message": f"unknown tool: {name}"}}

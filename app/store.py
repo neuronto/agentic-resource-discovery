@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, payments
 from .normalize import dedupe_key, media_family, normalize_identifier, publisher_of
 
 # Stored input schemas are capped so one giant tool cannot bloat the index.
@@ -291,6 +291,15 @@ _ADD_COLUMNS = {
     "probe_ok":        "INTEGER NOT NULL DEFAULT 0",   # probes that answered
     "probe_first":     "INTEGER",                      # first probe, unix ts
     "probe_ms_sum":    "INTEGER NOT NULL DEFAULT 0",   # summed ms of answering probes
+    # Payment terms (payments.py). What a manifest declares and what the
+    # endpoint's own 402 said are stored apart and never overwrite each other;
+    # the combined view and its three filterable columns are derived from both.
+    "pay_declared":    "TEXT",      # json, from the manifest
+    "pay_live":        "TEXT",      # json, from the endpoint's own 402, with `checked`
+    "pay_terms":       "TEXT",      # json, payments.merge of the two
+    "pay_protocols":   "TEXT",      # "x402,mpp"; NULL when no requirement is known
+    "pay_price":       "REAL",      # cheapest known call, in dollars
+    "pay_networks":    "TEXT",      # "base,solana"
 }
 
 
@@ -374,6 +383,22 @@ def _migrate_private(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
+def _add_column(conn: sqlite3.Connection, sql: str) -> None:
+    """ALTER TABLE ... ADD COLUMN, safe when several processes migrate at once.
+
+    Every worker runs this at startup. Checking for a column and then adding it is
+    a race: on 2026-09-14 four workers all saw a new column missing, the first
+    added it, and the others failed with "duplicate column name" and exited, which
+    rolled the deploy back. Staging ran one worker and could not see it. Losing the
+    race means the column exists, which is exactly the outcome wanted.
+    """
+    try:
+        conn.execute(sql)
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Bring an existing database up to the current shape.
 
@@ -384,26 +409,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """
     cs = {r["name"] for r in conn.execute("PRAGMA table_info(crawl_seen)")}
     if cs and "manifest_path" not in cs:
-        conn.execute("ALTER TABLE crawl_seen ADD COLUMN manifest_path TEXT")
+        _add_column(conn, "ALTER TABLE crawl_seen ADD COLUMN manifest_path TEXT")
 
     ad = {r["name"] for r in conn.execute("PRAGMA table_info(adoption)")}
     if ad and "path" not in ad:
-        conn.execute("ALTER TABLE adoption ADD COLUMN path TEXT")
+        _add_column(conn, "ALTER TABLE adoption ADD COLUMN path TEXT")
 
     # Our own probes were being reported to publishers as demand.
     sc = {r["name"] for r in conn.execute("PRAGMA table_info(searches)")}
     if sc and "probe" not in sc:
-        conn.execute("ALTER TABLE searches ADD COLUMN probe INTEGER NOT NULL DEFAULT 0")
+        _add_column(conn, "ALTER TABLE searches ADD COLUMN probe INTEGER NOT NULL DEFAULT 0")
 
     # Access tiers. Every existing key was issued to a verified domain.
     ak = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)")}
     if ak and "tier" not in ak:
-        conn.execute("ALTER TABLE api_keys ADD COLUMN tier TEXT NOT NULL DEFAULT 'verified'")
+        _add_column(conn, "ALTER TABLE api_keys ADD COLUMN tier TEXT NOT NULL DEFAULT 'verified'")
 
     have = {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}
     for col, decl in _ADD_COLUMNS.items():
         if col not in have:
-            conn.execute(f"ALTER TABLE entries ADD COLUMN {col} {decl}")
+            _add_column(conn, f"ALTER TABLE entries ADD COLUMN {col} {decl}")
 
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries_fts)")]
     if "tool_text" not in cols:
@@ -509,8 +534,85 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
              _s(e.get("type") or e.get("mediaType")) or "", fam, _s(url) or "", pub,
              _jlist(e.get("tags")), _jlist(e.get("capabilities")), _jlist(e.get("representativeQueries")),
              trust, _s(e.get("version")) or "", json.dumps([source]), now, now))
+    declared = payments.from_entry(e)
+    if declared:
+        set_payment(conn, key, declared=declared)
     _reindex(conn, key)
     return key
+
+
+_KEEP = object()
+
+
+def set_payment(conn: sqlite3.Connection, key: str, declared: Any = _KEEP,
+                live: Any = _KEEP) -> None:
+    """Record declared or live payment terms and refresh the derived columns.
+
+    The two sources are stored apart so neither silently overwrites the other: a
+    manifest that states $0.01 and an endpoint whose 402 asks $0.05 are both
+    kept, and the combined view says which price came from where.
+    """
+    row = conn.execute("SELECT pay_declared, pay_live FROM entries WHERE key=?",
+                       (key,)).fetchone()
+    if row is None:
+        return
+
+    def load(raw):
+        try:
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+    d = load(row["pay_declared"]) if declared is _KEEP else (declared or None)
+    l = load(row["pay_live"]) if live is _KEEP else (live or None)
+    m = payments.merge(d, l)
+    protos, price, nets = payments.columns(m)
+    conn.execute("""UPDATE entries SET pay_declared=?, pay_live=?, pay_terms=?,
+                           pay_protocols=?, pay_price=?, pay_networks=? WHERE key=?""",
+                 (json.dumps(d) if d else None, json.dumps(l) if l else None,
+                  json.dumps(m) if m else None, protos, price, nets, key))
+
+
+def mark_payment_live(conn: sqlite3.Connection, key: str, terms: dict | None,
+                      clear: bool = False) -> None:
+    """What the endpoint's own 402 said. `clear` when it answered without one."""
+    if terms:
+        t = dict(terms)
+        t["checked"] = int(time.time())
+        set_payment(conn, key, live=t)
+    elif clear:
+        row = conn.execute("SELECT pay_live FROM entries WHERE key=?", (key,)).fetchone()
+        if row is not None and row["pay_live"]:
+            set_payment(conn, key, live=None)
+
+
+def payment_counts(conn: sqlite3.Connection) -> dict:
+    """How much of the index states a price, and how much a live 402 confirmed."""
+    q = lambda s: conn.execute(s).fetchone()[0]
+    by_protocol: dict[str, int] = {}
+    by_network: dict[str, int] = {}
+    prices: list[float] = []
+    for r in conn.execute("""SELECT pay_protocols, pay_networks, pay_price FROM entries
+                             WHERE pay_protocols IS NOT NULL"""):
+        for p in (r["pay_protocols"] or "").split(","):
+            if p:
+                by_protocol[p] = by_protocol.get(p, 0) + 1
+        for n in (r["pay_networks"] or "").split(","):
+            if n:
+                by_network[n] = by_network.get(n, 0) + 1
+        if r["pay_price"] is not None:
+            prices.append(float(r["pay_price"]))
+    prices.sort()
+    return {
+        "payable": q("SELECT COUNT(*) FROM entries WHERE pay_protocols IS NOT NULL"),
+        "confirmed_live": q("SELECT COUNT(*) FROM entries WHERE pay_live IS NOT NULL"),
+        "declared": q("SELECT COUNT(*) FROM entries WHERE pay_declared IS NOT NULL"),
+        "priced": len(prices),
+        "median_price_usd": prices[len(prices) // 2] if prices else None,
+        "by_protocol": dict(sorted(by_protocol.items(), key=lambda kv: -kv[1])),
+        "by_network": dict(sorted(by_network.items(), key=lambda kv: -kv[1])[:12]),
+        "note": ("terms come from a publisher's manifest (declared) or from the endpoint's "
+                 "own 402 answer (confirmed_live); they filter results and never change a score"),
+    }
 
 
 def _reindex(conn: sqlite3.Connection, key: str) -> None:
@@ -814,7 +916,16 @@ def row_to_entry(r: sqlite3.Row) -> dict:
         out["trustManifest"] = {"identity": r["trust_identity"]}
     if r["version"]:
         out["version"] = r["version"]
-    return {k: v for k, v in out.items() if v is not None}
+    out = {k: v for k, v in out.items() if v is not None}
+    # Payment terms as JSON-LD extension terms under the `pay:` prefix the
+    # specification's worked example uses, bound in the entry's own @context,
+    # with where they came from beside them rather than inside them.
+    m = payments.row_view(r)
+    terms = payments.to_terms(m)
+    if terms:
+        out = {"@context": {"pay": payments.NS}, **out, **terms}
+        out["paymentEvidence"] = payments.evidence(m)
+    return out
 
 
 PRIVATE_QUERY_PLACEHOLDER = "(authenticated search, text not recorded)"

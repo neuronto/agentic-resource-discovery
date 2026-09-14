@@ -311,7 +311,7 @@ async def resolve(conn: sqlite3.Connection, raw: str, client: httpx.AsyncClient,
     identities: set[tuple] = set()
     for r in results:
         st = str(r["status"] or "")
-        if not (st.startswith("ok") or st == "auth"):
+        if not (st.startswith("ok") or st in ("auth", "payment")):
             continue
         ident = (r["server_name"], tuple(sorted(t.get("name", "") for t in r["_raw"].get("tools") or [])))
         if ident in identities and r["tools"] > 0:

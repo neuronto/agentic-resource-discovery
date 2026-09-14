@@ -1729,6 +1729,95 @@ def t_a_refusal_is_a_refusal_not_a_fault():
                     f"{rule!r} does not tell an unverified caller how to raise the limit"
 
 
+
+# --------------------------------------------------------------------------
+# Payment terms: declared or confirmed live, filterable, never a score
+# --------------------------------------------------------------------------
+PAY_NS = "https://agenticresourcediscovery.org/ns/payment#"
+
+
+def _pay_search(flt, text="crypto token prices market data"):
+    payload = {"query": {"text": text}, "federation": "none", "pageSize": 20}
+    if flt is not None:
+        payload["query"]["filter"] = flt
+    code, d = post("/search", payload)
+    assert code == 200, (code, d)
+    return d.get("results") or []
+
+
+def t_stats_count_payment_terms():
+    s, d = get("/stats")
+    assert s == 200, s
+    p = d.get("payments")
+    assert isinstance(p, dict), "/stats has no payments block"
+    for k in ("payable", "confirmed_live", "declared", "priced", "by_protocol"):
+        assert k in p, f"payments block is missing {k}"
+    assert p["payable"] > 0, "no resource in the index states a payment requirement"
+
+
+def t_a_payable_filter_returns_only_resources_with_terms():
+    res = _pay_search({"pay:protocol": ["payable"]})
+    if not res:
+        raise Skip("no payable resource matched the probe query")
+    bad = [r["identifier"] for r in res if not r.get("pay:protocol")]
+    assert not bad, f"payable filter returned entries without payment terms: {bad[:3]}"
+    for r in res:
+        assert (r.get("@context") or {}).get("pay") == PAY_NS, \
+            f"{r['identifier']} carries pay: terms without binding the prefix"
+        assert (r.get("paymentEvidence") or {}).get("source") in ("declared", "live"), r
+
+
+def t_a_free_filter_returns_nothing_with_terms():
+    res = _pay_search({"payment": "free"})
+    bad = [r["identifier"] for r in res if r.get("pay:protocol")]
+    assert not bad, f"free filter returned priced entries: {bad[:3]}"
+
+
+def t_a_price_cap_is_respected():
+    res = _pay_search({"pay:protocol": ["payable"], "maxPricePerCall": 0.01})
+    if not res:
+        raise Skip("nothing priced at or under a cent matched the probe query")
+    over = [(r["identifier"], r.get("pay:price")) for r in res
+            if r.get("pay:price") is None or float(r["pay:price"]) > 0.01]
+    assert not over, f"the price cap let through: {over[:3]}"
+
+
+def t_an_endpoint_asking_to_be_paid_is_reachable_not_broken():
+    s, d = get("/stats")
+    by = (d.get("verified") or {}).get("by_status") or {}
+    assert "error:http402" not in by or by.get("payment", 0) > 0, \
+        f"402 answers are still recorded as errors and none as payment: {by}"
+    if not by.get("payment"):
+        raise Skip("no introspected server has answered 402 yet")
+    res = _pay_search({"pay:verified": "live"}, text="mcp server api")
+    for r in res:
+        v = r.get("verification")
+        if v:
+            assert v.get("reachable") is True, \
+                f"{r['identifier']} asked to be paid and is marked unreachable"
+
+
+def t_mcp_find_resource_filters_by_payment():
+    code, d = post("/mcp", {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+        "name": "find_resource", "arguments": {"query": "crypto token prices", "payment": "payable",
+                                               "federate": False, "limit": 10}}})
+    assert code == 200, code
+    payload = json.loads(d["result"]["content"][0]["text"])
+    res = payload.get("results") or []
+    if not res:
+        raise Skip("no payable resource matched over MCP")
+    bad = [r.get("identifier") for r in res if not (r.get("payment") or {}).get("protocols")]
+    assert not bad, f"MCP payable filter returned results without terms: {bad[:3]}"
+
+
+def t_explore_counts_payment_protocols():
+    code, d = post("/explore", {"resultType": {"facets": ["pay:protocol"]}})
+    assert code == 200, code
+    buckets = ((d.get("facets") or {}).get("pay:protocol") or {}).get("buckets") or []
+    assert buckets, "explore has no pay:protocol buckets"
+    assert {b["value"] for b in buckets} & {"x402", "mpp", "card", "unspecified"}, buckets
+
+
 def main():
     print(f"\n  E2E against {BASE}\n" + "  " + "-" * 62)
     for name, fn in list(globals().items()):

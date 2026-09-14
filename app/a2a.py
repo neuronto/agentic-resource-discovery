@@ -188,8 +188,12 @@ async def _find_resource(conn, q: str, limit: int) -> tuple[str, dict]:
         }
         v = e.get("verification")
         if v:
-            r["verified"] = {k: v[k] for k in ("reachable", "tools", "authRequired")
-                             if k in v}
+            r["verified"] = {k: v[k] for k in ("reachable", "tools", "authRequired",
+                                               "paymentRequired") if k in v}
+        from . import payments
+        pay_terms = payments.summary_from_entry(e)
+        if pay_terms:
+            r["payment"] = pay_terms
         results.append(r)
     fed = [f["name"] for f in (out.get("_federated") or []) if f.get("ok")]
     data = {

@@ -10,6 +10,7 @@
   python -m scripts.ingest_cli adoption     # re-probe the adoption watchlist
   python -m scripts.ingest_cli bench [k] [n]# run ARD-Bench
   python -m scripts.ingest_cli reindex      # rebuild the FTS table
+  python -m scripts.ingest_cli payments [n] # re-read servers that answered 402, probe stated prices
   python -m scripts.ingest_cli all
 
 `all` is what the timer runs. Order matters: introspection must precede
@@ -63,6 +64,19 @@ async def main() -> None:
         out = await bench.run(conn, k=_num(2, 0) or None, n=_num(3, 0) or None)
         for name, m in (out.get("targets") or {}).items():
             print(f"  {name:34s} {m}", flush=True)
+    if cmd == "payments":
+        # Servers recorded as broken because they answered 402, read again now
+        # that a 402 is understood, then a live check of what manifests state.
+        rows = conn.execute("""SELECT key, url FROM entries WHERE mcp_status='error:http402'
+                               AND url LIKE 'http%'""").fetchall()
+        print(f"re-introspecting {len(rows)} servers that answered 402", flush=True)
+        print("introspect:", await tools_index.sweep(conn, rows=list(rows)), flush=True)
+        rows = conn.execute("""SELECT key, url FROM entries WHERE pay_declared IS NOT NULL
+                               AND pay_live IS NULL AND url LIKE 'http%' LIMIT ?""",
+                            (_num(2, 400),)).fetchall()
+        print(f"probing {len(rows)} endpoints that state a price", flush=True)
+        print("liveness:", await liveness.sweep(conn, rows=list(rows)), flush=True)
+        print("payments:", store.payment_counts(conn), flush=True)
     if cmd == "reindex":
         print("reindexed:", store.rebuild_fts(conn), flush=True)
 

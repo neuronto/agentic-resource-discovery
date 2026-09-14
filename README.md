@@ -104,6 +104,24 @@ returns internal and public results together, each labelled with which it is. Pr
 entries are held in separate storage from the public index rather than behind a flag, so no
 public search, count or page can reach them by construction.
 
+**Payment terms, before the call.** A paid endpoint used to be found, called, and only
+then answer `402 Payment Required`. Neuronto reads what a resource costs from two places
+and keeps them apart: what its manifest declares (the `pay:` terms of the specification's
+worked example, `schema:offers`, and catalogue formats that carry a price), and what the
+endpoint itself answers when it is called without payment (x402 terms in a
+`PAYMENT-REQUIRED` header or a 402 body, or an MPP challenge). A server that asks to be
+paid is recorded as reachable, not as broken. Results carry `pay:protocol`, `pay:price`,
+`pay:currency` and `pay:network`, with `paymentEvidence` saying whether a live 402
+confirmed them, and a search can be filtered on them:
+
+```bash
+curl -sS -X POST https://neuronto.com/search -H 'content-type: application/json' \
+  -d '{"query":{"text":"crypto token prices","filter":{"pay:protocol":["x402"],"maxPricePerCall":0.01}},"federation":"none"}'
+```
+
+Terms never change a score, and the registry never handles a payment: the caller pays the
+provider directly.
+
 **Ranking that separates.** A relevance score is only useful if the gap between the
 first and fifth result is legible. Scores are scaled to preserve real separation
 instead of compressing everything into a narrow band.

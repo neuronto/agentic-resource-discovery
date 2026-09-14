@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from . import config, store
+from . import config, payments, store
 
 PROTOCOL = "2025-06-18"
 
@@ -106,7 +106,7 @@ async def introspect_one(client: httpx.AsyncClient, url: str,
                            "auth": False, "server_name": None, "evidence": None}
     for attempt in range(retries + 1):
         out = await _introspect_once(client, url)
-        if out["status"].startswith("ok") or out["status"] == "auth":
+        if out["status"].startswith("ok") or out["status"] in ("auth", "payment"):
             return out
         if attempt < retries and _transient(out):
             await asyncio.sleep(1.5)
@@ -142,6 +142,16 @@ async def _introspect_once(client: httpx.AsyncClient, url: str) -> dict:
         out["status"] = "auth"
         out["auth"] = True
         return out
+    if r.status_code == 402:
+        # Payment required is an answer from a working server, not a failure. It
+        # was recorded as `error:http402`, which counted 133 paid servers as
+        # broken. A hosting provider's usage limit also answers 402 and is not
+        # an offer to sell, so that one stays an error.
+        kind, terms = payments.classify(r.status_code, r.headers, r.text)
+        if kind == "payment":
+            out["status"] = "payment"
+            out["payment"] = terms
+            return out
     if r.status_code >= 400:
         out["status"] = f"error:http{r.status_code}"
         return out
@@ -180,6 +190,12 @@ async def _introspect_once(client: httpx.AsyncClient, url: str) -> dict:
         out["status"] = "auth"
         out["auth"] = True
         return out
+    if r2.status_code == 402:
+        kind, terms = payments.classify(r2.status_code, r2.headers, r2.text)
+        if kind == "payment":
+            out["status"] = "payment"
+            out["payment"] = terms
+            return out
 
     d2 = _parse(r2.text)
     tools = ((d2 or {}).get("result") or {}).get("tools")
@@ -197,13 +213,16 @@ async def _introspect_once(client: httpx.AsyncClient, url: str) -> dict:
 
 
 async def sweep(conn, limit: int = 500, only_stale: bool = True,
-                concurrency: int | None = None) -> dict:
-    """Introspect a batch of MCP endpoints, least recently checked first."""
+                concurrency: int | None = None, rows: list | None = None) -> dict:
+    """Introspect a batch of MCP endpoints, least recently checked first.
+
+    `rows` of (key, url) introspects exactly those instead, for a targeted re-check.
+    """
     conc = concurrency or config.INTROSPECT_CONCURRENCY
     cutoff = int(time.time()) - config.INTROSPECT_MAX_AGE_H * 3600
     where = ("AND (mcp_checked IS NULL OR mcp_checked < ?)" if only_stale else "")
     args: tuple = (cutoff, limit) if only_stale else (limit,)
-    rows = conn.execute(
+    rows = rows if rows is not None else conn.execute(
         f"""SELECT key, url FROM entries
             WHERE type_family='mcp-server' AND url LIKE 'http%'
               AND (live IS NULL OR live = 1)
@@ -214,7 +233,7 @@ async def sweep(conn, limit: int = 500, only_stale: bool = True,
         return {"probed": 0, "ok": 0, "auth": 0, "failed": 0, "tools": 0}
 
     sem = asyncio.Semaphore(conc)
-    stats = {"probed": 0, "ok": 0, "auth": 0, "failed": 0, "tools": 0}
+    stats = {"probed": 0, "ok": 0, "auth": 0, "payment": 0, "failed": 0, "tools": 0}
     found: list[tuple[str, dict]] = []
 
     async with httpx.AsyncClient(
@@ -236,6 +255,8 @@ async def sweep(conn, limit: int = 500, only_stale: bool = True,
             stats["ok"] += 1
         elif status == "auth":
             stats["auth"] += 1
+        elif status == "payment":
+            stats["payment"] += 1
         else:
             stats["failed"] += 1
         n = 0
@@ -244,6 +265,8 @@ async def sweep(conn, limit: int = 500, only_stale: bool = True,
             stats["tools"] += n
         store.mark_introspection(conn, key, status, n, res["auth"],
                                  res.get("server_name"))
+        store.mark_payment_live(conn, key, res.get("payment") if status == "payment" else None,
+                                clear=status.startswith("ok") or status == "auth")
     conn.commit()
     return stats
 
@@ -261,7 +284,7 @@ def search_tools(conn, text: str, limit: int = 20) -> list[dict]:
     try:
         rows = conn.execute(
             """SELECT t.entry_key, t.name, t.title, t.description, t.input_schema,
-                      e.display_name, e.url, e.identifier, e.live,
+                      e.display_name, e.url, e.identifier, e.live, e.pay_terms,
                       bm25(tools_fts, 8.0, 4.0, 2.0) AS bm
                FROM tools_fts
                JOIN tools t ON t.id = tools_fts.tool_id
@@ -284,6 +307,9 @@ def search_tools(conn, text: str, limit: int = 20) -> list[dict]:
             "score": rank.apply_liveness(s, r["live"]),
             "verified": True,
         }
+        pay = payments.summary(payments.row_view(r))
+        if pay:
+            d["payment"] = pay
         if r["input_schema"]:
             try:
                 d["inputSchema"] = json.loads(r["input_schema"])

@@ -7,7 +7,7 @@ import re
 import sqlite3
 from typing import Any
 
-from . import config, federation, rank, store
+from . import config, federation, payments, rank, store
 from .normalize import expand_type_filter, media_family, publisher_of
 
 _TOKEN = re.compile(r"[A-Za-z0-9_]+")
@@ -197,6 +197,10 @@ def _passes_filter(row: sqlite3.Row, flt: dict | None) -> bool:
     """
     if not flt:
         return True
+    # Payment keys are answered from the stored terms (payments.py); the loop
+    # below ignores keys it does not own, so they are not read twice.
+    if payments.filter_active(flt) and not payments.passes(payments.row_view(row), flt):
+        return False
     for field, values in flt.items():
         if not isinstance(values, list):
             values = [values]
@@ -423,6 +427,10 @@ def _attach_verification(entry: dict, row: sqlite3.Row) -> None:
         v["reachable"] = True
         v["authRequired"] = True
         v["tools"] = 0
+    elif status == "payment":
+        v["reachable"] = True
+        v["paymentRequired"] = True
+        v["tools"] = 0
     else:
         v["reachable"] = False
         v["tools"] = 0
@@ -513,6 +521,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         rankings.append([k for k in tool_order if k in by_key])
         leg_weights.append(TOOL_LEG_WEIGHT)
     fam_filter = expand_type_filter(flt.get("type", [])) if flt and flt.get("type") else None
+    pay_filter = payments.filter_active(flt)
 
     for u in ups:
         if not u.get("ok"):
@@ -520,6 +529,10 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         order = []
         for e in u["results"]:
             if fam_filter and e.get("type_family") not in fam_filter:
+                continue
+            # An upstream result carries no terms we have checked, so it is
+            # judged on what it states itself, which for most registries is nothing.
+            if pay_filter and not payments.passes(payments.merge(payments.from_entry(e), None), flt):
                 continue
             k = e["key"]
             order.append(k)
