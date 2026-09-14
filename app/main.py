@@ -54,6 +54,36 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                                    "Retry-After"])
 
 
+# A route that answers HTML or JSON by the Accept header says so with Vary: Accept, and a
+# browser honours that. A shared cache in front of the origin may not: it keeps one copy
+# per URL, so after a purge the first caller's variant was served to everyone, and a JSON
+# client asking for /privacy received the HTML page. Every such response therefore carries
+# CDN-Cache-Control: no-store (RFC 9213), which keeps it out of shared caches and leaves
+# Cache-Control, so the browser's own cache, unchanged. Here rather than per route, so a
+# negotiated route added later cannot forget it. Raw ASGI: it touches one header, once.
+class _NoSharedCacheWhenNegotiated:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_wrapped(message):
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers") or [])
+                vary = {t.strip() for k, v in headers if k.lower() == b"vary"
+                        for t in v.lower().split(b",")}
+                if b"accept" in vary:
+                    message["headers"] = headers + [(b"cdn-cache-control", b"no-store")]
+            await send(message)
+
+        await self.app(scope, receive, send_wrapped)
+
+
+app.add_middleware(_NoSharedCacheWhenNegotiated)
+
+
 # Which routes spend something on a caller's behalf. Everything absent from this
 # map is a local read and is not limited, which is most of the API.
 #

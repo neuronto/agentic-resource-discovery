@@ -52,7 +52,9 @@ async def main() -> None:
     if cmd in ("introspect", "all"):
         print("introspect:", await tools_index.sweep(conn, limit=_num(2, 400)), flush=True)
     if cmd in ("embed", "all"):
-        print("embed:", await embed.build(conn, limit=_num(2, 2000)), flush=True)
+        # 2000 a run fell behind the index's growth and coverage sat at 0.85 for days;
+        # 6000 every six hours clears a backlog and keeps up with a registry walk.
+        print("embed:", await embed.build(conn, limit=_num(2, 6000)), flush=True)
         # The tool surface gets its own vector. Runs after introspection for the
         # same reason the prose vector does: there is nothing to embed until the
         # tools have been read.

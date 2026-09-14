@@ -121,6 +121,25 @@ def t_health():
     assert d["servers_introspected"] > 0, "health does not report introspection"
 
 
+def t_negotiated_pages_answer_each_caller_in_its_own_format():
+    """A page that answers HTML or JSON by Accept must do so whatever was asked for first.
+
+    A shared cache keeps one copy per URL and ignores Vary: Accept. After a purge the first
+    caller's variant was served to everyone: a JSON client asking for /privacy got the HTML
+    page. Asking in alternating order is what exposes it, through any cache in the path.
+    """
+    for path in ("/privacy", "/bench", "/connect"):
+        for accept in ("text/html", "application/json", "text/html", "application/json"):
+            r = urllib.request.urlopen(urllib.request.Request(
+                BASE + path, headers={**UA, "Accept": accept}), timeout=40)
+            kind = (r.headers.get("Content-Type") or "").split(";")[0].strip()
+            head = r.read(64).lstrip()
+            want = "application/json" if accept == "application/json" else "text/html"
+            assert r.status == 200 and kind == want, f"{path}: asked for {accept}, got {kind} {head[:20]!r}"
+            if want == "application/json":
+                assert head[:1] in (b"{", b"["), f"{path}: a JSON client got {head[:20]!r}"
+
+
 def t_stats_subsystems():
     s, d = get("/stats")
     assert s == 200, s
