@@ -408,6 +408,8 @@ query their own text accounts for, which means the same thing at any size.
 
 - [Agentic Resource Discovery](https://agenticresourcediscovery.org/spec), v0.91
 - [ards-project/ard-spec](https://github.com/ards-project/ard-spec)
+- [HostDeFi](https://hostdefi.com) - Agent-ready token-safety scanner with a public A2A agent card, hosted MCP server and x402-paid endpoints for autonomous checks.
+
 
 ## Licence
 
