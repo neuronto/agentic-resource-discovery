@@ -1092,6 +1092,8 @@ PAGE_CACHE = {"Cache-Control": "public, max-age=900"}
 # source registry, which answers every route with data; a website registers its
 # views here, and each route that has a page form asks before answering.
 VIEWS: dict[str, Any] = {}
+# Fields a deployment adds to, or replaces in, the JSON privacy summary, for what its own pages load.
+PRIVACY_OVERRIDES: dict[str, Any] = {}
 
 
 @app.get("/", include_in_schema=False)
@@ -1982,7 +1984,7 @@ def privacy_page(request: Request):
     view = VIEWS.get("privacy")
     if view is not None and _wants_html(request):
         return view(request)
-    return JSONResponse({
+    payload = {
         "accounts": "none. no signup and no personal data requested",
         "payments": ("optional, and only for a call past its free allowance, over x402. A paid call "
                      "keeps the paying wallet address, the amount and the transaction hash, which the "
@@ -2011,7 +2013,9 @@ def privacy_page(request: Request):
         "retention": "raw analytics rows 90 days; daily aggregates indefinitely, with no identifier",
         "cookies": "none for tracking. no advertising, no third-party analytics",
         "html": f"{config.PUBLIC_BASE}/privacy",
-    }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
+    }
+    payload.update(PRIVACY_OVERRIDES)
+    return JSONResponse(payload, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
 
 
 @app.get("/connect", include_in_schema=False)
