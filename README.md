@@ -130,6 +130,20 @@ never charged. `GET https://neuronto.com/x402` states the live terms.
 Terms never change a score, and the registry never handles a payment: the caller pays the
 provider directly.
 
+**Settling the payments, if you want that from us as well.** Reading a price is one half of
+the problem; taking the money is the other. Neuronto also operates a hosted x402 facilitator at
+[pay.neuronto.com](https://pay.neuronto.com), which any x402 server can point at in one line: it
+checks a buyer's signed stablecoin payment and settles it on-chain, and it never holds anyone's
+funds, because the buyer signs the transfer and the facilitator only broadcasts it. Live on Base,
+free while it is new. A live endpoint there charges a tenth of a cent and sends it straight back in
+the same request, so a client can be run end to end for nothing, and
+[pay.neuronto.com/status](https://pay.neuronto.com/status) publishes what it has been observed to
+do rather than a promise about it.
+
+It is a separate hosted service: it is not part of this repository, nothing here depends on it, a
+self-hosted Neuronto never contacts it, and no resource is ever ranked differently for using it or
+for not using it.
+
 **Ranking that separates.** A relevance score is only useful if the gap between the
 first and fifth result is legible. Scores are scaled to preserve real separation
 instead of compressing everything into a narrow band.
