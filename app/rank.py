@@ -57,6 +57,47 @@ TOOL_LEG_WEIGHT = 2.0         # a phrase or conjunction matched a tool
 TOOL_LEG_LOOSE_WEIGHT = 0.0   # only the OR fallback matched: not evidence
 
 
+# ── Federation and the dense leg: coverage, not ranking (2026-09-23) ─────────
+# Recorded every leg's ranking for all 192 declared tasks and the battery, then
+# swept fusion offline. Findings:
+#   * lexical alone had 183/192 targets in its top 10; `auto` had 174. The
+#     upstream legs rescued 2 and the dense leg 6, but together they pushed out 11.
+#   * 95.5% of what upstream registries return is already in this index (we
+#     harvest them every six hours), and 16 of 2,070 fused top-10 slots held an
+#     entry only an upstream had. Re-ranking our own entries in THEIR order is
+#     what cost accuracy, and waiting for them cost the 700 ms budget.
+#   * dense fused at 1.0 cost the battery 7/15 -> 4/15; as an additive leg
+#     (candidates lexical did not return) it costs nothing at weight <= 1.0.
+# So upstream and dense legs are ADDITIVE: they may add candidates the local legs
+# did not return, never reorder ones they did. At 0.5 an additive candidate
+# (best 0.5/61) cannot outrank a local one inside the first 30 (1/90), which is
+# what makes the gate below exact rather than heuristic.
+DENSE_LEG_WEIGHT = 0.5
+UPSTREAM_LEG_WEIGHT = 0.5
+
+# Federate only when the local answer is not confident: the top result accounts
+# for less than this share of the query's content words (`search.query_match`).
+# A confident local page cannot be changed by an additive leg, so the query is
+# not sent to other services and not embedded, which is both the latency win and
+# data minimisation. A caller that asks for a longer window (the homepage's
+# "every registry" call) always federates.
+FEDERATE_BELOW_COVERAGE = 0.75
+
+
+# Known-item queries: someone typing the name of the thing ("Notion API"). BM25
+# ranked that exact display name 22nd, under entries that mention both words many
+# times in long tool text. The name leg orders entries whose display_name holds
+# the query as a phrase, exact matches first. Measured on the tune half with each
+# target's own display name as the query (a known-item set built from the same
+# frozen tasks), declared queries and the battery held fixed:
+#   weight   name recall@10 / MRR   declared r@10 / MRR   battery hit@5
+#   0.0      0.860 / 0.688          0.942 / 0.830         6/15
+#   1.0      0.988 / 0.830          0.942 / 0.830         6/15
+#   2.0      1.000 / 0.927          0.942 / 0.830         6/15   (chosen: smallest at full recall)
+#   3.0      1.000 / 0.939          0.942 / 0.830         6/15
+NAME_LEG_WEIGHT = 2.0
+
+
 def tool_leg_weight(strict: bool) -> float:
     return TOOL_LEG_WEIGHT if strict else TOOL_LEG_LOOSE_WEIGHT
 

@@ -1030,6 +1030,9 @@ def row_to_entry(r: sqlite3.Row) -> dict:
 
 
 PRIVATE_QUERY_PLACEHOLDER = "(authenticated search, text not recorded)"
+# A caller who sent Sec-GPC or DNT. The search is still counted, so totals stay
+# true, but neither its text nor what it returned is kept.
+OPTED_OUT_QUERY_PLACEHOLDER = "(opted out, text not recorded)"
 
 
 _logq: "queue.Queue[tuple]" = queue.Queue(maxsize=50000)
@@ -1056,12 +1059,13 @@ def _log_writer() -> None:
         except queue.Empty:
             pass
         try:
-            for (q, mode, results, ms, federated, ents, authenticated, now, probe) in batch:
+            for (q, mode, results, ms, federated, ents, withheld, now, probe) in batch:
+                text = ({"key": PRIVATE_QUERY_PLACEHOLDER,
+                         "opt-out": OPTED_OUT_QUERY_PLACEHOLDER}.get(withheld) or q[:200])
                 cur = c.execute("""INSERT INTO searches(q,mode,results,ms,federated,ts,probe)
                                    VALUES(?,?,?,?,?,?,?)""",
-                                (PRIVATE_QUERY_PLACEHOLDER if authenticated else q[:200],
-                                 mode, results, ms, federated, now, 1 if probe else 0))
-                if ents and not authenticated:
+                                (text, mode, results, ms, federated, now, 1 if probe else 0))
+                if ents and not withheld:
                     c.executemany(
                         """INSERT INTO impressions(search_id,entry_key,rank,score,ts)
                            VALUES(?,?,?,?,?)""",
@@ -1072,11 +1076,90 @@ def _log_writer() -> None:
                 c.rollback()
             except Exception:
                 pass
+        _maybe_prune(c)
+
+
+_last_prune = 0.0
+
+# Write-back of entries only an upstream registry returned during a federated
+# search. Same pattern as the search log: a bounded queue, one thread, its own
+# connection, so a search never waits on an index write.
+_absorbq: "queue.Queue[tuple[str, dict]]" = queue.Queue(maxsize=5000)
+_absorbthread: threading.Thread | None = None
+
+
+def absorb(items: list[tuple[str, dict]]) -> None:
+    """Queue (upstream id, entry) pairs for indexing under that upstream's id,
+    exactly as the scheduled harvest would have indexed them."""
+    global _absorbthread
+    for it in items:
+        try:
+            _absorbq.put_nowait(it)
+        except queue.Full:
+            return
+    if _absorbthread is None or not _absorbthread.is_alive():
+        _absorbthread = threading.Thread(target=_absorb_writer, name="absorb", daemon=True)
+        _absorbthread.start()
+
+
+def _absorb_writer() -> None:
+    c = connect()
+    while True:
+        batch = [_absorbq.get()]
+        try:
+            while len(batch) < 100:
+                batch.append(_absorbq.get_nowait())
+        except queue.Empty:
+            pass
+        try:
+            for uid, e in batch:
+                if c.execute("SELECT 1 FROM entries WHERE key=?", (e.get("key"),)).fetchone():
+                    continue
+                upsert_entry(c, {k: v for k, v in e.items()
+                                 if k not in ("key", "source", "type_family")}, uid)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+
+def _maybe_prune(c: sqlite3.Connection) -> None:
+    """Hold the search log to the retention /privacy states, once a day.
+
+    Runs on the log writer's own thread and connection, the one place that
+    already writes these tables, so it adds no second writer. Search ids only
+    grow, so one cutoff id bounds both tables and each delete is an index
+    range, never a scan of the impressions table.
+    """
+    global _last_prune
+    if time.time() - _last_prune < 86400:
+        return
+    _last_prune = time.time()
+    try:
+        prune_search_log(c)
+    except Exception:
+        pass
+
+
+def prune_search_log(c: sqlite3.Connection, days: int | None = None) -> int:
+    """Delete searches and their impressions older than the retention window."""
+    cutoff = int(time.time()) - (days if days is not None
+                                 else config.SEARCH_LOG_RETENTION_DAYS) * 86400
+    top = c.execute("SELECT MAX(id) FROM searches WHERE ts < ?", (cutoff,)).fetchone()[0]
+    if top is None:
+        return 0
+    c.execute("DELETE FROM impressions WHERE search_id <= ?", (top,))
+    n = c.execute("DELETE FROM searches WHERE id <= ?", (top,)).rowcount
+    c.commit()
+    return n
 
 
 def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
                ms: int, federated: int, entries: list[dict] | None = None,
-               authenticated: bool = False, probe: bool = False) -> None:
+               authenticated: bool = False, probe: bool = False,
+               opted_out: bool = False) -> None:
     """Record a query and what it returned, off the request path.
 
     `conn` is accepted for compatibility and unused: the writer thread holds
@@ -1088,7 +1171,8 @@ def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
     ents = [(e.get("_key"), e.get("score")) for e in (entries or [])[:10]
             if e.get("_key") and e.get("visibility") != "private"]
     try:
-        _logq.put_nowait((q, mode, results, ms, federated, ents, authenticated,
+        withheld = "key" if authenticated else ("opt-out" if opted_out else None)
+        _logq.put_nowait((q, mode, results, ms, federated, ents, withheld,
                           int(time.time()), bool(probe)))
     except queue.Full:
         return

@@ -19,7 +19,8 @@ _TOKEN = re.compile(r"[A-Za-z0-9_]+")
 # and it depends on how strictly the tools matched: see rank.tool_leg_weight.
 
 
-def tool_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
+def tool_keys(conn: sqlite3.Connection, text: str, limit: int,
+              loose: bool = True) -> list[str]:
     """Entries whose TOOLS match, as their own retrieval ordering.
 
     An entry's own description is often useless for discovery. Stripe's entire
@@ -57,18 +58,22 @@ def tool_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
     if len(terms) > 1:
         attempts.append((" ".join(t.strip('*') for t in terms), True))  # phrase-ish
         attempts.append((" AND ".join(terms), True))
-    attempts.append((" OR ".join(terms), len(terms) == 1))
+    # A caller that gives the OR fallback no weight (`loose=False`) does not pay
+    # for it either: over every tool description it is the slowest attempt here,
+    # and its answer would be discarded.
+    if loose or len(terms) == 1:
+        attempts.append((" OR ".join(terms), len(terms) == 1))
 
     rows, strict = [], False
     for match, strict in attempts:
         try:
             rows = conn.execute(
-                """SELECT tools_fts.entry_key AS entry_key, t.name AS name,
+                """SELECT f.entry_key AS entry_key, t.name AS name,
                           t.description AS description
-                   FROM tools_fts
-                   JOIN tools t ON t.id = tools_fts.tool_id
-                   WHERE tools_fts MATCH ?
-                   ORDER BY bm25(tools_fts) LIMIT ?""",
+                   FROM (SELECT tool_id, entry_key, bm25(tools_fts) AS bm FROM tools_fts
+                         WHERE tools_fts MATCH ? ORDER BY bm LIMIT ?) AS f
+                   JOIN tools t ON t.id = f.tool_id
+                   ORDER BY f.bm""",
                 (match, limit * 4)).fetchall()
         except sqlite3.OperationalError:
             continue
@@ -155,36 +160,61 @@ def _label(identifier: str, url: str | None = None) -> str:
     return identifier
 
 
-def _fts_query(text: str) -> str:
-    """Build an FTS5 MATCH expression that degrades gracefully.
-
-    User text is never passed through raw: FTS5 treats bare punctuation as
-    syntax and a stray quote or hyphen raises rather than returning nothing.
-    We OR the terms so a long natural-language query still matches on its
-    content words, which is how people actually phrase a need.
-    """
-    toks = [t.lower() for t in _TOKEN.findall(text or "") if len(t) > 1]
-    if not toks:
-        return ""
-    stop = {"the", "and", "for", "with", "that", "this", "you", "your", "can",
-            "get", "how", "what", "which", "from", "into", "are", "was", "some",
-            "any", "all", "one", "out", "use", "using", "want", "need", "please",
-            "find", "give", "show", "make"}
-    keep = [t for t in toks if t not in stop] or toks
-    return " OR ".join(f'"{t}"*' for t in keep[:16])
+_FTS_STOP = {"the", "and", "for", "with", "that", "this", "you", "your", "can",
+             "get", "how", "what", "which", "from", "into", "are", "was", "some",
+             "any", "all", "one", "out", "use", "using", "want", "need", "please",
+             "find", "give", "show", "make"}
 
 
 def _fts_terms(text: str) -> list[str]:
-    """The content words of a query, in order, as FTS5 prefix terms."""
+    """The content words of a query, in order, as FTS5 prefix terms.
+
+    User text is never passed through raw: FTS5 treats bare punctuation as
+    syntax and a stray quote or hyphen raises rather than returning nothing.
+
+    Every word stays a prefix term. Prefixing only the last word, and adding
+    two-letter stop words, were both measured on 2026-09-23 and REJECTED:
+    each was faster (70 and 48 ms against 122 ms median on the fast path) and
+    one scored higher on the declared set, but both lost capability-battery
+    cases ("charge a credit card" put Stripe at 6, not 5). The battery may not
+    regress; see rank.py for the rule and the gate that enforces it.
+    """
     toks = [t.lower() for t in _TOKEN.findall(text or "") if len(t) > 1]
     if not toks:
         return []
-    stop = {"the", "and", "for", "with", "that", "this", "you", "your", "can",
-            "get", "how", "what", "which", "from", "into", "are", "was", "some",
-            "any", "all", "one", "out", "use", "using", "want", "need", "please",
-            "find", "give", "show", "make"}
-    keep = [t for t in toks if t not in stop] or toks
-    return [f'"{t}"*' for t in keep[:16]]
+    keep = ([t for t in toks if t not in _FTS_STOP] or toks)[:16]
+    return [f'"{t}"*' for t in keep]
+
+
+def name_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
+    """Entries whose display name contains the whole query as a phrase.
+
+    Exact names first, then shortest names, since a name that is the query plus
+    little else is the closer match. A query of one short word is not a name
+    lookup; it would match half the index.
+    """
+    toks = [t.lower() for t in _TOKEN.findall(text or "") if len(t) > 1]
+    if not toks or (len(toks) == 1 and len(toks[0]) < 4) or len(toks) > 8:
+        return []
+    phrase = " ".join(toks)
+    try:
+        rows = conn.execute(
+            """SELECT f.key, e.display_name FROM
+                 (SELECT key FROM entries_fts WHERE entries_fts MATCH ? LIMIT 400) AS f
+               JOIN entries e ON e.key = f.key""",
+            (f'display_name : "{phrase}"',)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    def order(r):
+        name = " ".join(t.lower() for t in _TOKEN.findall(r["display_name"] or ""))
+        return (name != phrase, len(name))
+    return [r["key"] for r in sorted(rows, key=order)[:limit]]
+
+
+def _fts_query(text: str) -> str:
+    """The terms OR'd, so a long natural-language query still matches on its
+    content words, which is how people actually phrase a need."""
+    return " OR ".join(_fts_terms(text))
 
 
 def _passes_filter(row: sqlite3.Row, flt: dict | None) -> bool:
@@ -336,12 +366,16 @@ def local_search(conn: sqlite3.Connection, text: str, flt: dict | None,
     if not match:
         return []
     w = ",".join(str(x) for x in rank.FTS_WEIGHTS)
+    # Rank inside the FTS table first and join only the winners. Joining every
+    # match to its full `entries` row before sorting cost more than the search
+    # itself once rows grew (provenance, payments, probes): identical results,
+    # median 230 -> 102 ms on the declared eval set.
     sql = f"""
-      SELECT e.*, bm25(entries_fts, {w}) AS bm
-      FROM entries_fts JOIN entries e ON e.key = entries_fts.key
-      WHERE entries_fts MATCH ?
-      ORDER BY bm
-      LIMIT ?
+      SELECT e.*, f.bm AS bm
+      FROM (SELECT key, bm25(entries_fts, {w}) AS bm FROM entries_fts
+            WHERE entries_fts MATCH ? ORDER BY bm LIMIT ?) AS f
+      JOIN entries e ON e.key = f.key
+      ORDER BY f.bm
     """
     try:
         rows = conn.execute(sql, (match, max(limit * 6, 60))).fetchall()
@@ -472,15 +506,19 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     # "charge a credit card" while the operation `PostCharges` said exactly that
     # one level down.
     tool_order, tool_detail = await asyncio.to_thread(
-        lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3))
+        lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3,
+                          loose=rank.TOOL_LEG_LOOSE_WEIGHT > 0))
     # `tool_detail` is filled only when the match was strict (phrase or
     # conjunction). An OR-fallback ordering carries the loose weight, which is
     # measured at zero, and a leg with no weight is not fused at all.
     tool_w = rank.tool_leg_weight(bool(tool_detail))
     if tool_w <= 0:
         tool_order = []
+    name_order = await asyncio.to_thread(
+        lambda: name_keys(store.tls_conn(), text, max(page_size, 10))) \
+        if rank.NAME_LEG_WEIGHT > 0 else []
     by_key: dict[str, dict] = {e["_key"]: e for e in local}
-    missing = [k for k in tool_order if k not in by_key]
+    missing = [k for k in tool_order + name_order if k not in by_key]
     if missing:
         extra = await asyncio.to_thread(
             lambda: local_by_keys(store.tls_conn(), missing, flt))
@@ -492,15 +530,21 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             e["matchedTool"] = td
 
     if mode in ("none", "referrals"):
-        local_fused = _fuse_local(local, tool_order, by_key, page_size, tool_w)
+        local_fused = _fuse_local(local, tool_order, by_key, page_size, tool_w, name_order)
         out = {"results": local_fused, "_federated": [], "_dense": None}
         if mode == "referrals":
             out["referrals"] = federation.referral_entries()
         return out
 
-    # auto: fuse our ordering, the dense ordering, and each upstream's
-    # ordering, all through RRF. Sparse and dense are launched together so the
-    # dense leg is free in wall-clock terms.
+    # auto. The local answer first; the other legs only when they could change it.
+    local_fused = _fuse_local(local, tool_order, by_key, page_size, tool_w, name_order)
+    cov = query_match(text, local_fused)["coverage"] if local_fused else 0.0
+    if cov >= rank.FEDERATE_BELOW_COVERAGE and budget_ms is None:
+        return {"results": local_fused, "_federated": [], "_dense": None,
+                "_gate": {"federated": False, "coverage": cov}}
+
+    # Not confident: ask the other legs, launched together so the dense leg is
+    # free in wall-clock terms, and fuse them as ADDITIVE legs (rank.py).
     want_dense = config.DENSE_ENABLED if use_dense is None else bool(use_dense)
     dense_task = None
     dense_started = time.monotonic()
@@ -533,6 +577,12 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     if tool_order:
         rankings.append([k for k in tool_order if k in by_key])
         leg_weights.append(tool_w)
+    if name_order:
+        rankings.append([k for k in name_order if k in by_key])
+        leg_weights.append(rank.NAME_LEG_WEIGHT)
+    # What the local legs returned. Additive legs may add to it, never reorder it.
+    returned = {k for r in rankings for k in r}
+    novel: list[tuple[str, dict]] = []
     fam_filter = expand_type_filter(flt.get("type", [])) if flt and flt.get("type") else None
     pay_filter = payments.filter_active(flt)
 
@@ -548,10 +598,13 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             if pay_filter and not payments.passes(payments.merge(payments.from_entry(e), None), flt):
                 continue
             k = e["key"]
-            order.append(k)
             if k in by_key:
                 by_key[k].setdefault("_also", []).append(u["source"])
+                if k not in returned:
+                    order.append(k)
             else:
+                order.append(k)
+                novel.append((u["id"], e))
                 by_key[k] = {
                     "identifier": e["identifier"],
                     # §5.3.2: a response entry MUST carry identifier and nothing
@@ -570,7 +623,12 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
                 }
         if order:
             rankings.append(order)
-            leg_weights.append(1.0)
+            leg_weights.append(rank.UPSTREAM_LEG_WEIGHT)
+    # Entries only an upstream returned are written back, so the next search
+    # finds them here without asking anyone. Off the request path; the writer
+    # skips any that another source indexed meanwhile.
+    if novel:
+        store.absorb(novel)
 
     # The dense ranking joins the fusion as one more ordering. Entries it
     # surfaces that lexical search missed are the whole point, so they are
@@ -578,6 +636,8 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     if dense_order:
         dense_keep = []
         for k in dense_order:
+            if k in returned:
+                continue
             if k in by_key:
                 dense_keep.append(k)
                 continue
@@ -593,7 +653,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             dense_keep.append(k)
         if dense_keep:
             rankings.append(dense_keep)
-            leg_weights.append(1.0)
+            leg_weights.append(rank.DENSE_LEG_WEIGHT)
 
     fused = rank.rrf(rankings, weights=leg_weights)
     scored = rank.fuse_to_scores(fused)
@@ -607,12 +667,14 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         results.append(e)
     results.sort(key=lambda x: -x["score"])
     return {"results": diversify(results, page_size)[:page_size], "_federated": ups,
-            "_dense": {"state": dense_state, "candidates": len(dense_order)}}
+            "_dense": {"state": dense_state, "candidates": len(dense_order)},
+            "_gate": {"federated": True, "coverage": cov}}
 
 
 def _fuse_local(local: list[dict], tool_order: list[str],
                 by_key: dict[str, dict], page_size: int,
-                tool_w: float = rank.TOOL_LEG_WEIGHT) -> list[dict]:
+                tool_w: float = rank.TOOL_LEG_WEIGHT,
+                name_order: list[str] | None = None) -> list[dict]:
     """Fuse the lexical and tool legs for the modes that do not federate.
 
     Same RRF and the same tool weight as `auto` uses, so the two paths agree
@@ -620,11 +682,18 @@ def _fuse_local(local: list[dict], tool_order: list[str],
     legs on top. Without this the fast path and the default path disagreed about
     the contents of one index, which is worse than either being wrong alone.
     """
-    if not tool_order:
+    name_order = [k for k in (name_order or []) if k in by_key]
+    if not tool_order and not name_order:
         return diversify(local, page_size)[:page_size]
-    rankings = [[e["_key"] for e in local],
-                [k for k in tool_order if k in by_key]]
-    fused = rank.rrf(rankings, weights=[1.0, tool_w])
+    rankings = [[e["_key"] for e in local]]
+    weights = [1.0]
+    if tool_order:
+        rankings.append([k for k in tool_order if k in by_key])
+        weights.append(tool_w)
+    if name_order:
+        rankings.append(name_order)
+        weights.append(rank.NAME_LEG_WEIGHT)
+    fused = rank.rrf(rankings, weights=weights)
     scored = rank.fuse_to_scores(fused)          # same call the auto path makes
     out = []
     for k, sc in sorted(scored.items(), key=lambda kv: -kv[1]):

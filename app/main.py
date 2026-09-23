@@ -483,10 +483,14 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     # schema is the spec's, and a client hint has no business in it. Suppressing
     # it only affects our own numbers, so there is nothing to abuse here.
     preview = request.headers.get("x-neuronto-preview") == "1"
+    # Sec-GPC and DNT already withhold the analytics session; they withhold the
+    # query text too. The search is still counted, so no total is overstated.
+    opted_out = (request.headers.get("sec-gpc") == "1"
+                 or request.headers.get("dnt") == "1")
     if not preview:
         store.log_search(conn, text, mode, len(out["results"]), took, fed_ok,
                          entries=out["results"], authenticated=bool(owner),
-                         probe=_is_probe(request))
+                         probe=_is_probe(request), opted_out=opted_out)
     cleaned = search.clean(out["results"])
     payload: dict[str, Any] = {"results": cleaned,
                                "queryMatch": search.query_match(text, cleaned)}
@@ -496,6 +500,15 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
     fed = out.get("_federated") or []
+    gate = out.get("_gate")
+    if gate and not gate["federated"]:
+        payload["federation"] = {
+            "mode": mode, "federated": False, "coverage": gate["coverage"],
+            "reason": ("this index answered with high confidence, and the other "
+                       "registries could only add resources below these, so the query "
+                       "was not sent to them. Send the x-neuronto-budget-ms header to "
+                       "federate regardless."),
+        }
     if fed:
         # Say plainly which upstreams answered. A federating registry that hides
         # a failing upstream is quietly serving a smaller index than it claims.
@@ -514,7 +527,42 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
                             **({"error": f["error"]} if f.get("error") else {})}
                            for f in fed],
         }
-    return JSONResponse(payload)
+    handling = _query_handling(preview, bool(owner), opted_out, fed,
+                               out.get("_dense") or {})
+    payload["queryHandling"] = handling
+    return JSONResponse(payload, headers={
+        "Link": f'<{config.PUBLIC_BASE}/privacy>; rel="privacy-policy"',
+        "Neuronto-Query-Handling": (f'logged={handling["logged"]}; '
+                                    f'forwarded={len(handling["forwardedTo"])}; '
+                                    f'embedded={"1" if handling["embedded"] else "0"}'),
+    })
+
+
+def _query_handling(preview: bool, keyed: bool, opted_out: bool,
+                    fed: list[dict], dense: dict) -> dict:
+    """What happened to THIS query, stated in the response that answered it.
+
+    A privacy page describes a policy; this describes an event. A registry
+    federating on a caller's behalf sends their words to other services, and the
+    caller should learn that from the answer, not from a page they may never
+    read. `forwardedTo` names only registries asked just now: an answer served
+    from our 30 minute cache sent nothing anywhere.
+    """
+    if preview:
+        logged = "no"
+    elif keyed:
+        logged = "withheld-api-key"
+    elif opted_out:
+        logged = "withheld-opt-out"
+    else:
+        logged = f"text-{config.SEARCH_LOG_RETENTION_DAYS}d"
+    return {
+        "logged": logged,
+        "forwardedTo": [f["name"] for f in fed if not f.get("cached")],
+        "embedded": dense.get("state") not in (None, "off"),
+        "policy": f"{config.PUBLIC_BASE}/privacy",
+        "localOnly": 'send "federation": "none" and the query never leaves this service',
+    }
 
 
 # Paths that real callers guessed in the outside-failure log, each pointed at
@@ -1778,8 +1826,50 @@ def bench_endpoint(request: Request):
     view = VIEWS.get("bench")
     if view is not None and _wants_html(request):
         return view(request, got)
-    return JSONResponse(got, headers={"Cache-Control": "public, max-age=900",
-                                      "Vary": "Accept"})
+    # Negotiated on Accept, and the edge ignores Vary, so the edge must not
+    # store it or it serves one representation to both kinds of caller.
+    return JSONResponse(_bench_view(got), headers={"Cache-Control": "public, max-age=900",
+                                                   "CDN-Cache-Control": "no-store",
+                                                   "Vary": "Accept"})
+
+
+def _bench_view(got: dict) -> dict:
+    """The stored run plus how old it is, computed when served, so a stale
+    number says so itself rather than relying on a reader checking a date."""
+    out = dict(got)
+    out["age_hours"] = round((time.time() - int(got.get("generated") or 0)) / 3600, 1)
+    return out
+
+
+@app.get("/bench.json")
+def bench_json():
+    """Always JSON, never negotiated, so any cache may keep it. The machine
+    readable counterpart a reproduction starts from, with the task set beside it."""
+    got = bench.latest(db())
+    if not got:
+        return JSONResponse(status_code=404,
+                            content={"error": "no_run_yet",
+                                     "detail": "no benchmark has been run on this index"})
+    return JSONResponse(_bench_view(got), headers={"Cache-Control": "public, max-age=900"})
+
+
+@app.get("/bench/tasks.json")
+def bench_tasks():
+    """The frozen task set the benchmark reads: every query, its expected
+    identifier, the publisher manifest it was read from and that body's sha256."""
+    from . import evalset
+    try:
+        ev = evalset.load(str(config.BENCH_SET))
+    except (OSError, ValueError) as e:
+        return JSONResponse(status_code=503, content={"error": "task_set_unavailable",
+                                                      "detail": str(e)[:200]})
+    return JSONResponse(ev, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/bench", include_in_schema=False)
+def bench_api_alias():
+    # Guessed by a reviewer and by assistants; the canonical path is /bench.json.
+    return Response(status_code=301, headers={"Location": "/bench.json"})
 
 
 # ---------------------------------------------------------------------------
@@ -1999,6 +2089,11 @@ def privacy_page(request: Request):
             "anonymous": ("query text truncated to 200 chars, mode, result count, duration "
                           "and the entries returned with their rank"),
             "with_api_key": "not recorded. the query is replaced with a placeholder",
+            "with_sec_gpc_or_dnt": "counted, but text and results are not recorded",
+            "retention_days": config.SEARCH_LOG_RETENTION_DAYS,
+            "per_response": ("every search response carries `queryHandling` and a "
+                             "Neuronto-Query-Handling header stating whether its text was kept, "
+                             "where it was sent and whether it was embedded"),
             "why": f"powers {config.PUBLIC_BASE}/demand, scoped to a publisher's own domain",
         },
         "submissions": ("a submission records the user agent of the client that made it, "
@@ -2007,8 +2102,11 @@ def privacy_page(request: Request):
                         "anonymous reading, and the question it answers is which tool "
                         "submitted a given entry. Nothing else about the request is kept"),
         "query_leaves_the_machine": [
-            "to the other public ARD registries when federating, cached 30 minutes then deleted",
-            "to an embedding provider, to vectorise the query for semantic retrieval",
+            ("only in `federation: auto` when the local answer is not confident (top result "
+             "covers under 75% of the query's words), or when the caller asks for a longer "
+             "federation window; never in `federation: none`"),
+            "then to the other public ARD registries, answers cached 30 minutes then deleted",
+            "and to an embedding provider, to vectorise the query for semantic retrieval",
         ],
         "retention": "raw analytics rows 90 days; daily aggregates indefinitely, with no identifier",
         "cookies": "none for tracking. no advertising, no third-party analytics",
