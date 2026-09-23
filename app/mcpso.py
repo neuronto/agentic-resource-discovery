@@ -40,6 +40,20 @@ DESC = re.compile(r'<meta name="description" content="([^"]{6,400})"', re.I)
 OGD = re.compile(r'<meta property="og:description" content="([^"]{6,400})"', re.I)
 REPO = re.compile(r"github\.com/([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git|[\"'<\s])")
 
+# mcp.so links its OWN source repository in the chrome of every page, before the
+# server's repository. Taking the first match filed 797 unrelated servers under
+# that one URL, and liveness then probed mcp.so's repo and credited its uptime to
+# each of them. A repository that is site chrome is never a server's.
+SITE_REPOS = {"chatmcp/mcp-directory", "chatmcp/mcpso", "chatmcp/mcp.so"}
+
+
+def server_repo(html: str) -> str | None:
+    for m in REPO.finditer(html):
+        r = m.group(1)
+        if r.lower() not in SITE_REPOS:
+            return f"https://github.com/{r}"
+    return None
+
 
 def _get(url: str, timeout: int = 25) -> tuple[int, str]:
     """urllib, because httpx is fingerprinted and refused. Never raises."""
@@ -104,8 +118,7 @@ async def from_mcpso(conn, max_servers: int = 25000, concurrency: int = 6,
             fetched += 1
             m = DESC.search(h) or OGD.search(h)
             desc = (m.group(1).strip() if m else "")
-            rm = REPO.search(h)
-            repo = f"https://github.com/{rm.group(1)}" if rm else None
+            repo = server_repo(h)
             name = slug.replace("-", " ").strip()
 
             entry = {
