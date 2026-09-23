@@ -15,10 +15,8 @@ _TOKEN = re.compile(r"[A-Za-z0-9_]+")
 
 
 
-# How much a tool match counts against a description match. A tool match is the
-# server's own statement, verified by us reading it; a description match is
-# prose. Set from measurement across a query battery, not from one example.
-TOOL_LEG_WEIGHT = 2.0
+# How much a tool match counts against a description match is measured data,
+# and it depends on how strictly the tools matched: see rank.tool_leg_weight.
 
 
 def tool_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
@@ -475,6 +473,12 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     # one level down.
     tool_order, tool_detail = await asyncio.to_thread(
         lambda: tool_keys(store.tls_conn(), text, max(page_size, 10) * 3))
+    # `tool_detail` is filled only when the match was strict (phrase or
+    # conjunction). An OR-fallback ordering carries the loose weight, which is
+    # measured at zero, and a leg with no weight is not fused at all.
+    tool_w = rank.tool_leg_weight(bool(tool_detail))
+    if tool_w <= 0:
+        tool_order = []
     by_key: dict[str, dict] = {e["_key"]: e for e in local}
     missing = [k for k in tool_order if k not in by_key]
     if missing:
@@ -488,7 +492,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
             e["matchedTool"] = td
 
     if mode in ("none", "referrals"):
-        local_fused = _fuse_local(local, tool_order, by_key, page_size)
+        local_fused = _fuse_local(local, tool_order, by_key, page_size, tool_w)
         out = {"results": local_fused, "_federated": [], "_dense": None}
         if mode == "referrals":
             out["referrals"] = federation.referral_entries()
@@ -528,7 +532,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     leg_weights = [1.0]
     if tool_order:
         rankings.append([k for k in tool_order if k in by_key])
-        leg_weights.append(TOOL_LEG_WEIGHT)
+        leg_weights.append(tool_w)
     fam_filter = expand_type_filter(flt.get("type", [])) if flt and flt.get("type") else None
     pay_filter = payments.filter_active(flt)
 
@@ -607,7 +611,8 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
 
 
 def _fuse_local(local: list[dict], tool_order: list[str],
-                by_key: dict[str, dict], page_size: int) -> list[dict]:
+                by_key: dict[str, dict], page_size: int,
+                tool_w: float = rank.TOOL_LEG_WEIGHT) -> list[dict]:
     """Fuse the lexical and tool legs for the modes that do not federate.
 
     Same RRF and the same tool weight as `auto` uses, so the two paths agree
@@ -619,7 +624,7 @@ def _fuse_local(local: list[dict], tool_order: list[str],
         return diversify(local, page_size)[:page_size]
     rankings = [[e["_key"] for e in local],
                 [k for k in tool_order if k in by_key]]
-    fused = rank.rrf(rankings, weights=[1.0, TOOL_LEG_WEIGHT])
+    fused = rank.rrf(rankings, weights=[1.0, tool_w])
     scored = rank.fuse_to_scores(fused)          # same call the auto path makes
     out = []
     for k, sc in sorted(scored.items(), key=lambda kv: -kv[1]):

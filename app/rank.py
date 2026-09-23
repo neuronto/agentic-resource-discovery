@@ -36,6 +36,31 @@ _GAMMA = 0.65
 _FLOOR = 4
 
 
+# ── Fusion weights for the tool leg ─────────────────────────────────────────
+# MEASURED, not asserted. Chosen on the `tune` half of the frozen declared eval
+# set (bench/declared-v1.json) and confirmed on its `holdout` half, with the
+# capability battery (scripts/battery.py) held as a second objective that may not
+# regress. Change them only by re-running that measurement.
+#
+# The tool leg tries a phrase, then a conjunction, then a bare OR over the query
+# words. Only the first two are evidence: the OR matches almost any query against
+# 95,994 tool descriptions. At a flat 2.0 the OR leg's whole top ten outscored the
+# lexical leg's first place under RRF (2/(60+r) > 1/61 for every r < 62), so a
+# publisher's own verbatim query found its entry 21% of the time while the lexical
+# leg alone ranked it first in 140 of 192 cases.
+#
+#   strict / loose   declared recall@10 / MRR (tune)   battery hit@5
+#   2.0 / 2.0        0.209 / 0.087                     6/15   (before)
+#   1.0 / 1.0        0.919 / 0.454                     4/15   (a flat cut costs the battery)
+#   2.0 / 0.0        0.930 / 0.811                     6/15   (chosen)
+TOOL_LEG_WEIGHT = 2.0         # a phrase or conjunction matched a tool
+TOOL_LEG_LOOSE_WEIGHT = 0.0   # only the OR fallback matched: not evidence
+
+
+def tool_leg_weight(strict: bool) -> float:
+    return TOOL_LEG_WEIGHT if strict else TOOL_LEG_LOOSE_WEIGHT
+
+
 def scale_scores(raw: Sequence[float]) -> list[int]:
     """Map raw relevance (higher is better) onto 0-100, preserving separation.
 
