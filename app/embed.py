@@ -27,18 +27,30 @@ that is 40 MB resident and a single matmul per query.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import os
 import struct
+import threading
 import time
 
 import httpx
 
 from . import config
 
-_matrix = None          # numpy array (n, dim), L2-normalised
-_keys: list[str] = []
-_loaded_at = 0.0
-_lock = asyncio.Lock()
+# One snapshot, swapped in a single assignment. A reader takes the matrix and
+# its keys in one read, so a refresh landing mid-search can never pair one
+# build's row indices with another build's keys.
+_snap: tuple = (None, [], 0.0)   # (mapped matrix, keys, file mtime)
+_LOCK_STALE_S = 900
+
+# A refresh runs in a worker thread, never on the event loop: building the
+# matrix is a multi-second synchronous read of every vector in the database,
+# and `asyncio.wait_for` cannot interrupt a coroutine that never awaits, so
+# doing it inline froze the whole worker for as long as the read took.
+_refresh_lock = threading.Lock()
+_refreshing = False
+_refresh_task = None             # held: asyncio keeps only a weak reference
 
 
 def _np():
@@ -74,6 +86,30 @@ def text_for(row) -> str:
     if "tool_text" in row.keys():
         parts.append(row["tool_text"] or "")
     return " \n".join(p for p in parts if p)[:4000]
+
+
+# Query vectors, cached briefly. The same phrasings recur constantly, from
+# our own battery, from crawlers and from real callers, and each miss is a
+# ~0.6 s call to an external API inside a budget of about one second. Keyed on
+# the exact text; bounded so it cannot grow without limit.
+_qcache: dict[str, tuple[float, list[float]]] = {}
+_QCACHE_MAX = 512
+
+
+async def embed_query(text: str) -> list[float] | None:
+    """One query's vector, from cache when it is warm."""
+    now = time.time()
+    hit = _qcache.get(text)
+    if hit and now - hit[0] < config.EMBED_CACHE_S:
+        return hit[1]
+    vecs = await embed_texts([text])
+    if not vecs:
+        return None
+    if len(_qcache) >= _QCACHE_MAX:
+        for k in sorted(_qcache, key=lambda k: _qcache[k][0])[:_QCACHE_MAX // 4]:
+            _qcache.pop(k, None)
+    _qcache[text] = (now, vecs[0])
+    return vecs[0]
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]] | None:
@@ -231,43 +267,169 @@ async def build_tools(conn, limit: int = 2000, only_missing: bool = True) -> dic
 
 
 def invalidate() -> None:
-    global _matrix, _loaded_at
-    _matrix = None
-    _loaded_at = 0.0
+    """Mark the shared build stale so the next search schedules a rebuild.
+
+    It does not delete anything. Dropping the matrix made the next search
+    rebuild from scratch on the request path; marking it stale keeps serving
+    the previous build, minutes out of date at worst, while the rebuild runs
+    behind the request.
+    """
+    vec_p, _, _ = _dense_paths()
+    try:
+        old = time.time() - config.DENSE_REBUILD_S - 1
+        os.utime(vec_p, (old, old))
+    except OSError:
+        pass
+
+
+def _dense_paths() -> tuple[str, str, str]:
+    """Where the shared matrix lives: next to the database it is built from."""
+    base = os.environ.get("NEURONTO_DENSE_DIR") or os.path.dirname(
+        os.path.abspath(config.DB_PATH))
+    return (os.path.join(base, "dense.f32"),
+            os.path.join(base, "dense.keys"),
+            os.path.join(base, "dense.lock"))
 
 
 def load(conn, force: bool = False):
-    """Load all vectors into one normalised matrix, cached in process."""
-    global _matrix, _keys, _loaded_at
-    if _matrix is not None and not force and (time.time() - _loaded_at) < config.EMBED_CACHE_S:
-        return _matrix
+    """Build the shared matrix file from the database.
+
+    Synchronous and slow, several seconds of reading every vector there is.
+    Never call it from the event loop; `ensure_matrix` is the query path's
+    entry point. Writes are atomic, so a worker mapping the file never sees a
+    half-written build.
+    """
+    vec_p, key_p, _ = _dense_paths()
     try:
         np = _np()
     except Exception:
         return None
-    # Both vectors of every entry, in one matrix. `_keys` therefore holds an
-    # entry key twice, once for its prose and once for its tools, and
-    # `dense_ranking` collapses them keeping the better rank. Fusing here rather
-    # than running two matmuls keeps the query path a single matrix multiply.
     rows = conn.execute(
         "SELECT key, vec, dim FROM vectors "
         "UNION ALL SELECT key, vec, dim FROM tool_vectors").fetchall()
     if not rows:
-        _matrix, _keys, _loaded_at = None, [], time.time()
         return None
     dim = rows[0]["dim"]
+    # Both vectors of every entry, in one matrix. The key list therefore holds an
+    # entry key twice, once for its prose and once for its tools, and
+    # `dense_ranking` collapses them keeping the better rank. Fusing here rather
+    # than running two matmuls keeps the query path a single matrix multiply.
     keep = [r for r in rows if r["dim"] == dim and len(r["vec"]) == dim * 4]
     if not keep:
-        _matrix, _keys, _loaded_at = None, [], time.time()
         return None
     m = np.frombuffer(b"".join(r["vec"] for r in keep),
                       dtype="<f4").reshape(len(keep), dim).astype("float32")
     norms = np.linalg.norm(m, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
-    _matrix = m / norms
-    _keys = [r["key"] for r in keep]
-    _loaded_at = time.time()
-    return _matrix
+    m /= norms
+    tmp_v, tmp_k = vec_p + ".tmp", key_p + ".tmp"
+    m.tofile(tmp_v)
+    with io.open(tmp_k, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(r["key"] for r in keep))
+    os.replace(tmp_v, vec_p)
+    os.replace(tmp_k, key_p)
+    del m
+    return True
+
+
+def _rebuild() -> None:
+    """Runs on a worker thread, on that thread's own connection.
+
+    Guarded by a lock file so that several workers noticing staleness in the same
+    second produce one build between them rather than four.
+    """
+    _, _, lock_p = _dense_paths()
+    try:
+        fd = os.open(lock_p, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        # Stale lock from a build that was killed: reclaim it, never wait forever.
+        try:
+            if time.time() - os.path.getmtime(lock_p) > _LOCK_STALE_S:
+                os.unlink(lock_p)
+        except OSError:
+            pass
+        return
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        from . import store
+        load(store.tls_conn(), force=True)
+    finally:
+        try:
+            os.unlink(lock_p)
+        except OSError:
+            pass
+
+
+async def _refresh() -> None:
+    global _refreshing, _refresh_task
+    try:
+        await asyncio.to_thread(_rebuild)
+    except Exception:
+        pass
+    finally:
+        with _refresh_lock:
+            _refreshing = False
+        _refresh_task = None
+
+
+def _schedule_refresh() -> None:
+    """At most one rebuild in flight per worker; the lock file handles the
+    other workers."""
+    global _refreshing, _refresh_task
+    with _refresh_lock:
+        if _refreshing:
+            return
+        _refreshing = True
+    try:
+        _refresh_task = asyncio.ensure_future(_refresh())
+    except RuntimeError:          # no running loop, e.g. a synchronous caller
+        with _refresh_lock:
+            _refreshing = False
+
+
+def _map_file():
+    """Map the shared matrix. Cheap: the pages are the OS page cache, so every
+    worker reads one copy rather than each holding its own half a gigabyte."""
+    global _snap
+    vec_p, key_p, _ = _dense_paths()
+    try:
+        np = _np()
+        mtime = os.path.getmtime(vec_p)
+        if _snap[0] is not None and _snap[2] == mtime:
+            return _snap[0], _snap[1]
+        keys = io.open(key_p, encoding="utf-8").read().split("\n")
+        size = os.path.getsize(vec_p)
+        if not keys or size % (len(keys) * 4):
+            return None, []
+        dim = size // 4 // len(keys)
+        m = np.memmap(vec_p, dtype="<f4", mode="r").reshape(len(keys), dim)
+        _snap = (m, keys, mtime)
+        return m, keys
+    except (OSError, ValueError):
+        return None, []
+
+
+async def ensure_matrix():
+    """The matrix and its keys, without ever blocking the event loop.
+
+    The matrix is a file that every worker maps, so this is a stat and, when
+    the build has changed, a mmap: microseconds either way. A build older than
+    EMBED_CACHE_S is still served while a rebuild runs on a thread behind the
+    request, because minutes of drift in one ranking leg cost nothing and a
+    rebuild on the request path cost a minute of wall clock. No file at all,
+    which happens once on a new deployment, means this search runs without the
+    dense leg, which contributes nothing to RRF, and a later one has it.
+    """
+    vec_p, _, _ = _dense_paths()
+    try:
+        age = time.time() - os.path.getmtime(vec_p)
+    except OSError:
+        _schedule_refresh()
+        return None, []
+    if age > config.DENSE_REBUILD_S:
+        _schedule_refresh()
+    return _map_file()
 
 
 async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
@@ -277,15 +439,15 @@ async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
     ranking contributes nothing to RRF, so search behaves exactly as it did
     before this module existed.
     """
-    m = load(conn)
-    if m is None or not _keys:
+    m, keys = await ensure_matrix()
+    if m is None or not keys:
         return []
-    vecs = await embed_texts([text])
-    if not vecs:
+    vec = await embed_query(text)
+    if not vec:
         return []
     try:
         np = _np()
-        q = np.asarray(vecs[0], dtype="float32")
+        q = np.asarray(vec, dtype="float32")
         if q.shape[0] != m.shape[1]:
             return []          # model changed under us; ignore until rebuilt
         n = float(np.linalg.norm(q)) or 1.0
@@ -297,7 +459,7 @@ async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
         idx = idx[np.argsort(-sims[idx])]
         out, seen = [], set()
         for i in idx:
-            key = _keys[i]
+            key = keys[i]
             if key in seen:
                 continue      # already ranked, by whichever vector matched better
             seen.add(key)

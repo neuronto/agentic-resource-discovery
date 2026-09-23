@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import re
 import sqlite3
@@ -498,6 +499,7 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     # dense leg is free in wall-clock terms.
     want_dense = config.DENSE_ENABLED if use_dense is None else bool(use_dense)
     dense_task = None
+    dense_started = time.monotonic()
     if want_dense:
         dense_task = asyncio.ensure_future(
             _dense_keys(conn, text, max(page_size, 20) * 3))
@@ -507,9 +509,16 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
     dense_order: list[str] = []
     dense_state = "off"
     if dense_task is not None:
+        # The deadline runs from when the leg STARTED, not from when the
+        # fan-out happened to return. Embedding a query costs ~0.6 s, and a
+        # fan-out that came back early, because every circuit was open or the
+        # answer was cached, used to leave the leg only EMBED_QUERY_TIMEOUT_S
+        # and then throw away work that was nearly finished. The leg vanished
+        # from exactly the searches that had the most time to spare.
+        budget_s = (budget_ms or config.FEDERATION_BUDGET_MS) / 1000.0
+        left = budget_s + config.EMBED_QUERY_TIMEOUT_S - (time.monotonic() - dense_started)
         try:
-            dense_order = await asyncio.wait_for(
-                dense_task, timeout=config.EMBED_QUERY_TIMEOUT_S)
+            dense_order = await asyncio.wait_for(dense_task, timeout=max(0.05, left))
             dense_state = "ok" if dense_order else "empty"
         except (asyncio.TimeoutError, Exception):
             dense_task.cancel()

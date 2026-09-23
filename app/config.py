@@ -142,12 +142,23 @@ EMBED_MODEL    = os.getenv("NEURONTO_EMBED_MODEL", "BAAI/bge-m3")
 EMBED_BATCH    = _i("NEURONTO_EMBED_BATCH", 64)
 EMBED_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_TIMEOUT", "20"))
 # The query-time budget. Dense runs only alongside federation, never on the
-# fast path, so it must fit inside the federation budget or be dropped.
-# Waited on AFTER the fan-out returns, so this is the extra allowance beyond
-# the federation budget, not a parallel one. 1.6 s on top of a 700 ms budget
-# would put the worst case back above two seconds.
-EMBED_QUERY_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_QUERY_TIMEOUT", "0.3"))
+# fast path, so it must fit inside the federation budget or be dropped. It is
+# the allowance ON TOP of the federation budget, and the deadline is measured
+# from when the leg started, not from when the fan-out returned: a fan-out that
+# came back early used to leave the leg a fraction of this and discard it.
+# Sized to the measured cost of embedding one query, 2026-09-21, over eight
+# queries: median 0.60 s, worst 1.28 s. 0.7 s of budget plus 0.8 s covers the
+# worst case observed; at 0.3 s the leg was thrown away on most searches.
+EMBED_QUERY_TIMEOUT_S = float(os.getenv("NEURONTO_EMBED_QUERY_TIMEOUT", "0.8"))
 EMBED_CACHE_S  = _i("NEURONTO_EMBED_CACHE_S", 300)
+
+# How long a shared dense build may stand before a worker rebuilds it. This is
+# a SAFETY NET, not the trigger: the build is half a gigabyte, so rebuilding it
+# on the old 300 s query cache would have written it 288 times a day for data
+# that changes four times a day. The real trigger is `embed.invalidate()`,
+# which the embedding job calls once it has written new vectors, so a rebuild
+# follows the data rather than a clock.
+DENSE_REBUILD_S = _i("NEURONTO_DENSE_REBUILD_S", 3600)
 DENSE_ENABLED  = _b("NEURONTO_DENSE", True)
 
 # Adoption tracking. The watchlist is public and deliberately includes the
