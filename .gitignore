@@ -70,3 +70,6 @@ web/media/
 # The website: every page, its assets and build scripts. A separate private
 # repository checked out here; the registry never depends on it.
 website/
+
+# Server-only: hardcodes server paths and reads the analytics store. Never public.
+app/badge_watch.py

@@ -38,6 +38,13 @@ def stats_for(conn: sqlite3.Connection, publisher: str) -> tuple | None:
     got = _CACHE.get(key)
     if got and now - got[0] < _TTL:
         return got[1]
+    # EVERY family counts for "is this publisher in the index", not just MCP.
+    # This used to end with `AND type_family='mcp-server'`, which meant a publisher
+    # of A2A agents, OpenAPI descriptions, skills or docs matched nothing and was
+    # shown "not indexed yet" while sitting in the index. 738 publishers were
+    # affected, including an early adopter who had already embedded the badge.
+    # The TOOLS subquery stays MCP-only on purpose: tools/list is an MCP concept,
+    # and reporting tools for an OpenAPI entry would be a false claim.
     row = conn.execute(
         """SELECT
              (SELECT COUNT(*) FROM tools t JOIN entries e2 ON e2.key=t.entry_key
@@ -46,8 +53,25 @@ def stats_for(conn: sqlite3.Connection, publisher: str) -> tuple | None:
              SUM(CASE WHEN mcp_status LIKE 'ok%' OR mcp_status IN ('auth', 'payment')
                       THEN 1 ELSE 0 END) AS responding
            FROM entries
-           WHERE lower(publisher)=? AND type_family='mcp-server'""",
+           WHERE lower(publisher)=?""",
         (key, key)).fetchone()
+
+    # Exact miss: the publisher may serve from a subdomain of the domain they pasted
+    # (nevermined.app publishes under api.live.nevermined.app). Suffix match on a DOT
+    # boundary so a short key cannot swallow an unrelated domain, and only for keys
+    # that look like a domain at all.
+    if (not row or not row["servers"]) and "." in key and len(key) >= 4:
+        row = conn.execute(
+            """SELECT
+                 (SELECT COUNT(*) FROM tools t JOIN entries e2 ON e2.key=t.entry_key
+                   WHERE lower(e2.publisher) LIKE '%.' || ?) AS tools,
+                 COUNT(*) AS servers,
+                 SUM(CASE WHEN mcp_status LIKE 'ok%' OR mcp_status IN ('auth', 'payment')
+                          THEN 1 ELSE 0 END) AS responding
+               FROM entries
+               WHERE lower(publisher) LIKE '%.' || ?""",
+            (key, key)).fetchone()
+
     if not row or not row["servers"]:
         _CACHE[key] = (now, None)
         return None
