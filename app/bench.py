@@ -6,18 +6,24 @@ hard and that poor retrieval degrades an agent's task pass rate, but it was run
 against corpora, not against the live services agents actually query.
 
 **The ground truth.** For an entry E, the publisher of E wrote
-`representativeQueries`. The spec describes that field as the text a registry
+`representativeQueries`, read verbatim from the manifest on the publisher's own
+domain and frozen, with that document's sha256, in `bench/declared-v1.json`. The spec describes that field as the text a registry
 builds its semantic index from: it is the publisher stating, in a user's words,
 what they want to be found for. So the task "given query Q from E, does the
 registry return E?" is answerable with no hand-labelling and no judgement call
 by us, and it is answerable *identically for every registry*, because every
 registry indexes the same public manifests.
 
-**Why this is not rigged.** Three deliberate constraints:
+**Why this is not rigged.** Four deliberate constraints:
 
-  * Tasks are drawn only from entries that at least two independent registries
-    carry, so no target is one we alone happen to know about.
+  * The task set is frozen and published, so it cannot be redrawn to suit a
+    result. Until 2026-09-23 tasks were sampled live from our own index, whose
+    query column mixed publisher text with text our ingest synthesised; 7,530 of
+    7,898 queries on some entries were ours, so the benchmark partly graded our
+    ranking against our own writing.
   * The query text is the publisher's, never ours, and never rewritten.
+  * Only the `holdout` half is reported. Our ranking weights are chosen on the
+    `tune` half, and grading ourselves on the half we tuned on would flatter us.
   * Our own entries are excluded as targets. We are a registry indexing other
     people's resources; scoring ourselves on our own manifest would be exactly
     the thing that makes a benchmark worthless.
@@ -43,49 +49,26 @@ from . import config, federation, search, store
 
 
 def build_tasks(conn, n: int | None = None, seed: int = 7) -> list[dict]:
-    """Sample (query, expected identifier) pairs from publisher-written text."""
-    n = n or config.BENCH_TASKS
-    rows = conn.execute(
-        """SELECT key, identifier, rep_queries, sources, publisher
-           FROM entries
-           WHERE rep_queries IS NOT NULL AND rep_queries != '[]'
-             AND identifier IS NOT NULL
-             AND publisher IS NOT NULL
-             AND publisher != ?
-             AND json_array_length(sources) >= 2""",
-        (config.PUBLISHER,)).fetchall()
-    tasks: list[dict] = []
-    for r in rows:
-        try:
-            qs = json.loads(r["rep_queries"] or "[]")
-        except Exception:
-            continue
-        for q in qs:
-            q = str(q).strip()
-            # Too short to be a real query; too long to be one a person types.
-            if 12 <= len(q) <= 160:
-                try:
-                    srcs = set(json.loads(r["sources"] or "[]"))
-                except Exception:
-                    srcs = set()
-                tasks.append({"query": q, "expect": r["identifier"],
-                              "key": r["key"], "publisher": r["publisher"],
-                              "sources": srcs})
-    rnd = random.Random(seed)
-    rnd.shuffle(tasks)
+    """The frozen declared set's holdout half, with each target's sources.
 
-    # At most one task per publisher, so a single prolific publisher cannot
-    # dominate the score.
-    seen: set[str] = set()
+    `sources` is read from our index at run time, because whether another
+    registry carries a target is a fact about today, while the task is not.
+    `n` and `seed` are kept for callers; the set itself is fixed.
+    """
+    from .evalset import load
+    ev = load(str(config.BENCH_SET))
     out = []
-    for t in tasks:
-        if t["publisher"] in seen:
+    for t in ev["tasks"]:
+        if t["split"] != "holdout":
             continue
-        seen.add(t["publisher"])
-        out.append(t)
-        if len(out) >= n:
-            break
-    return out
+        r = conn.execute("SELECT sources FROM entries WHERE key=?", (t["key"],)).fetchone()
+        try:
+            srcs = set(json.loads(r["sources"] or "[]")) if r else set()
+        except Exception:
+            srcs = set()
+        out.append({"query": t["query"], "expect": t["expect"], "key": t["key"],
+                    "publisher": t["publisher"], "sources": srcs})
+    return out[:n] if n else out
 
 
 def _norm(ident: str | None) -> str:
@@ -243,9 +226,11 @@ async def run(conn, k: int | None = None, n: int | None = None,
         "k": k,
         "tasks": len(tasks),
         "generated": int(time.time()),
-        "ground_truth": ("publisher-written representativeQueries; targets carried "
-                         "by at least two independent registries; one task per "
-                         "publisher; entries published by this registry excluded"),
+        "ground_truth": ("publisher-written representativeQueries, read verbatim from "
+                         "each publisher's own manifest and frozen with its sha256; one "
+                         "task per publisher; holdout half only; entries published by "
+                         "this registry excluded"),
+        "task_set": "https://github.com/neuronto/agentic-resource-discovery/blob/main/bench/declared-v1.json",
         "identifier_matching": ("both sides normalised to the spec's urn:air: form "
                                 "before comparison, so a registry emitting urn:ai: "
                                 "is not scored as wrong"),

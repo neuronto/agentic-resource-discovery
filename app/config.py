@@ -180,6 +180,9 @@ ADOPTION_CONCURRENCY = _i("NEURONTO_ADOPTION_CONCURRENCY", 8)
 # anyone hand-labelling anything, and identically for every registry.
 BENCH_K            = _i("NEURONTO_BENCH_K", 10)
 BENCH_TASKS        = _i("NEURONTO_BENCH_TASKS", 120)
+# The frozen, published task set ARD-Bench and the regression gate read.
+BENCH_SET          = Path(os.getenv("NEURONTO_BENCH_SET",
+                          str(Path(__file__).resolve().parent.parent / "bench" / "declared-v1.json")))
 BENCH_TIMEOUT_S    = float(os.getenv("NEURONTO_BENCH_TIMEOUT", "12"))
 BENCH_CONCURRENCY  = _i("NEURONTO_BENCH_CONCURRENCY", 4)
 

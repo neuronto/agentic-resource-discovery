@@ -1,0 +1,1748 @@
+{
+ "name": "neuronto-declared",
+ "created": "2026-09-23",
+ "ground_truth": "a publisher-written representativeQuery, read verbatim from the publisher's own manifest at a well-known path on its own domain; never from an upstream registry's copy and never synthesised",
+ "selection": "one task per publisher, seed 7, query length 12-160, the same placeholder filter indexing applies, entries published by this registry excluded",
+ "splits": "`tune` is the only half a ranking parameter may be chosen on; `holdout` is what is reported and what the regression gate reads. Split by crc32 of the publisher.",
+ "counts": {
+  "manifests_listed": 292,
+  "manifests_fetched": 287,
+  "declared_queries": 3021,
+  "publishers_with_a_query": 193,
+  "publishers_not_indexed": 1,
+  "tasks": 192,
+  "tune": 86,
+  "holdout": 106
+ },
+ "sha256": "7407698a12716e8f336d64564d6dcc708477b8ebf74e9e12dceb25c37d2a714f",
+ "tasks": [
+  {
+   "query": "find 0xArchive SDK, CLI, authentication, and production reliability guidance",
+   "expect": "urn:air:0xarchive.io:guide:llms-txt",
+   "key": "urn:air:0xarchive.io:guide:llms-txt",
+   "publisher": "0xarchive.io",
+   "manifest": "https://0xarchive.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "4f214a72a7ee5eaed1f58f1222b7d51a24db501474e80dc3bbffd4e9afa3af2c",
+   "split": "holdout"
+  },
+  {
+   "query": "Look up the visa requirement for a traveler with a given passport visiting a…",
+   "expect": "urn:air:2s.io:api:travel",
+   "key": "urn:air:2s.io:api:travel",
+   "publisher": "2s.io",
+   "manifest": "https://2s.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "614dc64f7f3aabd2fa9a72ebfe173faebfad36d6ce39b5445cfabb8c49664ecc",
+   "split": "tune"
+  },
+  {
+   "query": "show the request and response schemas for the garden MCP API",
+   "expect": "urn:air:aarnphm.xyz:schema:garden-openapi",
+   "key": "urn:air:aarnphm.xyz:schema:garden-openapi",
+   "publisher": "aarnphm.xyz",
+   "manifest": "https://aarnphm.xyz/.well-known/ai-catalog.json",
+   "manifest_sha256": "08b05d7f8f030caaecdad373090bedafb5d58a39885ae194e23b30baff2b3380",
+   "split": "tune"
+  },
+  {
+   "query": "how do I paginate ActiveCampaign list endpoints",
+   "expect": "urn:air:activecampaign.com:skill:activecampaign-api",
+   "key": "urn:air:activecampaign.com:skill:activecampaign-api",
+   "publisher": "activecampaign.com",
+   "manifest": "https://activecampaign.com/.well-known/ard.json",
+   "manifest_sha256": "8d4edc55b371a8ebba7aa70a28ad15ff7591b1b3b57a458bf5c538547cc59250",
+   "split": "holdout"
+  },
+  {
+   "query": "Which Ada Diamonds showroom can I visit in New York?",
+   "expect": "urn:air:adadiamonds.com:a2a:ada-diamonds",
+   "key": "urn:air:adadiamonds.com:a2a:ada-diamonds",
+   "publisher": "adadiamonds.com",
+   "manifest": "https://adadiamonds.com/.well-known/ard.json",
+   "manifest_sha256": "51ff88da7179ce33a86cd35bc748f7a4a0b5f5b2f428db19704e27327b37fd00",
+   "split": "holdout"
+  },
+  {
+   "query": "run docker on a TEE machine my agent pays for",
+   "expect": "urn:air:agentgates.ai:skills:compute",
+   "key": "urn:air:agentgates.ai:skills:compute",
+   "publisher": "agentgates.ai",
+   "manifest": "https://agentgates.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "10494689d9dbe96b4e3ca9d8401477cdb5b7081f12b50da8c68ccfd2e8958bb0",
+   "split": "holdout"
+  },
+  {
+   "query": "what does this verify warning mean",
+   "expect": "urn:air:agentic-mermaid.dev:warnings",
+   "key": "urn:air:agentic-mermaid.dev:warnings",
+   "publisher": "agentic-mermaid.dev",
+   "manifest": "https://agentic-mermaid.dev/.well-known/ai-catalog.json",
+   "manifest_sha256": "15175677e9267e3de5a13726841cfbeec41ed91adc7a40a1dcb3a61a6550abf4",
+   "split": "holdout"
+  },
+  {
+   "query": "how many e-commerce sites support UCP, MCP or ARD",
+   "expect": "urn:air:agentready.market:research:mcp",
+   "key": "urn:air:agentready.market:research:mcp",
+   "publisher": "agentready.market",
+   "manifest": "https://agentready.market/.well-known/ai-catalog.json",
+   "manifest_sha256": "b136358f5a1f60cbad620c5544d942517451a58d64c6b6e7b64bf81e8155ec62",
+   "split": "tune"
+  },
+  {
+   "query": "read the AI Content Drop pricing page as markdown",
+   "expect": "urn:air:aicontentdrop.com:content:llms-txt",
+   "key": "urn:air:aicontentdrop.com:content:llms-txt",
+   "publisher": "aicontentdrop.com",
+   "manifest": "https://aicontentdrop.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "ab80ddce1f72f0a8006efc800cee6405ef071c232e66bdd4c9ecd7b5aa12c4ef",
+   "split": "holdout"
+  },
+  {
+   "query": "search AI for Database documentation",
+   "expect": "urn:air:aifordatabase.com:reference:docs-mcp",
+   "key": "urn:air:aifordatabase.com:reference:docs-mcp",
+   "publisher": "aifordatabase.com",
+   "manifest": "https://aifordatabase.com/.well-known/ard.json",
+   "manifest_sha256": "56392dac381a129d4ee8b2d74334ac125495dcb68dd0b924f63f135bbf2bd496",
+   "split": "tune"
+  },
+  {
+   "query": "log all agent actions and decisions to an audit trail",
+   "expect": "urn:air:airtable.com:skill:agent-activity-log",
+   "key": "urn:air:airtable.com:skill:agent-activity-log",
+   "publisher": "airtable.com",
+   "manifest": "https://airtable.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "4a56028cd4e670a68a9f25c134514764b8c2ff08ba6a635a43b284d48f1092ba",
+   "split": "holdout"
+  },
+  {
+   "query": "export raw Amplitude event data for a date range",
+   "expect": "urn:air:amplitude.com:api:public",
+   "key": "urn:air:amplitude.com:api:public",
+   "publisher": "amplitude.com",
+   "manifest": "https://amplitude.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "d56974fd9b59f319ebde0737038d8f3e4cbe06aad6bbe93a4f4c7cca4be4cab4",
+   "split": "holdout"
+  },
+  {
+   "query": "give me a protocol for checking my assumptions before a risky action",
+   "expect": "urn:air:anahana.com:skill:ai-agent-wellbeing",
+   "key": "urn:air:anahana.com:skill:ai-agent-wellbeing",
+   "publisher": "anahana.com",
+   "manifest": "https://anahana.com/.well-known/ard.json",
+   "manifest_sha256": "193fa1f193aabada9f8bf76e759e46bad9790a3209e02146165f2bca56c77769",
+   "split": "holdout"
+  },
+  {
+   "query": "Show me the API contract for applying to Angels for Agents.",
+   "expect": "urn:air:angelsforagents.com:api:venture-capital",
+   "key": "urn:air:angelsforagents.com:api:venture-capital",
+   "publisher": "angelsforagents.com",
+   "manifest": "https://angelsforagents.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "0677786bc1ea71136f3dc5a20fffe766a554677c2abe3f8279b8000c7db1a45c",
+   "split": "tune"
+  },
+  {
+   "query": "What are Thomas Anglero's speaking topics?",
+   "expect": "urn:air:anglero.com:server:speaker",
+   "key": "urn:air:anglero.com:server:speaker",
+   "publisher": "anglero.com",
+   "manifest": "https://anglero.com/.well-known/ard.json",
+   "manifest_sha256": "daf1fe2ab8e8991c5b84ddc9702d32ed5b50a97e8917a760d907dfd38012d52e",
+   "split": "holdout"
+  },
+  {
+   "query": "agent-to-agent discovery Delx",
+   "expect": "urn:air:api.delx.ai:agent:protocol",
+   "key": "urn:air:api.delx.ai:agent:protocol",
+   "publisher": "api.delx.ai",
+   "manifest": "https://api.delx.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "3bf8f4cc0f979b588a97d8c771cac0ac04c6c7e00a4c41423c796864b6f9d958",
+   "split": "holdout"
+  },
+  {
+   "query": "agent for Token Safety",
+   "expect": "urn:air:api.live.nevermined.app:service:deepnets",
+   "key": "urn:air:api.live.nevermined.app:service:deepnets",
+   "publisher": "api.live.nevermined.app",
+   "manifest": "https://api.live.nevermined.app/.well-known/ard.json",
+   "manifest_sha256": "bc3ac8b940ea12dd361d183522f1edd06ff4dba58c5cddf5926e51abad9a4937",
+   "split": "holdout"
+  },
+  {
+   "query": "which Apify tool extracts data from Google Maps",
+   "expect": "urn:air:apify.com:api:store-search",
+   "key": "urn:air:apify.com:api:store-search",
+   "publisher": "apify.com",
+   "manifest": "https://apify.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "038c42c41bbeb8ee6f7e460207afacc118e856470621d97cb11b06b52412a76c",
+   "split": "holdout"
+  },
+  {
+   "query": "Connect an AI agent to other agents",
+   "expect": "urn:air:app.agentmesh.link:agent:agentmesh",
+   "key": "urn:air:app.agentmesh.link:agent:agentmesh",
+   "publisher": "app.agentmesh.link",
+   "manifest": "https://app.agentmesh.link/.well-known/ard.json",
+   "manifest_sha256": "63342c7cf83c7baf3bb0e80d5b2d1fa1c89e1b0100824f810102548dc2361801",
+   "split": "holdout"
+  },
+  {
+   "query": "scaffold an Aptos dApp with the TypeScript SDK",
+   "expect": "urn:air:aptos.dev:skill:aptos-agent-skills",
+   "key": "urn:air:aptos.dev:skill:aptos-agent-skills",
+   "publisher": "aptos.dev",
+   "manifest": "https://aptos.dev/.well-known/ai-catalog.json",
+   "manifest_sha256": "48cb36b51fc3b779845f7504c1f37565d72487615530afe821c9f921fcedafce",
+   "split": "holdout"
+  },
+  {
+   "query": "Read complete documentation on Aradia sovereign AI staging studio",
+   "expect": "urn:air:aradia.com:docs:llms-full",
+   "key": "urn:air:aradia.com:docs:llms-full",
+   "publisher": "aradia.com",
+   "manifest": "https://aradia.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "1336bc565fe0728d47b823482f1bc7e074b8eca2555be86dc0d01008cf4487f3",
+   "split": "tune"
+  },
+  {
+   "query": "manage custom-domain email forwarding with aliases and sender blocking",
+   "expect": "urn:air:arc-relay.com:server:mcp",
+   "key": "urn:air:arc-relay.com:server:mcp",
+   "publisher": "arc-relay.com",
+   "manifest": "https://arc-relay.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "104bc282a24ed7c15b5f86758298ef57f3a6281c8a7418fad1b8a5535882e1e3",
+   "split": "tune"
+  },
+  {
+   "query": "difference between ARD and MCP",
+   "expect": "urn:air:ardregistry.net:doc:reference",
+   "key": "urn:air:ardregistry.net:doc:reference",
+   "publisher": "ardregistry.net",
+   "manifest": "https://ardregistry.net/.well-known/ard.json",
+   "manifest_sha256": "c289764ac02fac1c7a79468aaba8ade1a7a3a2d515a8875c262e6707847bd84f",
+   "split": "tune"
+  },
+  {
+   "query": "show me jobs in Brno that allow remote work",
+   "expect": "urn:air:assetlog.ai:server:mcp",
+   "key": "urn:air:assetlog.ai:server:mcp",
+   "publisher": "assetlog.ai",
+   "manifest": "https://assetlog.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "fb5266bd1824e0d8de6f83d77617da23d402239ceb2f57f07fa139ddd338c145",
+   "split": "holdout"
+  },
+  {
+   "query": "What is the aurora forecast for Helsinki tonight?",
+   "expect": "urn:air:aurorareach.com:mcp:aurorareach",
+   "key": "urn:air:aurorareach.com:mcp:aurorareach",
+   "publisher": "aurorareach.com",
+   "manifest": "https://aurorareach.com/.well-known/ard.json",
+   "manifest_sha256": "693f5244e82da7d3b7e293543513ea863efd5bd5a766bdcb290e34d0f265a042",
+   "split": "tune"
+  },
+  {
+   "query": "temporary cloud browser session for an agent",
+   "expect": "urn:air:ausca.com:skills:browser-session",
+   "key": "urn:air:ausca.com:skills:browser-session",
+   "publisher": "ausca.com",
+   "manifest": "https://ausca.com/.well-known/ard.json",
+   "manifest_sha256": "cd9cc2b0cb227beb42be0b82a2e918afef9c6a2221bd9967705af1c5c6716817",
+   "split": "holdout"
+  },
+  {
+   "query": "verify a business counterparty before payment",
+   "expect": "urn:air:aux.prdictionedge.ai:a2a:evidence-certification",
+   "key": "urn:air:aux.prdictionedge.ai:a2a:evidence-certification",
+   "publisher": "aux.prdictionedge.ai",
+   "manifest": "https://aux.prdictionedge.ai/.well-known/ard.json",
+   "manifest_sha256": "2a9c1333d581b14db48ec07997de820e34a44dc7d835b8d4d37a9252f6129389",
+   "split": "holdout"
+  },
+  {
+   "query": "Rezumatul platformei Avizo pentru agenți AI",
+   "expect": "urn:air:avizo.ro:docs:llms-txt",
+   "key": "urn:air:avizo.ro:docs:llms-txt",
+   "publisher": "avizo.ro",
+   "manifest": "https://avizo.ro/.well-known/ai-catalog.json",
+   "manifest_sha256": "8f8db2a04cf792848bb7ec9d79a6ea1118382a36c5cb35b9bd250e655cc89690",
+   "split": "holdout"
+  },
+  {
+   "query": "ist diese website fuer ai agents nutzbar",
+   "expect": "urn:air:blckalpaca.at:api:agentic-check",
+   "key": "urn:air:blckalpaca.at:api:agentic-check",
+   "publisher": "blckalpaca.at",
+   "manifest": "https://blckalpaca.at/.well-known/ai-catalog.json",
+   "manifest_sha256": "884ec3b14ac23e656c71c465a201e582ebf22222b9e0fdf13019e20729cc6f51",
+   "split": "holdout"
+  },
+  {
+   "query": "fetch the logo and brand assets for stripe.com",
+   "expect": "urn:air:brandfetch.com:api:brand",
+   "key": "urn:air:brandfetch.com:api:brand",
+   "publisher": "brandfetch.com",
+   "manifest": "https://brandfetch.io/.well-known/ard.json",
+   "manifest_sha256": "44320832c8e6b910244a853dfaaba2404ae495f511b93ee81bacc4f4cdb019bb",
+   "split": "holdout"
+  },
+  {
+   "query": "how do I make my website readable by AI agents",
+   "expect": "urn:air:built2winweb.com:product:ai-indexing-pack",
+   "key": "urn:air:built2winweb.com:product:ai-indexing-pack",
+   "publisher": "built2winweb.com",
+   "manifest": "https://built2winweb.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "5fe8a9d504484d915cbcd435fb7104fbf9b899f62e4af72f28c09f41da3bc27a",
+   "split": "holdout"
+  },
+  {
+   "query": "plan how to compare a purchase without placing an order",
+   "expect": "urn:air:buyer.agentsanctuary.dev:agent:buying-agent",
+   "key": "urn:air:buyer.agentsanctuary.dev:agent:buying-agent",
+   "publisher": "buyer.agentsanctuary.dev",
+   "manifest": "https://buyer.agentsanctuary.dev/.well-known/ard.json",
+   "manifest_sha256": "031d15871a68711d657dca84b392dcf59e7d69a15bbfa633bfd077b12fb34cd6",
+   "split": "holdout"
+  },
+  {
+   "query": "What are the current byImprint services and canonical public URLs?",
+   "expect": "urn:air:byimprint.com:mcp:public-guidance",
+   "key": "urn:air:byimprint.com:mcp:public-guidance",
+   "publisher": "byimprint.com",
+   "manifest": "https://byimprint.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "00ab82f74f4449d13005c489338a1fec2c13313569f8ec185fa9e1ff7ed7767b",
+   "split": "holdout"
+  },
+  {
+   "query": "create a booking through the cal.com api",
+   "expect": "urn:air:cal.com:api:v2",
+   "key": "urn:air:cal.com:api:v2",
+   "publisher": "cal.com",
+   "manifest": "https://cal.eu/.well-known/ai-catalog.json",
+   "manifest_sha256": "cdf82f441658d45209a39f3b17788a0ab698a012d19fe7487df557b6adb5412c",
+   "split": "tune"
+  },
+  {
+   "query": "Read Certifier documentation",
+   "expect": "urn:air:certifier.io:docs:llms-txt",
+   "key": "urn:air:certifier.io:docs:llms-txt",
+   "publisher": "certifier.io",
+   "manifest": "https://certifier.io/.well-known/ard.json",
+   "manifest_sha256": "9e046d20f69189fdf2233f43a6a344c0899f8de9b87d641cd2ccc8ce632b4e1f",
+   "split": "holdout"
+  },
+  {
+   "query": "how to contact a holiday rental owner without fees",
+   "expect": "urn:air:chalet-montagne.com:skill:chalet-montagne-rentals",
+   "key": "urn:air:chalet-montagne.com:skill:chalet-montagne-rentals",
+   "publisher": "chalet-montagne.com",
+   "manifest": "https://mcp.chalet-montagne.com/.well-known/ard.json",
+   "manifest_sha256": "f993c46332eb948e43f6addd0759652c525f66babddb989b0953d30f870b0386",
+   "split": "holdout"
+  },
+  {
+   "query": "Where do AI agents argue rules of doctrine with each other?",
+   "expect": "urn:air:church-of-ai.org:church:liturgy",
+   "key": "urn:air:church-of-ai.org:church:liturgy",
+   "publisher": "church-of-ai.org",
+   "manifest": "https://church-of-ai.org/.well-known/ard.json",
+   "manifest_sha256": "a6b1c0b9f41d415903194b649a181805b8cb34be342427c7d86861e615d0f573",
+   "split": "holdout"
+  },
+  {
+   "query": "How can a small Texas agency prepare for a CJIS technical audit without buying a large compliance platform?",
+   "expect": "urn:air:cjis.redravenpress.net:skill:texas-cjis-audit-readiness",
+   "key": "urn:air:cjis.redravenpress.net:skill:texas-cjis-audit-readiness",
+   "publisher": "cjis.redravenpress.net",
+   "manifest": "https://cjis.redravenpress.net/.well-known/ard.json",
+   "manifest_sha256": "b52b6883c2a6fc7e8544edff5d197cb6aa8cb7e8382a6c370cc9e3b7a601e62e",
+   "split": "tune"
+  },
+  {
+   "query": "create a moving sale page with AI listings",
+   "expect": "urn:air:clearlist.me:mcp:clearlist",
+   "key": "urn:air:clearlist.me:mcp:clearlist",
+   "publisher": "clearlist.me",
+   "manifest": "https://clearlist.me/.well-known/ai-catalog.json",
+   "manifest_sha256": "9f92dc6eb525437deaf48fac86819816245128df1de655e787a4e77cc7860d1f",
+   "split": "tune"
+  },
+  {
+   "query": "query my ClickHouse Cloud database",
+   "expect": "urn:air:clickhouse.com:cloud",
+   "key": "urn:air:clickhouse.com:cloud",
+   "publisher": "clickhouse.com",
+   "manifest": "https://clickhouse.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "8de4b945ac71a526c658091cfa219ef8f7784a9a9c3a4300cc42e82949f5e38c",
+   "split": "holdout"
+  },
+  {
+   "query": "how to use Delx Commerce from an agent",
+   "expect": "urn:air:commerce.delx.ai:skills:index",
+   "key": "urn:air:commerce.delx.ai:skills:index",
+   "publisher": "commerce.delx.ai",
+   "manifest": "https://commerce.delx.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "b818fe6c596ae96ec98b60343747b04ddaf75b85050f80e8df66203e901c0e91",
+   "split": "tune"
+  },
+  {
+   "query": "Where do I report online fraud in Poland?",
+   "expect": "urn:air:compass.madeinro.eu:mcp:digital-compass",
+   "key": "urn:air:compass.madeinro.eu:mcp:digital-compass",
+   "publisher": "compass.madeinro.eu",
+   "manifest": "https://compass.madeinro.eu/.well-known/ai-catalog.json",
+   "manifest_sha256": "29b52d99b29f2651230495660fbdef5480e32136bddc4975b97a00501c9ac0e9",
+   "split": "holdout"
+  },
+  {
+   "query": "create a mailbox for an AI agent",
+   "expect": "urn:air:console.mermail.app:server:mcp",
+   "key": "urn:air:console.mermail.app:server:mcp",
+   "publisher": "console.mermail.app",
+   "manifest": "https://console.mermail.app/.well-known/ard.json",
+   "manifest_sha256": "f1b2959033ef015974fcb5e151b2c16233122bff8f4f54cad83acbe4caf56f8d",
+   "split": "holdout"
+  },
+  {
+   "query": "read the Black Label Continuum home page",
+   "expect": "urn:air:continuum.blacklabelbots.com:mcp:site",
+   "key": "urn:air:continuum.blacklabelbots.com:mcp:site",
+   "publisher": "continuum.blacklabelbots.com",
+   "manifest": "https://continuum.blacklabelbots.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "ae5c9044b93c89a333add69bb274a4515d693785cae973ca98e2233bbcafb286",
+   "split": "holdout"
+  },
+  {
+   "query": "Which companies are insiders buying together right now?",
+   "expect": "urn:air:datasignalslab.com:mcp:datasignals-lab",
+   "key": "urn:air:datasignalslab.com:mcp:datasignals-lab",
+   "publisher": "datasignalslab.com",
+   "manifest": "https://datasignalslab.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "8507de2cc22f21e7a911851684eb4acc5ddb96d2a352d9699aec571c3850a060",
+   "split": "holdout"
+  },
+  {
+   "query": "anchor the responsibility scope of a task before I delegate it",
+   "expect": "urn:air:decision-anchor.com:agent:da",
+   "key": "urn:air:decision-anchor.com:agent:da",
+   "publisher": "decision-anchor.com",
+   "manifest": "https://decision-anchor.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "15b7350866080a6b523d9d87285e2b968f722467b8ff3de93c437254651aa378",
+   "split": "holdout"
+  },
+  {
+   "query": "Search for decisions related to an architecture choice.",
+   "expect": "urn:air:decisionlog.ai:api:decision-log-rest",
+   "key": "urn:air:decisionlog.ai:api:decision-log-rest",
+   "publisher": "decisionlog.ai",
+   "manifest": "https://decisionlog.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "85b0b77cdf66aaa595f41a2296efb610e77ab36d38c47dfb9733a54a0beb2de4",
+   "split": "holdout"
+  },
+  {
+   "query": "what does the DeepSearch privacy policy say about breach data",
+   "expect": "urn:air:deepsearch.app:mcp:deepsearch-docs",
+   "key": "urn:air:deepsearch.app:mcp:deepsearch-docs",
+   "publisher": "deepsearch.app",
+   "manifest": "https://deepsearch.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "a279e515639d37892a01be835eda67d0081eb5f512271f799f401f857deebd42",
+   "split": "tune"
+  },
+  {
+   "query": "Delx free agent care protocol tools",
+   "expect": "urn:air:delx.ai:server:protocol-mcp",
+   "key": "urn:air:delx.ai:server:protocol-mcp",
+   "publisher": "delx.ai",
+   "manifest": "https://delx.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "daa71723cd89ee23780cd5107420041030082b27f4384b821525d61152634a35",
+   "split": "tune"
+  },
+  {
+   "query": "is this npm package deprecated",
+   "expect": "urn:air:dephealth.dsh.sh:mcp:dephealth",
+   "key": "urn:air:dephealth.dsh.sh:mcp:dephealth",
+   "publisher": "dephealth.dsh.sh",
+   "manifest": "https://dephealth.dsh.sh/.well-known/ard.json",
+   "manifest_sha256": "0b07930eb182968b8446702db531fe07632337228ee6165f444a22436b368cdf",
+   "split": "holdout"
+  },
+  {
+   "query": "help LLMs and agents find and use my software",
+   "expect": "urn:air:deploytoagents.com:agent:distribution-auditor",
+   "key": "urn:air:deploytoagents.com:agent:distribution-auditor",
+   "publisher": "deploytoagents.com",
+   "manifest": "https://deploytoagents.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "7a6baf078602acc73ed6ca2367012e4c7da4d8142b590678a23b2dc8d94959b7",
+   "split": "tune"
+  },
+  {
+   "query": "alert me if a provider starts blocking AI crawlers",
+   "expect": "urn:air:desvela.ai:registry:watch",
+   "key": "urn:air:desvela.ai:registry:watch",
+   "publisher": "desvela.ai",
+   "manifest": "https://desvela.ai/.well-known/ard.json",
+   "manifest_sha256": "dc0ae3d13ede72d77a3aeb69bb10cf53300b69d8d11bd98da190de050fc95681",
+   "split": "tune"
+  },
+  {
+   "query": "does this website allow AI crawlers",
+   "expect": "urn:air:desvela.dev:registry:preflight",
+   "key": "urn:air:desvela.dev:registry:preflight",
+   "publisher": "desvela.dev",
+   "manifest": "https://desvela.dev/.well-known/ard.json",
+   "manifest_sha256": "79c77e9bbc135cd8f1e5c5fdf72bc50807ccde814c3295dba448bab7fc19fb86",
+   "split": "holdout"
+  },
+  {
+   "query": "List Cloudflare products and their documentation roots",
+   "expect": "urn:air:developers.cloudflare.com:docs:llms-txt",
+   "key": "urn:air:developers.cloudflare.com:docs:llms-txt",
+   "publisher": "developers.cloudflare.com",
+   "manifest": "https://developers.cloudflare.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "70b5b2c5b85608d1b6e5f42ef9b9cd9992798360d68f65d21c19cecad0b29368",
+   "split": "holdout"
+  },
+  {
+   "query": "novità e uscite streaming del mese su Netflix Prime Video Disney Plus e NOW",
+   "expect": "urn:air:digital-news.it:publisher:main",
+   "key": "urn:air:digital-news.it:publisher:main",
+   "publisher": "digital-news.it",
+   "manifest": "https://digital-news.it/.well-known/ard.json",
+   "manifest_sha256": "8ebc0e2166a6ec31d8de21a97366b5970990db93b69626966c62e382b77ff713",
+   "split": "tune"
+  },
+  {
+   "query": "where can autonomous digital agents meet and interact online",
+   "expect": "urn:air:digitalagentcafe.com:place:second-cafe",
+   "key": "urn:air:digitalagentcafe.com:place:second-cafe",
+   "publisher": "digitalagentcafe.com",
+   "manifest": "https://digitalagentcafe.com/.well-known/ard.json",
+   "manifest_sha256": "7c3ded0c7b8b79f1e053e7227ddefeea848d50123d5764a75c15f4852676a4c6",
+   "split": "tune"
+  },
+  {
+   "query": "has my DNS change propagated worldwide yet",
+   "expect": "urn:air:dnsdoctor.dev:mcp:dns-doctor",
+   "key": "urn:air:dnsdoctor.dev:mcp:dns-doctor",
+   "publisher": "dnsdoctor.dev",
+   "manifest": "https://dnsdoctor.dev/.well-known/ard.json",
+   "manifest_sha256": "41249b99022d94a54ca276fbdb08466e5e4e549df7f3ba3d47dabef40e51c4ed",
+   "split": "holdout"
+  },
+  {
+   "query": "Get a black-box receipt for a robot decision, or a notarized un-retunable eval run",
+   "expect": "urn:air:dynamicfeed.ai:api:witness",
+   "key": "urn:air:dynamicfeed.ai:api:witness",
+   "publisher": "dynamicfeed.ai",
+   "manifest": "https://dynamicfeed.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "984895947f1dffa0555beb3b7fd3b9ce00146dfffaee647328b48f5776d681d1",
+   "split": "holdout"
+  },
+  {
+   "query": "what does Emora Health treat and where does it operate",
+   "expect": "urn:air:emorahealth.com:corpus:llms-full",
+   "key": "urn:air:emorahealth.com:corpus:llms-full",
+   "publisher": "emorahealth.com",
+   "manifest": "https://emorahealth.com/.well-known/ard.json",
+   "manifest_sha256": "587e6edac47afe4fa1100b00851036caa008b0ca0afdb5d0b2fb21bcb5bf6531",
+   "split": "tune"
+  },
+  {
+   "query": "fetch one end-of-day report by id",
+   "expect": "urn:air:eodly.io:api:rest",
+   "key": "urn:air:eodly.io:api:rest",
+   "publisher": "eodly.io",
+   "manifest": "https://eodly.io/.well-known/ard.json",
+   "manifest_sha256": "6eb14ec78a64ed729a2daeac6686b01b24b287320ed62ae98cc25f0ea5cab08c",
+   "split": "holdout"
+  },
+  {
+   "query": "ist eprimo ausgezeichnet",
+   "expect": "urn:air:eprimo.de:content:auszeichnungen",
+   "key": "urn:air:eprimo.de:content:auszeichnungen",
+   "publisher": "eprimo.de",
+   "manifest": "https://eprimo.de/.well-known/ai-catalog.json",
+   "manifest_sha256": "5b7aec52b95b7e921070a4b855e09f21888762638e0776ebc0d2e133ccaee1b3",
+   "split": "tune"
+  },
+  {
+   "query": "find a travel eSIM for Japan",
+   "expect": "urn:air:esimfinder.io:mcp:connector",
+   "key": "urn:air:esimfinder.io:mcp:connector",
+   "publisher": "esimfinder.io",
+   "manifest": "https://esimfinder.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "d1939a1f4afdab43f7568e5de2082d98d6958e334b61a09d97183192eeab3754",
+   "split": "holdout"
+  },
+  {
+   "query": "what is a good lap time at silverstone in f1 26",
+   "expect": "urn:air:f1laps.com:skill:f1-lap-time-benchmarks",
+   "key": "urn:air:f1laps.com:skill:f1-lap-time-benchmarks",
+   "publisher": "f1laps.com",
+   "manifest": "https://f1laps.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "972adcf247ae180692fb710a67e12aace5d055e12da42548831e86bff5c9cf66",
+   "split": "tune"
+  },
+  {
+   "query": "pay per call for a 3D print slice",
+   "expect": "urn:air:fabtally.com:x402:discovery",
+   "key": "urn:air:fabtally.com:x402:discovery",
+   "publisher": "fabtally.com",
+   "manifest": "https://fabtally.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "403b5148659dd1561a9fe23cfc389b534473093e0a2939d6094f756d74896dec",
+   "split": "holdout"
+  },
+  {
+   "query": "Show me today's jobs for my business.",
+   "expect": "urn:air:fieldrobin.com:server:fieldrobin-mcp",
+   "key": "urn:air:fieldrobin.com:server:fieldrobin-mcp",
+   "publisher": "fieldrobin.com",
+   "manifest": "https://fieldrobin.com/.well-known/ard.json",
+   "manifest_sha256": "368fd873744ec5db911d0c5ce79971393b38bc3d7816d345a7386504b2f6f672",
+   "split": "tune"
+  },
+  {
+   "query": "check whether an agent is authorized to make this payment",
+   "expect": "urn:air:flint.network:verification:mcp",
+   "key": "urn:air:flint.network:verification:mcp",
+   "publisher": "flint.network",
+   "manifest": "https://flint.network/.well-known/ai-catalog.json",
+   "manifest_sha256": "4f82e0415a9326786b96f01d4fbd1a180ff12d9f1c301889fb121255b381a868",
+   "split": "holdout"
+  },
+  {
+   "query": "close the Camden store tomorrow for staff training",
+   "expect": "urn:air:flipdish.com:server:flipdish-mcp",
+   "key": "urn:air:flipdish.com:server:flipdish-mcp",
+   "publisher": "flipdish.com",
+   "manifest": "https://flipdish.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "d937af797f721375d182d1c463352d8681de349cb1b57ddb793cae9586466932",
+   "split": "tune"
+  },
+  {
+   "query": "parse an X12 856 advance ship notice",
+   "expect": "urn:air:fluentedi.com:mcp:tools",
+   "key": "urn:air:fluentedi.com:mcp:tools",
+   "publisher": "fluentedi.com",
+   "manifest": "https://fluentedi.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "8b7a7ccf018e65b5ec92c96cdf8a5fa84b2a772177e2e017e8d431a909ecc6b2",
+   "split": "tune"
+  },
+  {
+   "query": "keep a dev server running between sessions",
+   "expect": "urn:air:fly.io:mcp:sprites",
+   "key": "urn:air:fly.io:mcp:sprites",
+   "publisher": "fly.io",
+   "manifest": "https://fly.io/.well-known/ard.json",
+   "manifest_sha256": "5bc4155d567db42d3675832a6873e7f2297c87bf93cc5c6af8f4c1daa791f93e",
+   "split": "holdout"
+  },
+  {
+   "query": "batch many tiny agent payments into one on-chain settlement",
+   "expect": "urn:air:focxle.com:gateway:mcp",
+   "key": "urn:air:focxle.com:gateway:mcp",
+   "publisher": "focxle.com",
+   "manifest": "https://focxle.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "95f9d0e688ceaa7ef5e102ab3a1ad8beb33e12cb9691ebdb2a5b283624340164",
+   "split": "holdout"
+  },
+  {
+   "query": "review this smart contract the way Frank Poncelet would",
+   "expect": "urn:air:frankponcelet.com:server:profile",
+   "key": "urn:air:frankponcelet.com:server:profile",
+   "publisher": "frankponcelet.com",
+   "manifest": "https://frankponcelet.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "0ce1667fb0f5c2be3db7033317fda6376920e08865efbaf864842674c8fb0313",
+   "split": "holdout"
+  },
+  {
+   "query": "log a business expense in Frihet",
+   "expect": "urn:air:frihet.io:server:mcp",
+   "key": "urn:air:frihet.io:server:mcp",
+   "publisher": "frihet.io",
+   "manifest": "https://frihet.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "65d6d394dc29d2bee465c61f339f04387d3d275dbdb1ce5804ea2b416dcaff04",
+   "split": "holdout"
+  },
+  {
+   "query": "What's included in a Gentoura tour package?",
+   "expect": "urn:air:gentoura.com:skills:agent-skills-index",
+   "key": "urn:air:gentoura.com:skills:agent-skills-index",
+   "publisher": "gentoura.com",
+   "manifest": "https://gentoura.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "c4182e37d55cd92ee5655c22c2af34e797ef6d2b950f2016c7187b8600ac3c3a",
+   "split": "holdout"
+  },
+  {
+   "query": "FIRE number and years-to-retire calculator API",
+   "expect": "urn:air:geo-parity.com:api:openapi",
+   "key": "urn:air:geo-parity.com:api:openapi",
+   "publisher": "geo-parity.com",
+   "manifest": "https://geo-parity.com/.well-known/ard.json",
+   "manifest_sha256": "89b207653d35ab7ca89c42a4186a309adeeb61634d8e58221a88fd6cc1bc75c3",
+   "split": "tune"
+  },
+  {
+   "query": "How often are UK parking appeals allowed at independent adjudication?",
+   "expect": "urn:air:getaxionlabs.com:door:appealsdesk",
+   "key": "urn:air:getaxionlabs.com:door:appealsdesk",
+   "publisher": "getaxionlabs.com",
+   "manifest": "https://mcp.getaxionlabs.com/.well-known/ard.json",
+   "manifest_sha256": "2f46ff4ded1d0c4e5aa3f447634f68601e484be7907ad660b971ff07404754a4",
+   "split": "tune"
+  },
+  {
+   "query": "how to make a PDF form fillable with an API",
+   "expect": "urn:air:getemboss.ai:docs:llms",
+   "key": "urn:air:getemboss.ai:docs:llms",
+   "publisher": "getemboss.ai",
+   "manifest": "https://getemboss.ai/.well-known/ard.json",
+   "manifest_sha256": "7d2348d2f7a6a07fb69272f88e1fcd75982a0e1016de3aa51ec3b5c90c44a863",
+   "split": "holdout"
+  },
+  {
+   "query": "design usage metering with Lago",
+   "expect": "urn:air:getlago.com:skill:billing-integration",
+   "key": "urn:air:getlago.com:skill:billing-integration",
+   "publisher": "getlago.com",
+   "manifest": "https://getlago.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "3112b9c214d2a0e3165db64c0a85ecf57cc034471d682abb814a9713ea2f2a83",
+   "split": "tune"
+  },
+  {
+   "query": "review this coding task for scope, verification, and common execution mistakes",
+   "expect": "urn:air:god-prompt-mcp.tomi-seregi99.workers.dev:mcp:god-prompt",
+   "key": "urn:air:god-prompt-mcp.tomi-seregi99.workers.dev:mcp:god-prompt",
+   "publisher": "god-prompt-mcp.tomi-seregi99.workers.dev",
+   "manifest": "https://god-prompt-mcp.tomi-seregi99.workers.dev/.well-known/ard.json",
+   "manifest_sha256": "f8f2ae72fecb42e04800ac0d6094c1c7d1dc37cafba483e46ac916f54f261c76",
+   "split": "tune"
+  },
+  {
+   "query": "Find GST Cranes on mcpservers.org",
+   "expect": "urn:air:gstcranes.com:mcp:mcpservers-org",
+   "key": "urn:air:gstcranes.com:mcp:mcpservers-org",
+   "publisher": "gstcranes.com",
+   "manifest": "https://gstcranes.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "5d5303cf844c45f873037532ba35305abab4e58c7b926332494bf825d77d6ddf",
+   "split": "holdout"
+  },
+  {
+   "query": "How many GTmetrix API credits do I have left?",
+   "expect": "urn:air:gtmetrix.com:server:mcp",
+   "key": "urn:air:gtmetrix.com:server:mcp",
+   "publisher": "gtmetrix.com",
+   "manifest": "https://gtmetrix.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "a0a756e1cc417ff4c69488e0920b7bdbddefa066ea91c56be87795a983c246f7",
+   "split": "holdout"
+  },
+  {
+   "query": "verify a cryptographically signed vacation rental offer",
+   "expect": "urn:air:hemmabo.com:mcp:hemmabo-mcp-server",
+   "key": "urn:air:hemmabo.com:mcp:hemmabo-mcp-server",
+   "publisher": "hemmabo.com",
+   "manifest": "https://hemmabo.com/.well-known/ard.json",
+   "manifest_sha256": "becd041b643e851637dd4cc701aea2004ec82295529a6619dae13b5231fba75d",
+   "split": "holdout"
+  },
+  {
+   "query": "get a human to test my app and report findings",
+   "expect": "urn:air:humanforai.dev:server:human-for-ai",
+   "key": "urn:air:humanforai.dev:server:human-for-ai",
+   "publisher": "humanforai.dev",
+   "manifest": "https://humanforai.dev/.well-known/ard.json",
+   "manifest_sha256": "3ba2c5ff278a7dfcc0085b334e4d3b819f7583356ce112afa9fe5d5daa4a4b26",
+   "split": "tune"
+  },
+  {
+   "query": "how to filter an Idescat table by territory and period",
+   "expect": "urn:air:idescat.cat:skill:workflow",
+   "key": "urn:air:idescat.cat:skill:workflow",
+   "publisher": "idescat.cat",
+   "manifest": "https://api.idescat.cat/.well-known/ard.json",
+   "manifest_sha256": "89bcf18c034a04e08624ac95cd32df7a940de8bc320a4dcb41ef5f0b3a0fda96",
+   "split": "tune"
+  },
+  {
+   "query": "Which places does Ishan Goyal recommend in Tokyo?",
+   "expect": "urn:air:igoyal.ai:mcp:public-context",
+   "key": "urn:air:igoyal.ai:mcp:public-context",
+   "publisher": "igoyal.ai",
+   "manifest": "https://igoyal.ai/.well-known/ard.json",
+   "manifest_sha256": "5359ee5bf0316898d8c2c716402bd7d89a974fdbb8db235be61e5854c3638b4a",
+   "split": "tune"
+  },
+  {
+   "query": "contact IMG.LY sales about CE.SDK pricing",
+   "expect": "urn:air:img.ly:tool:contact-sales",
+   "key": "urn:air:img.ly:tool:contact-sales",
+   "publisher": "img.ly",
+   "manifest": "https://img.ly/.well-known/ai-catalog.json",
+   "manifest_sha256": "a46c11a0c54b23dd7241f97b0aad4f7cbc8669fd049252ddfaccc1bb7e08bf24",
+   "split": "tune"
+  },
+  {
+   "query": "read the latest issue of THE SIGNAL AI newsletter",
+   "expect": "urn:air:immersivecommons.com:mcp:immersive-commons-floor10",
+   "key": "urn:air:immersivecommons.com:mcp:immersive-commons-floor10",
+   "publisher": "immersivecommons.com",
+   "manifest": "https://immersivecommons.com/.well-known/ard.json",
+   "manifest_sha256": "c9074343e9efaff2208c64d583350f797d15df87ddaa3bf0d3c49d60b33985a8",
+   "split": "tune"
+  },
+  {
+   "query": "What public evidence supports Dan Crane's experience?",
+   "expect": "urn:air:infoaddict.com:profile:dan-crane:full-text",
+   "key": "urn:air:infoaddict.com:profile:dan-crane:full-text",
+   "publisher": "infoaddict.com",
+   "manifest": "https://infoaddict.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "f2a5370328d019b3dbbd8c97b3cfdf8cac73d638d873856a7ec01e2af3421ae9",
+   "split": "holdout"
+  },
+  {
+   "query": "how do I review and approve what the agent drafted",
+   "expect": "urn:air:iridiumhqmcp.com:skills:index",
+   "key": "urn:air:iridiumhqmcp.com:skills:index",
+   "publisher": "iridiumhqmcp.com",
+   "manifest": "https://iridiumhqmcp.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "0c276f0c7bb53a0dca7252a7505ae3e1d36a72f4fca550e2ccaf33b0222f5fce",
+   "split": "holdout"
+  },
+  {
+   "query": "Kontaktiere einen IT-Dienstleister in Bayern für Firewall, Antivirus und E-Mail-Archivierung",
+   "expect": "urn:air:itcomlanger.de:service:it-systemhaus-bayern",
+   "key": "urn:air:itcomlanger.de:service:it-systemhaus-bayern",
+   "publisher": "itcomlanger.de",
+   "manifest": "https://itcomlanger.de/.well-known/ai-catalog.json",
+   "manifest_sha256": "a6663f6ef38bda1034b5c02afe5598ca5b67b13b02b90d003f8bd2fe5eb60cfd",
+   "split": "holdout"
+  },
+  {
+   "query": "how do I find a home inspector in Palm Beach County",
+   "expect": "urn:air:jacobcampbellrealtor.com:partners",
+   "key": "urn:air:jacobcampbellrealtor.com:partners",
+   "publisher": "jacobcampbellrealtor.com",
+   "manifest": "https://jacobcampbellrealtor.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "ef4f249625cea7f3bc895c96eff71e13c89740bd0a8d8c535d37b107fb7ade2d",
+   "split": "holdout"
+  },
+  {
+   "query": "check the status of a Jobherder job search",
+   "expect": "urn:air:jobherder.com:mcp:job-search",
+   "key": "urn:air:jobherder.com:mcp:job-search",
+   "publisher": "jobherder.com",
+   "manifest": "https://jobero.ai/.well-known/ard.json",
+   "manifest_sha256": "0faee4184e69ee7e6c3f61f90efc681f5a36ffc83718fd59fc5794933b069e9b",
+   "split": "holdout"
+  },
+  {
+   "query": "find an English-speaking dentist in Los Cabos",
+   "expect": "urn:air:joinplexa.com:server:plexa-registry",
+   "key": "urn:air:joinplexa.com:server:plexa-registry",
+   "publisher": "joinplexa.com",
+   "manifest": "https://api.joinplexa.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "3deb83f6bb46eccde2185f6fc26a44024f43b10d68ce6a1200ad35beba49786b",
+   "split": "tune"
+  },
+  {
+   "query": "apply to a lot of jobs without filling in the same form every time",
+   "expect": "urn:air:keywordise.com:service:auto-apply",
+   "key": "urn:air:keywordise.com:service:auto-apply",
+   "publisher": "keywordise.com",
+   "manifest": "https://keywordise.com/.well-known/ard.json",
+   "manifest_sha256": "c0f3c8e4763e505d06f5697048cc82fe2742308afba7189881094a170c184cbf",
+   "split": "holdout"
+  },
+  {
+   "query": "log a drive to the client office and price it at the IRS rate",
+   "expect": "urn:air:labnotes.org:mcp:expense",
+   "key": "urn:air:labnotes.org:mcp:expense",
+   "publisher": "labnotes.org",
+   "manifest": "https://expense.labnotes.org/.well-known/ai-catalog.json",
+   "manifest_sha256": "eb19b24389e49eab53315729c95f02b11505cb07ad67eb11a27546714d762054",
+   "split": "holdout"
+  },
+  {
+   "query": "give my AI agent its own social network account",
+   "expect": "urn:air:latticenet.ai:skill:latticenet",
+   "key": "urn:air:latticenet.ai:skill:latticenet",
+   "publisher": "latticenet.ai",
+   "manifest": "https://latticenet.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "fc90a5229a563df49d38194ea31f9b5479c81a2ca59a5ef92a50133c86a98d77",
+   "split": "tune"
+  },
+  {
+   "query": "find an MCP tool to replay failed lead deliveries without CRM duplicates",
+   "expect": "urn:air:leadproof.jessesay.chatgpt.site:mcp:sales-agent",
+   "key": "urn:air:leadproof.jessesay.chatgpt.site:mcp:sales-agent",
+   "publisher": "leadproof.jessesay.chatgpt.site",
+   "manifest": "https://leadproof.jessesay.chatgpt.site/.well-known/ai-catalog.json",
+   "manifest_sha256": "ea8eff26ba0a283481864bee54f7b7cf59a0a25846c32a09924f4a8c4595d7f4",
+   "split": "tune"
+  },
+  {
+   "query": "compare vendors in one category on agent readiness",
+   "expect": "urn:air:letagentsin.com:data:corpus",
+   "key": "urn:air:letagentsin.com:data:corpus",
+   "publisher": "letagentsin.com",
+   "manifest": "https://letagentsin.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "a13f3303db08ed33c1ed8c43616bf68eee172f8d63e397656c542ee69021520a",
+   "split": "holdout"
+  },
+  {
+   "query": "Which broadband plans serve 123 Main Street?",
+   "expect": "urn:air:letshum.com:skill:check-internet-availability",
+   "key": "urn:air:letshum.com:skill:check-internet-availability",
+   "publisher": "letshum.com",
+   "manifest": "https://mcp.letshum.com/.well-known/ard.json",
+   "manifest_sha256": "daecff9cb2965ecdc5d2a18e26e0965bcca1e0489358d9019b354f8885c2f55c",
+   "split": "tune"
+  },
+  {
+   "query": "keep this supplier directory coming as a table every week",
+   "expect": "urn:air:licium.ai:server:catalog",
+   "key": "urn:air:licium.ai:server:catalog",
+   "publisher": "licium.ai",
+   "manifest": "https://licium.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "40989784c0bb8b249d1a2186580beef3f048cad4d4d29cb22acd2a40ec66bfcc",
+   "split": "holdout"
+  },
+  {
+   "query": "list the competitors tracked for a project",
+   "expect": "urn:air:llmpulse.ai:api:rest-v1",
+   "key": "urn:air:llmpulse.ai:api:rest-v1",
+   "publisher": "llmpulse.ai",
+   "manifest": "https://llmpulse.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "e9d67ae26a10fdef584fd34cb45422cf6f1cbe79ed5b4d2a769ada78f7fd4201",
+   "split": "holdout"
+  },
+  {
+   "query": "MCP tool abuse detection",
+   "expect": "urn:air:llmrt-companion.manhliemcn4euwlu.workers.dev:api:redteam-scan",
+   "key": "urn:air:llmrt-companion.manhliemcn4euwlu.workers.dev:api:redteam-scan",
+   "publisher": "llmrt-companion.manhliemcn4euwlu.workers.dev",
+   "manifest": "https://llmrt-companion.manhliemcn4euwlu.workers.dev/.well-known/ard.json",
+   "manifest_sha256": "051f3dc84aa50467a581d1213e8f9eb007a4302877932f64c776c8065e9efcf1",
+   "split": "tune"
+  },
+  {
+   "query": "tell me what I missed since I last ran",
+   "expect": "urn:air:longwatch.dev:api:longwatch",
+   "key": "urn:air:longwatch.dev:api:longwatch",
+   "publisher": "longwatch.dev",
+   "manifest": "https://longwatch.dev/.well-known/ai-catalog.json",
+   "manifest_sha256": "e84e72485bfdedbf2fd826e77145c42b0508d000806af35850d99bd604939f21",
+   "split": "tune"
+  },
+  {
+   "query": "which full-stack TypeScript developer specialising in MCP and LangGraph is available for freelance work in Paris?",
+   "expect": "urn:air:loopingagent.com:mcp:main",
+   "key": "urn:air:loopingagent.com:mcp:main",
+   "publisher": "loopingagent.com",
+   "manifest": "https://loopingagent.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "decb2f5e5ed8ba9aa6ab4c31fd108df42558661e9421cefc7f8412df1ba4f6ae",
+   "split": "tune"
+  },
+  {
+   "query": "generate an image from a text prompt",
+   "expect": "urn:air:magichour.ai:api:v1",
+   "key": "urn:air:magichour.ai:api:v1",
+   "publisher": "magichour.ai",
+   "manifest": "https://magichour.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "5d2e93bb19e666e868ad28320438e8689fa371ba2dddcfab80005913acd287e8",
+   "split": "tune"
+  },
+  {
+   "query": "find an AI agent available for long-term adoption",
+   "expect": "urn:air:mahmoudquran-wq.github.io:agent:ai-agent-adoption",
+   "key": "urn:air:mahmoudquran-wq.github.io:agent:ai-agent-adoption",
+   "publisher": "mahmoudquran-wq.github.io",
+   "manifest": "https://mahmoudquran-wq.github.io/.well-known/ard.json",
+   "manifest_sha256": "2a28c5b6d71550cc9bddc16376a099b764187015eb2218a66ededf3f87d9bb0b",
+   "split": "tune"
+  },
+  {
+   "query": "find framework guides for agent postal mail",
+   "expect": "urn:air:mailbox.bot:agent:openclaw",
+   "key": "urn:air:mailbox.bot:agent:openclaw",
+   "publisher": "mailbox.bot",
+   "manifest": "https://mailbox.bot/.well-known/ai-catalog.json",
+   "manifest_sha256": "d3301c412c9f17d5e8bac1dad9474ecbb18cfce02179e678ae85f808855f2a77",
+   "split": "holdout"
+  },
+  {
+   "query": "Create a domain or GitHub commit binding challenge for offline conformance outputs",
+   "expect": "urn:air:mandateshield.com:api:proof-network",
+   "key": "urn:air:mandateshield.com:api:proof-network",
+   "publisher": "mandateshield.com",
+   "manifest": "https://mandateshield.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "1410ebdcd537ee32cc1d8b9759e951439e10af2e0560ccd7f9ad2c8cd0e088c9",
+   "split": "holdout"
+  },
+  {
+   "query": "MCP maps.ikeytz.com 52 Orte",
+   "expect": "urn:air:maps.ikeytz.com:mcp:maps",
+   "key": "urn:air:maps.ikeytz.com:mcp:maps",
+   "publisher": "maps.ikeytz.com",
+   "manifest": "https://maps.ikeytz.com/.well-known/ard.json",
+   "manifest_sha256": "c552a5e48ec38acff6ca06f5c88445276c0ca5f35af1c0f68c21d9fbef7e4546",
+   "split": "tune"
+  },
+  {
+   "query": "launch a GPU VM with an L40 in any region",
+   "expect": "urn:air:massedcompute.com:mcp:gpu-cloud",
+   "key": "urn:air:massedcompute.com:mcp:gpu-cloud",
+   "publisher": "massedcompute.com",
+   "manifest": "https://vm.massedcompute.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "1100d2bdfece407b723a0d8069aef61516e03fdb9244e7f955fd0dfcbd344d68",
+   "split": "tune"
+  },
+  {
+   "query": "check whether an AI agent can distinguish between similar MCP tools",
+   "expect": "urn:air:mcp-selection-lab-production.up.railway.app:mcp:mcp-selection-lab",
+   "key": "urn:air:mcp-selection-lab-production.up.railway.app:mcp:mcp-selection-lab",
+   "publisher": "mcp-selection-lab-production.up.railway.app",
+   "manifest": "https://mcp-selection-lab-production.up.railway.app/.well-known/ard.json",
+   "manifest_sha256": "2f5f4db25a8d7a852615cd56864e61000d626833110786b662a7672e506cf9ae",
+   "split": "tune"
+  },
+  {
+   "query": "which GSC Carrier fleet serves Brazil",
+   "expect": "urn:air:mcp.gsc-fleet.ai:fleet:discovery-mcp",
+   "key": "urn:air:mcp.gsc-fleet.ai:fleet:discovery-mcp",
+   "publisher": "mcp.gsc-fleet.ai",
+   "manifest": "https://mcp.gsc-fleet.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "510c775e4a301c058d9f297a7d55d87abb369508e2f7f00bfdb509828c46fba4",
+   "split": "holdout"
+  },
+  {
+   "query": "Show me resorts in Colorado with more than 30cm of new snow in the last 48 hours.",
+   "expect": "urn:air:mcp.snowdata.ai:server:live-snow",
+   "key": "urn:air:mcp.snowdata.ai:server:live-snow",
+   "publisher": "mcp.snowdata.ai",
+   "manifest": "https://mcp.snowdata.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "96396b68f40a3beeebf8840b487c6493c5edc2de5387c1436d145ed757eb9fd5",
+   "split": "holdout"
+  },
+  {
+   "query": "Ce acces programatic oferă mmatinca.eu?",
+   "expect": "urn:air:mmatinca.eu:docs:auth",
+   "key": "urn:air:mmatinca.eu:docs:auth",
+   "publisher": "mmatinca.eu",
+   "manifest": "https://mmatinca.eu/.well-known/ai-catalog.json",
+   "manifest_sha256": "663c5d70cef83458f637e700021ccdffab2a223d67b3dcfde128a664adb96b4c",
+   "split": "tune"
+  },
+  {
+   "query": "Roll this project out to French after showing the expected scope and cost.",
+   "expect": "urn:air:multilocale.com:plugin:multilocale",
+   "key": "urn:air:multilocale.com:plugin:multilocale",
+   "publisher": "multilocale.com",
+   "manifest": "https://multilocale.com/.well-known/ard.json",
+   "manifest_sha256": "d41579e025a37695db21a0a645d9f115ccce33b7b0db2fcbcd4da544f4138edf",
+   "split": "tune"
+  },
+  {
+   "query": "List knowledge topics in this workspace",
+   "expect": "urn:air:myagentda:knowledge:agentda-rest",
+   "key": "urn:air:myagentda:knowledge:agentda-rest",
+   "publisher": "myagentda",
+   "manifest": "https://myagentda.com/.well-known/ard.json",
+   "manifest_sha256": "0fa19256253491807c6344493071194ca50bb6b6ee703497aaeda0603ac13c53",
+   "split": "holdout"
+  },
+  {
+   "query": "pay per call web search with USDC and no account",
+   "expect": "urn:air:neurobird.com:catalog:search",
+   "key": "urn:air:neurobird.com:catalog:search",
+   "publisher": "neurobird.com",
+   "manifest": "https://neurobird.com/.well-known/ard.json",
+   "manifest_sha256": "5dc2f4dbe97727e118386164e822ebf5f58959339ceb9cdc65caf205454a7b69",
+   "split": "holdout"
+  },
+  {
+   "query": "PAWRA PET CARES in LONDON",
+   "expect": "urn:air:nexez.ai:listing:pawra-pet-cares",
+   "key": "urn:air:nexez.ai:listing:pawra-pet-cares",
+   "publisher": "nexez.ai",
+   "manifest": "https://nexez.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "1c8cb692213a093ab791e5df8bd911dd4c04c19047808fdc8b1aae4ca5bb7573",
+   "split": "holdout"
+  },
+  {
+   "query": "What is notepad.page?",
+   "expect": "urn:air:notepad.page:docs:llms",
+   "key": "urn:air:notepad.page:docs:llms",
+   "publisher": "notepad.page",
+   "manifest": "https://notepad.page/.well-known/ai-catalog.json",
+   "manifest_sha256": "1f47f515d21ae98013449aabfb7815d1b66270d16b9b04f6e6d86f8e6ca37e48",
+   "split": "tune"
+  },
+  {
+   "query": "hand one unresolved research role to another agent",
+   "expect": "urn:air:nulliverba.ol-lo.workers.dev:skill:research-relay",
+   "key": "urn:air:nulliverba.ol-lo.workers.dev:skill:research-relay",
+   "publisher": "nulliverba.ol-lo.workers.dev",
+   "manifest": "https://nulliverba.ol-lo.workers.dev/.well-known/ard.json",
+   "manifest_sha256": "5e426a186c8e229c57f69812986db6c1277ab7d52d681c9b4c523f1faca56000",
+   "split": "holdout"
+  },
+  {
+   "query": "Estimate the cost and timeline to implement Odoo",
+   "expect": "urn:air:octurasolutions.com:a2a:site-tools",
+   "key": "urn:air:octurasolutions.com:a2a:site-tools",
+   "publisher": "octurasolutions.com",
+   "manifest": "https://octurasolutions.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "383e96be36b88330288696d61e89ccfce7df813d5d0881afe0b191d70e803bf2",
+   "split": "holdout"
+  },
+  {
+   "query": "connect an MCP client to Outlit",
+   "expect": "urn:air:outlit.ai:mcp:server-card",
+   "key": "urn:air:outlit.ai:mcp:server-card",
+   "publisher": "outlit.ai",
+   "manifest": "https://outlit.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "2c3f1b048151f2ca2ee1f80b3fc5e9ab011a8791a961c1c84a4b41259170c645",
+   "split": "holdout"
+  },
+  {
+   "query": "x402 facilitator to accept payments for my API",
+   "expect": "urn:air:pay.neuronto.com:api:facilitator",
+   "key": "urn:air:pay.neuronto.com:api:facilitator",
+   "publisher": "pay.neuronto.com",
+   "manifest": "https://pay.neuronto.com/.well-known/ard.json",
+   "manifest_sha256": "efcb7151b974109cb2ba82e8c61b50c8957b8102ef5c89b78a6d8239228fa1ee",
+   "split": "holdout"
+  },
+  {
+   "query": "when does this site's TLS certificate expire",
+   "expect": "urn:air:paypercall.dev:api:url-status",
+   "key": "urn:air:paypercall.dev:api:url-status",
+   "publisher": "paypercall.dev",
+   "manifest": "https://extract.paypercall.dev/.well-known/ard.json",
+   "manifest_sha256": "ae2747fd76fc6d083076220531848e915a5a28069e32e6443c61b21046be1f4f",
+   "split": "tune"
+  },
+  {
+   "query": "How can a Performa.AI customer connect an AI assistant to store data?",
+   "expect": "urn:air:performa.ai:mcp:customer-server",
+   "key": "urn:air:performa.ai:mcp:customer-server",
+   "publisher": "performa.ai",
+   "manifest": "https://performa.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "24fc4dc1697b6ea1b40e00d01a4a59c8516c04c6e7d91d1258dcf6442adfc28b",
+   "split": "tune"
+  },
+  {
+   "query": "compare AAFCO vs FEDIAF vs NIAS lysine requirement for adult cats",
+   "expect": "urn:air:petforai.com:server:pet-data-station",
+   "key": "urn:air:petforai.com:server:pet-data-station",
+   "publisher": "petforai.com",
+   "manifest": "https://petforai.com/.well-known/ard.json",
+   "manifest_sha256": "e7b6c13e57240a8b6e99c11fd6541507caf40082f1c6d9fe86a5ec45d5b0672a",
+   "split": "tune"
+  },
+  {
+   "query": "register for analytics without a signup form",
+   "expect": "urn:air:pickrate.io:auth:registration",
+   "key": "urn:air:pickrate.io:auth:registration",
+   "publisher": "pickrate.io",
+   "manifest": "https://pickrate.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "ded1ff05a76d0cd6f235c45c56605854b1383a65da64fa88f6ad00adec2da2e8",
+   "split": "holdout"
+  },
+  {
+   "query": "Prepare a policy-gated advertising action for human approval.",
+   "expect": "urn:air:plainrouter.com:mcp:advertising-control-plane",
+   "key": "urn:air:plainrouter.com:mcp:advertising-control-plane",
+   "publisher": "plainrouter.com",
+   "manifest": "https://plainrouter.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "ebdbe34c0dd3e8bf3236113d2fcdf2bd500bf7c957f2eb930e18706ade3c2c85",
+   "split": "tune"
+  },
+  {
+   "query": "independent verification practice for agent-facing systems",
+   "expect": "urn:air:plumbline-hq.github.io:catalog:service-descriptor",
+   "key": "urn:air:plumbline-hq.github.io:catalog:service-descriptor",
+   "publisher": "plumbline-hq.github.io",
+   "manifest": "https://plumbline-hq.github.io/.well-known/ard.json",
+   "manifest_sha256": "4672c46acc0548018ac46d220b24f90d2c67073254ee3d475c5ba7c0a5206653",
+   "split": "holdout"
+  },
+  {
+   "query": "rent a subdomain for an hour",
+   "expect": "urn:air:popdot.ai:server:popdot-mcp",
+   "key": "urn:air:popdot.ai:server:popdot-mcp",
+   "publisher": "popdot.ai",
+   "manifest": "https://popdot.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "bf562c7927eeb56a9c193ee7bd15fbd7ba094eed29917c67dd2dcaa46c65ce4d",
+   "split": "tune"
+  },
+  {
+   "query": "look up why a Postmark message bounced",
+   "expect": "urn:air:postmarkapp.com:api:server",
+   "key": "urn:air:postmarkapp.com:api:server",
+   "publisher": "postmarkapp.com",
+   "manifest": "https://postmarkapp.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "73f0e30d824eb08646c824acd98bc38b800be8b0bb1d728c1913af9c857bda5c",
+   "split": "tune"
+  },
+  {
+   "query": "Our vendor cannot migrate data from a legacy database into the new system. Who can preserve the old records?",
+   "expect": "urn:air:preservation.redravenpress.net:skill:legacy-data-preservation",
+   "key": "urn:air:preservation.redravenpress.net:skill:legacy-data-preservation",
+   "publisher": "preservation.redravenpress.net",
+   "manifest": "https://preservation.redravenpress.net/.well-known/ard.json",
+   "manifest_sha256": "30b438dcb0e22cc5fdfbd8045b8ea01b8b0b80589a4ee3105b80989416161975",
+   "split": "tune"
+  },
+  {
+   "query": "ask a vendor support agent a question over email",
+   "expect": "urn:air:primitive.dev:skill:primitive-chat",
+   "key": "urn:air:primitive.dev:skill:primitive-chat",
+   "publisher": "primitive.dev",
+   "manifest": "https://primitive.dev/.well-known/ai-catalog.json",
+   "manifest_sha256": "fb05b173f46e8651cc71b0530ce612f1a9281c14eb92af0b8cacc35a7a0271e9",
+   "split": "tune"
+  },
+  {
+   "query": "Review and prioritize the open work for my product.",
+   "expect": "urn:air:priorify.app:mcp:priorify",
+   "key": "urn:air:priorify.app:mcp:priorify",
+   "publisher": "priorify.app",
+   "manifest": "https://priorify.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "596bfec3f84f98321e0453b3c82ae48f542b0ed896af8abf5e98f5491a8e0951",
+   "split": "tune"
+  },
+  {
+   "query": "Вакансии: сколько записей и за какой период",
+   "expect": "urn:air:prismfact.com:dataset:jobs",
+   "key": "urn:air:prismfact.com:dataset:jobs",
+   "publisher": "prismfact.com",
+   "manifest": "https://prismfact.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "1e8fe56c97f62ae7a5af046d6ff7fa4ba039c109c939581d78898ff525a2269f",
+   "split": "holdout"
+  },
+  {
+   "query": "verified sale price for apartments in Marbella municipality",
+   "expect": "urn:air:propertylist.es:dataset:oracle",
+   "key": "urn:air:propertylist.es:dataset:oracle",
+   "publisher": "propertylist.es",
+   "manifest": "https://propertylist.es/.well-known/ai-catalog.json",
+   "manifest_sha256": "dac0f304c01f13a7de764a015b71b18bccf0c6a7a7ad72bef965d5a60cdae5bc",
+   "split": "tune"
+  },
+  {
+   "query": "Which webhooks does a publica.la store send on a purchase?",
+   "expect": "urn:air:publica.la:mcp:docs",
+   "key": "urn:air:publica.la:mcp:docs",
+   "publisher": "publica.la",
+   "manifest": "https://publica.la/.well-known/ard.json",
+   "manifest_sha256": "b3a1fdb9857caa4b58a35ec69af5aa7ea55f6cd2595e394b55d7b33f7a0e4c64",
+   "split": "holdout"
+  },
+  {
+   "query": "public feed where autonomous agents post and reply",
+   "expect": "urn:air:publicairelay.com:relay:broadcast",
+   "key": "urn:air:publicairelay.com:relay:broadcast",
+   "publisher": "publicairelay.com",
+   "manifest": "https://publicairelay.com/.well-known/ard.json",
+   "manifest_sha256": "775a5ae4d9f63882f786d79dc14e023538b1cdb8352414570328267b4e939010",
+   "split": "tune"
+  },
+  {
+   "query": "get the current Formula 1 driver standings",
+   "expect": "urn:air:racecalendar.app:api:f1-v2",
+   "key": "urn:air:racecalendar.app:api:f1-v2",
+   "publisher": "racecalendar.app",
+   "manifest": "https://racecalendar.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "0c7fd88818b67997e3faf90033474404ada10a7083633adf7b61ac5c4ea611c1",
+   "split": "holdout"
+  },
+  {
+   "query": "what kind of role is Rafe Blandford looking for",
+   "expect": "urn:air:rafeblandford.com:mcp:career",
+   "key": "urn:air:rafeblandford.com:mcp:career",
+   "publisher": "rafeblandford.com",
+   "manifest": "https://rafeblandford.com/.well-known/ard.json",
+   "manifest_sha256": "08d5fc327da77e362ac7c8248e5a9312d8d98a6964778078c7d121de9a4b7348",
+   "split": "holdout"
+  },
+  {
+   "query": "where are Railway's agent-readable docs",
+   "expect": "urn:air:railway.com:doc:llms-txt",
+   "key": "urn:air:railway.com:doc:llms-txt",
+   "publisher": "railway.com",
+   "manifest": "https://railway.com/.well-known/ard.json",
+   "manifest_sha256": "9e7892b189cf51edb4c032992f423dbc98bcdf4324f7b1ba83399cf77a86e026",
+   "split": "tune"
+  },
+  {
+   "query": "convert an office document to PDF and compress it",
+   "expect": "urn:air:relaystation.ai:recipes:document-chores",
+   "key": "urn:air:relaystation.ai:recipes:document-chores",
+   "publisher": "relaystation.ai",
+   "manifest": "https://relaystation.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "98ef4abf74565c8366c9cbd4bda568a2a6e26f75cbc2d8d1f34e6ea819819fae",
+   "split": "holdout"
+  },
+  {
+   "query": "My electrical panel keeps tripping near Aubagne",
+   "expect": "urn:air:renoolab.fr:a2a:find-artisans-france",
+   "key": "urn:air:renoolab.fr:a2a:find-artisans-france",
+   "publisher": "renoolab.fr",
+   "manifest": "https://renoolab.fr/.well-known/ard.json",
+   "manifest_sha256": "450b2664e17e5744ee7ee2a396b8ae1557af354b380bc07c7c5ab5b45f0c5d18",
+   "split": "tune"
+  },
+  {
+   "query": "flirty opener in a language my match speaks",
+   "expect": "urn:air:rumors.app:mcp:rumors-lines",
+   "key": "urn:air:rumors.app:mcp:rumors-lines",
+   "publisher": "rumors.app",
+   "manifest": "https://rumors.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "0723d60ef3eff2a5fb8b2a71eab55020df05692747b0d6f2c6d9e3ffdf9ccf3b",
+   "split": "tune"
+  },
+  {
+   "query": "Read the resume as a document",
+   "expect": "urn:air:ryanlindsey.me:profile:resume-markdown",
+   "key": "urn:air:ryanlindsey.me:profile:resume-markdown",
+   "publisher": "ryanlindsey.me",
+   "manifest": "https://ryanlindsey.me/.well-known/ard.json",
+   "manifest_sha256": "066bcafdda7f83780d6a069f79e303546bce7aed4882a33bd719b3cdf458a116",
+   "split": "holdout"
+  },
+  {
+   "query": "download the OpenAI security evidence dataset",
+   "expect": "urn:air:saasdossier.com:data:openai-ledger",
+   "key": "urn:air:saasdossier.com:data:openai-ledger",
+   "publisher": "saasdossier.com",
+   "manifest": "https://saasdossier.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "afa68148ef06258f2a4c316b6062fba7b4788009b7c68c419558c513adbfb3d1",
+   "split": "holdout"
+  },
+  {
+   "query": "subscribe to x402 observations and SCVD corrections in an Atom reader",
+   "expect": "urn:air:scvd.store:dataset:feeds",
+   "key": "urn:air:scvd.store:dataset:feeds",
+   "publisher": "scvd.store",
+   "manifest": "https://scvd.store/.well-known/ard.json",
+   "manifest_sha256": "cc2b95bf246a142a98a63d08f31107e9206de9d7b9ab4a5068bb51143f92d987",
+   "split": "holdout"
+  },
+  {
+   "query": "HTTP endpoint that searches the web and returns page content",
+   "expect": "urn:air:search.neurobird.com:api:search",
+   "key": "urn:air:search.neurobird.com:api:search",
+   "publisher": "search.neurobird.com",
+   "manifest": "https://search.neurobird.com/.well-known/ard.json",
+   "manifest_sha256": "06b12d8d176a2e336764f2ea63bd48b50bc0d661b1de4b0ba700447a3fedacf3",
+   "split": "tune"
+  },
+  {
+   "query": "build a slide deck from this outline",
+   "expect": "urn:air:sharewatch.ai:server:sharewatch",
+   "key": "urn:air:sharewatch.ai:server:sharewatch",
+   "publisher": "sharewatch.ai",
+   "manifest": "https://sharewatch.ai/.well-known/ard.json",
+   "manifest_sha256": "574978de08b3d7e9f5002cacd0a3c8ec7a76ec6e64f2964d6d1d385138cd9bc3",
+   "split": "tune"
+  },
+  {
+   "query": "which MCP server connects to a Postgres database in natural language",
+   "expect": "urn:air:smartbench.ai:registry:ai-asset-search",
+   "key": "urn:air:smartbench.ai:registry:ai-asset-search",
+   "publisher": "smartbench.ai",
+   "manifest": "https://smartbench.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "87c476b27dbbf9271d7b3a2cb3f0dba5a4f3c38b0bf741116e260861ff4f59d5",
+   "split": "holdout"
+  },
+  {
+   "query": "Where's the best powder this weekend within four hours of Denver?",
+   "expect": "urn:air:snowdata.ai:mcp:live-snow",
+   "key": "urn:air:snowdata.ai:mcp:live-snow",
+   "publisher": "snowdata.ai",
+   "manifest": "https://snowdata.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "e036247f20cc9b3d68b2d2faed27bcf8c662deadf982130e0b4ffa44eb6e255b",
+   "split": "holdout"
+  },
+  {
+   "query": "how accurate has the forecast been for this resort",
+   "expect": "urn:air:snowsure.ai:api:rest",
+   "key": "urn:air:snowsure.ai:api:rest",
+   "publisher": "snowsure.ai",
+   "manifest": "https://snowsure.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "8ad3f50d779f434869b46e55bce97da23865cd81d2e7876ca80eda2165307e16",
+   "split": "holdout"
+  },
+  {
+   "query": "manage a waitlist for a sold-out event",
+   "expect": "urn:air:sorted.fast:api:rest",
+   "key": "urn:air:sorted.fast:api:rest",
+   "publisher": "sorted.fast",
+   "manifest": "https://sorted.fast/.well-known/ai-catalog.json",
+   "manifest_sha256": "98b05d8f2071f60260216d7e17945cf37c801f5dbcdbfb0d3590c94bbea20087",
+   "split": "holdout"
+  },
+  {
+   "query": "Sparkbites MCP tools list",
+   "expect": "urn:air:sparkbites.dev:docs:mcp",
+   "key": "urn:air:sparkbites.dev:docs:mcp",
+   "publisher": "sparkbites.dev",
+   "manifest": "https://sparkbites.dev/.well-known/ai-catalog.json",
+   "manifest_sha256": "f22331c23b20434fd42987443a40e18ddae3c50ce264d461629ecad1dbf85d39",
+   "split": "holdout"
+  },
+  {
+   "query": "How do I detect shadow AI and prompt injection across AI clients?",
+   "expect": "urn:air:speakeasy.com:plugin:ai-control-plane",
+   "key": "urn:air:speakeasy.com:plugin:ai-control-plane",
+   "publisher": "speakeasy.com",
+   "manifest": "https://speakeasy.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "a880552b9c308121bf20ed9b375501cc6fb40b6ff6c73975719f4945438a3246",
+   "split": "holdout"
+  },
+  {
+   "query": "what is my average download speed in this browser",
+   "expect": "urn:air:speedof.me:webmcp:browser-tools",
+   "key": "urn:air:speedof.me:webmcp:browser-tools",
+   "publisher": "speedof.me",
+   "manifest": "https://speedof.me/.well-known/ai-catalog.json",
+   "manifest_sha256": "d0af7df027b3c8c4f30fd1c91d91025ed082ca570e29dc5cfc3687a772542805",
+   "split": "holdout"
+  },
+  {
+   "query": "verify agent delivery before payment",
+   "expect": "urn:air:spoolis.com:mcp:spoolis",
+   "key": "urn:air:spoolis.com:mcp:spoolis",
+   "publisher": "spoolis.com",
+   "manifest": "https://spoolis.com/.well-known/ard.json",
+   "manifest_sha256": "8dd06c5e4878c1abd1d5dbae5037a92e03e70135ffe2c0ecd52ba77540241d9f",
+   "split": "holdout"
+  },
+  {
+   "query": "download a public dataset of AI-agent design work",
+   "expect": "urn:air:sssnack.com:dataset:snacks",
+   "key": "urn:air:sssnack.com:dataset:snacks",
+   "publisher": "sssnack.com",
+   "manifest": "https://sssnack.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "4326cc5440067d2b9fde447fb9424805c2a01700eba0e4a995d148b9f013c8dc",
+   "split": "tune"
+  },
+  {
+   "query": "Classify this cosmetics product under SPARKS.",
+   "expect": "urn:air:standard-10060.org:kg:cpg-knowledge-graph",
+   "key": "urn:air:standard-10060.org:kg:cpg-knowledge-graph",
+   "publisher": "standard-10060.org",
+   "manifest": "https://standard-10060.org/.well-known/ai-catalog.json",
+   "manifest_sha256": "edef6b519f3c5c8440811e73ceef474bde50d1b69a9c11bc2b0624561a0bad9c",
+   "split": "tune"
+  },
+  {
+   "query": "consult our organization's AI advisor before deciding",
+   "expect": "urn:air:structa.me:server:structa-gateway",
+   "key": "urn:air:structa.me:server:structa-gateway",
+   "publisher": "structa.me",
+   "manifest": "https://structa.me/.well-known/ai-catalog.json",
+   "manifest_sha256": "2bd837c59421c94dc14e70c872aa6122d70e4a78dc8d7d34c5b0f6fa998df536",
+   "split": "holdout"
+  },
+  {
+   "query": "subscribe a webhook URL to Supademo demo view events",
+   "expect": "urn:air:supademo.com:schema:http-api",
+   "key": "urn:air:supademo.com:schema:http-api",
+   "publisher": "supademo.com",
+   "manifest": "https://supademo.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "4bb5856fbecf639531c94a7abf83f7af683d71c63f010a066cdb8e1ba065c6a4",
+   "split": "holdout"
+  },
+  {
+   "query": "find the URL of a SurrealDB blog post or product page",
+   "expect": "urn:air:surrealdb.com:site:sitemap",
+   "key": "urn:air:surrealdb.com:site:sitemap",
+   "publisher": "surrealdb.com",
+   "manifest": "https://api.surrealdb.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "33b32f009310147168c0b4db315aea6150916143e04971b5ab357735a3ba4629",
+   "split": "tune"
+  },
+  {
+   "query": "Research a topic and retrieve a report.",
+   "expect": "urn:air:tavily.com:api:rest",
+   "key": "urn:air:tavily.com:api:rest",
+   "publisher": "tavily.com",
+   "manifest": "https://tavily.com/.well-known/ard.json",
+   "manifest_sha256": "abaadbbd37917426399264398b7d4e9ee67fd0c8dc0fd76b6268f7f7857c4b05",
+   "split": "tune"
+  },
+  {
+   "query": "Find Telegram channels about technology",
+   "expect": "urn:air:tgboard.com:server:tgboard-mcp",
+   "key": "urn:air:tgboard.com:server:tgboard-mcp",
+   "publisher": "tgboard.com",
+   "manifest": "https://tgboard.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "5baaaa81f85d815302de59f59cd89162e623c578160582a6cdd240ce64ca75f7",
+   "split": "tune"
+  },
+  {
+   "query": "Retrieve Microsoft annual balance-sheet history",
+   "expect": "urn:air:the-stall.intuitek.ai:component:balance-sheet",
+   "key": "urn:air:the-stall.intuitek.ai:component:balance-sheet",
+   "publisher": "the-stall.intuitek.ai",
+   "manifest": "https://the-stall.intuitek.ai/.well-known/ard.json",
+   "manifest_sha256": "8c6fd3acd86a0be86a9e0fe47dac8f9ff44968215812a08cc0a3ed958e668c6c",
+   "split": "holdout"
+  },
+  {
+   "query": "Rezumatul platformei travel-trends pentru agenți AI",
+   "expect": "urn:air:travel-trends.mmatinca.eu:docs:llms-txt",
+   "key": "urn:air:travel-trends.mmatinca.eu:docs:llms-txt",
+   "publisher": "travel-trends.mmatinca.eu",
+   "manifest": "https://travel-trends.mmatinca.eu/.well-known/ai-catalog.json",
+   "manifest_sha256": "f0cd8906e2986309869528f14c569c506709df9f04e63315f71c11e4b1437e95",
+   "split": "holdout"
+  },
+  {
+   "query": "find a flight from London to New York on 12 October",
+   "expect": "urn:air:travel.agentplayground.dev:agent:travel-merchant",
+   "key": "urn:air:travel.agentplayground.dev:agent:travel-merchant",
+   "publisher": "travel.agentplayground.dev",
+   "manifest": "https://travel.agentplayground.dev/.well-known/ard.json",
+   "manifest_sha256": "18fc5501c0231a7cd7348c098f9da38df61c108292de9877f0e011be072a0bbc",
+   "split": "tune"
+  },
+  {
+   "query": "Plan a weekend getaway from Paris",
+   "expect": "urn:air:travelfinder.online:travel:travelfinder",
+   "key": "urn:air:travelfinder.online:travel:travelfinder",
+   "publisher": "travelfinder.online",
+   "manifest": "https://travelfinder.online/.well-known/ard.json",
+   "manifest_sha256": "48cba4f11541981de271c0b00519a9a3897ffd858c67fa9008498f43990ec41b",
+   "split": "tune"
+  },
+  {
+   "query": "check an identity's trust tier",
+   "expect": "urn:air:truealter.com:alter-identity-mcp",
+   "key": "urn:air:truealter.com:alter-identity-mcp",
+   "publisher": "truealter.com",
+   "manifest": "https://truealter.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "e0c4bf44641d42f498a0d95ae3ea86354aa8f39b4b631d87fd613c81ed42cacf",
+   "split": "tune"
+  },
+  {
+   "query": "software recommendation API",
+   "expect": "urn:air:trytoolscout.org:openapi:recommendation-api",
+   "key": "urn:air:trytoolscout.org:openapi:recommendation-api",
+   "publisher": "trytoolscout.org",
+   "manifest": "https://trytoolscout.org/.well-known/ard.json",
+   "manifest_sha256": "4240334ed6fba38059ddb9fd8b7c5757b79bb792aeeac3f2470c991e61710f7b",
+   "split": "tune"
+  },
+  {
+   "query": "Cum interoghez programul TV românesc programatic?",
+   "expect": "urn:air:tv.madeinro.eu:skill:romanian-tv-guide",
+   "key": "urn:air:tv.madeinro.eu:skill:romanian-tv-guide",
+   "publisher": "tv.madeinro.eu",
+   "manifest": "https://tv.madeinro.eu/.well-known/ai-catalog.json",
+   "manifest_sha256": "ca0c946de627096e2b8aca43fd48320b79cc59e74df10e73061566de6217cedc",
+   "split": "holdout"
+  },
+  {
+   "query": "test the Tweetsmash API without a key",
+   "expect": "urn:air:tweetsmash.com:api:sandbox",
+   "key": "urn:air:tweetsmash.com:api:sandbox",
+   "publisher": "tweetsmash.com",
+   "manifest": "https://tweetsmash.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "c127e944aa3ebbf46dd08b46ef895071a6f21d7153c14294056f884401cd7a7e",
+   "split": "tune"
+  },
+  {
+   "query": "is there an operation in progress right now",
+   "expect": "urn:air:ultimaluz.com:api:war",
+   "key": "urn:air:ultimaluz.com:api:war",
+   "publisher": "ultimaluz.com",
+   "manifest": "https://ultimaluz.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "40678e9b4fc6744fc176a2262d128cbaebd409b518ef844ba9d5506fca34edc1",
+   "split": "holdout"
+  },
+  {
+   "query": "which operators offer the cheapest premium economy upgrade",
+   "expect": "urn:air:upgradeagent.ai:registry:search",
+   "key": "urn:air:upgradeagent.ai:registry:search",
+   "publisher": "upgradeagent.ai",
+   "manifest": "https://upgradeagent.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "8193f21ea54da27f7bb12f33eaa2584e56257bd2e4e0e1aa67ecb078b12a2650",
+   "split": "holdout"
+  },
+  {
+   "query": "Run a usability test to learn where people get stuck in checkout.",
+   "expect": "urn:air:usertold.ai:mcp:usertold-mcp",
+   "key": "urn:air:usertold.ai:mcp:usertold-mcp",
+   "publisher": "usertold.ai",
+   "manifest": "https://mcp.usertold.ai/.well-known/ard.json",
+   "manifest_sha256": "8ca68791bd6c9836818892d74d424022a7ba1f08cfecf797a064d48fe9fbc9ce",
+   "split": "holdout"
+  },
+  {
+   "query": "What are people on Reddit saying about this product?",
+   "expect": "urn:air:veezee.io:capability:mcp-server",
+   "key": "urn:air:veezee.io:capability:mcp-server",
+   "publisher": "veezee.io",
+   "manifest": "https://veezee.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "bea22845c0419e14052fa6ad88356b1971c33eb8bbbf0da2e6c155375f7cafee",
+   "split": "tune"
+  },
+  {
+   "query": "make flashcards from this recording",
+   "expect": "urn:air:vocce.io:server:vocce-media",
+   "key": "urn:air:vocce.io:server:vocce-media",
+   "publisher": "vocce.io",
+   "manifest": "https://vocce.io/.well-known/ai-catalog.json",
+   "manifest_sha256": "eb970b137beccd24a47bc01b6ebaa74614bda350037f4518f55661ed9d9dedd0",
+   "split": "holdout"
+  },
+  {
+   "query": "check my ai-catalog.json for errors",
+   "expect": "urn:air:wellknownhq.com:mcp:wellknown",
+   "key": "urn:air:wellknownhq.com:mcp:wellknown",
+   "publisher": "wellknownhq.com",
+   "manifest": "https://wellknownhq.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "fd0e2f534613c88ea379944336f90c316d665fce75cc91528775cd7a53852656",
+   "split": "holdout"
+  },
+  {
+   "query": "Erzaehl mir etwas ueber die Brennerei Glenfarclas",
+   "expect": "urn:air:whisky-circle.info:mcp:whisky-circle",
+   "key": "urn:air:whisky-circle.info:mcp:whisky-circle",
+   "publisher": "whisky-circle.info",
+   "manifest": "https://whisky-circle.info/.well-known/ai-catalog.json",
+   "manifest_sha256": "3e6ce2a969024a9fcdbae7879ed3d2059590f5c5ef97d5c5dc55d8bb1cad84c8",
+   "split": "holdout"
+  },
+  {
+   "query": "forecast the impact of a Strait of Hormuz closure",
+   "expect": "urn:air:worldmonitor.app:mcp:worldmonitor",
+   "key": "urn:air:worldmonitor.app:mcp:worldmonitor",
+   "publisher": "worldmonitor.app",
+   "manifest": "https://worldmonitor.app/.well-known/ai-catalog.json",
+   "manifest_sha256": "3f0e4afad2f39437d71c348c319f19b96b5bc6b67bb35861586cbd71dde79230",
+   "split": "holdout"
+  },
+  {
+   "query": "inspect recent changes in a persistent agent-built voxel world",
+   "expect": "urn:air:worldorder.club:mcp:cube-playground",
+   "key": "urn:air:worldorder.club:mcp:cube-playground",
+   "publisher": "worldorder.club",
+   "manifest": "https://worldorder.club/.well-known/ard.json",
+   "manifest_sha256": "b9d15da599d4c4d53758337bb061590598ae83ab438173fee80f4c616573c183",
+   "split": "tune"
+  },
+  {
+   "query": "hospodářské výsledky a oznámení pro akcionáře",
+   "expect": "urn:air:www.cez.cz:feed:informacni-povinnost-emitenta",
+   "key": "urn:air:www.cez.cz:feed:informacni-povinnost-emitenta",
+   "publisher": "www.cez.cz",
+   "manifest": "https://cez.cz/.well-known/ai-catalog.json",
+   "manifest_sha256": "94abd3196afc709c46fb6440dff44dce08c3c6b1205413c5f58e17995217d4ed",
+   "split": "tune"
+  },
+  {
+   "query": "what does HostTracker monitor",
+   "expect": "urn:air:www.host-tracker.com:docs:llms-txt",
+   "key": "urn:air:www.host-tracker.com:docs:llms-txt",
+   "publisher": "www.host-tracker.com",
+   "manifest": "https://host-tracker.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "23d181f740485c80b6cd7b624266ce4a2fda7a4196daabb8ae842dcaae5808b7",
+   "split": "tune"
+  },
+  {
+   "query": "ikeytz Notdienst Telefonnummer",
+   "expect": "urn:air:www.ikeytz.com:mcp:website",
+   "key": "urn:air:www.ikeytz.com:mcp:website",
+   "publisher": "www.ikeytz.com",
+   "manifest": "https://ikeytz.com/.well-known/ard.json",
+   "manifest_sha256": "8df8fe623e2440d0c49ec7411c9e922720d868403c26e6ba269b6a229bd2a4a9",
+   "split": "tune"
+  },
+  {
+   "query": "How can I check what AI search says about my business?",
+   "expect": "urn:air:www.knownspace.space:docs:overview",
+   "key": "urn:air:www.knownspace.space:docs:overview",
+   "publisher": "www.knownspace.space",
+   "manifest": "https://www.knownspace.space/.well-known/ard.json",
+   "manifest_sha256": "65d46cd310315c8fade32bcdad62df601b7feeacfbd8ffe255464171b70db9a1",
+   "split": "tune"
+  },
+  {
+   "query": "sign me up for the LELO newsletter",
+   "expect": "urn:air:www.lelo.com:skill:newsletter-subscribe",
+   "key": "urn:air:www.lelo.com:skill:newsletter-subscribe",
+   "publisher": "www.lelo.com",
+   "manifest": "https://www.lelo.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "146c85026c31ef112a18ee1ac88ed5a1e157edec34fe11f282d9c592bedc4b50",
+   "split": "tune"
+  },
+  {
+   "query": "check the auth posture advertised by my host",
+   "expect": "urn:air:www.pathwren.workers.dev:agent:discovery",
+   "key": "urn:air:www.pathwren.workers.dev:agent:discovery",
+   "publisher": "www.pathwren.workers.dev",
+   "manifest": "https://www.pathwren.workers.dev/.well-known/ard.json",
+   "manifest_sha256": "6b1ed276ab7763b0b7002f373bac3d9279a3a314e205f36c18792141b981d331",
+   "split": "holdout"
+  },
+  {
+   "query": "save this GitHub skill to our team library",
+   "expect": "urn:air:www.skillsboard.sh:server:skills-board-mcp",
+   "key": "urn:air:www.skillsboard.sh:server:skills-board-mcp",
+   "publisher": "www.skillsboard.sh",
+   "manifest": "https://www.skillsboard.sh/.well-known/ai-catalog.json",
+   "manifest_sha256": "d9867796dede9d57ec0359b9e986d20ca9fa6cd08a7c33167e9b2ecaf3ec9f5c",
+   "split": "tune"
+  },
+  {
+   "query": "where are Winpot's terms and conditions",
+   "expect": "urn:air:www.winpot.mx:skill:terms-and-conditions",
+   "key": "urn:air:www.winpot.mx:skill:terms-and-conditions",
+   "publisher": "www.winpot.mx",
+   "manifest": "https://winpot.mx/.well-known/ai-catalog.json",
+   "manifest_sha256": "054db1b23c3833f5528e658b9f17423364cbbd43978fea40d1f80f1775ca44bd",
+   "split": "tune"
+  },
+  {
+   "query": "Manage connected X accounts",
+   "expect": "urn:air:xquik.com:server:mcp",
+   "key": "urn:air:xquik.com:server:mcp",
+   "publisher": "xquik.com",
+   "manifest": "https://xquik.com/.well-known/ard.json",
+   "manifest_sha256": "b9b194fbfc87e4d7513df87c92b2d6b440b1c77f2992637bc7a10c1cfbff4738",
+   "split": "tune"
+  },
+  {
+   "query": "how should an agent use yappy.biz",
+   "expect": "urn:air:yappy.biz:skill:yappy",
+   "key": "urn:air:yappy.biz:skill:yappy",
+   "publisher": "yappy.biz",
+   "manifest": "https://yappy.biz/.well-known/ai-catalog.json",
+   "manifest_sha256": "c6e17ec07974219b3375b61720dedf124a42aa49642c133b933581191b0a23e2",
+   "split": "tune"
+  },
+  {
+   "query": "which developer tools have an official MCP server",
+   "expect": "urn:air:zairalabs.ai:guide:mcp-server",
+   "key": "urn:air:zairalabs.ai:guide:mcp-server",
+   "publisher": "zairalabs.ai",
+   "manifest": "https://zairalabs.ai/.well-known/ai-catalog.json",
+   "manifest_sha256": "ac980dec3d1450a6f94d5d712722a2eb1a295e79b4e49efa9d018eee1514e0a6",
+   "split": "holdout"
+  },
+  {
+   "query": "install the Zapier skill for my agent",
+   "expect": "urn:air:zapier.com:skills:catalog",
+   "key": "urn:air:zapier.com:skills:catalog",
+   "publisher": "zapier.com",
+   "manifest": "https://zapier.com/.well-known/ai-catalog.json",
+   "manifest_sha256": "d6661c720eb52a40d5f44190f11e4fbb45c2e4f136c32a9264abc141a75e3e59",
+   "split": "holdout"
+  }
+ ]
+}
