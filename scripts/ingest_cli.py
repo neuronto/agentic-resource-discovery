@@ -3,6 +3,10 @@
 
   python -m scripts.ingest_cli mcp          # the official MCP Registry
   python -m scripts.ingest_cli upstreams    # harvest the four ARD registries
+  python -m scripts.ingest_cli smithery     # the Smithery aggregator
+  python -m scripts.ingest_cli glama        # the Glama aggregator (needs a key)
+  python -m scripts.ingest_cli dockerhub    # Docker's mcp/ namespace
+  python -m scripts.ingest_cli mcpso [n]    # mcp.so via its sitemap
   python -m scripts.ingest_cli crawl f.txt  # well-known paths on a domain list
   python -m scripts.ingest_cli liveness [n] # probe a batch of endpoints
   python -m scripts.ingest_cli introspect [n]  # tools/list on MCP endpoints
@@ -21,7 +25,11 @@ import asyncio, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app import adoption, bench, embed, ingest, liveness, store, tools_index  # noqa: E402
+from app import (adoption, bench, dockerhub, embed, glama, ingest, liveness,  # noqa: E402
+                 mcpso,
+                 smithery,
+                 store,
+                 tools_index)
 
 
 def _num(i: int, default: int) -> int:
@@ -37,6 +45,29 @@ async def main() -> None:
         print("mcp-registry:", await ingest.from_mcp_registry(conn), flush=True)
     if cmd in ("upstreams", "all"):
         print("upstreams:", await ingest.from_upstreams(conn), flush=True)
+    if cmd in ("glama", "all"):
+        # Highest miss rate of any source evaluated: 72% of a 3,000 server sample
+        # was absent from the index. Needs GLAMA_API_KEY; skips cleanly without one.
+        # The backfill (400 pages, 40,000 servers) was a one-off; run
+        # `ingest_cli glama 400` by hand to extend it. Glama's cursor is ordered
+        # newest first (verified: endCursor.createdAt descends page over page), so
+        # a small budget per scheduled run catches everything published since the
+        # last one, without re-walking the whole catalogue four times a day.
+        print("glama:", await glama.from_glama(conn, max_pages=_num(2, 40)), flush=True)
+    if cmd == "mcpso":
+        # Not in `all`: it reads ~18,700 pages, so it runs on its own schedule
+        # rather than inside a six-hourly job that also walks four registries.
+        print("mcpso:", await mcpso.from_mcpso(conn, max_servers=_num(2, 25000)),
+              flush=True)
+    if cmd in ("dockerhub", "all"):
+        # Docker's own mcp/ namespace: containerised servers, a different artifact
+        # from a repo or an endpoint, so some appear nowhere else.
+        print("dockerhub:", await dockerhub.from_dockerhub(conn), flush=True)
+    if cmd in ("smithery", "all"):
+        # An aggregator, not an ARD registry, so it cannot go through upstreams.
+        # Carries community servers never published to the official registry:
+        # 35% of a sample was absent from our index when this was added.
+        print("smithery:", await smithery.from_smithery(conn), flush=True)
     if cmd == "crawl":
         src = Path(sys.argv[2])
         conc = int(sys.argv[3]) if len(sys.argv) > 3 else None
