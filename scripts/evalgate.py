@@ -13,7 +13,14 @@ in the number is a change in our ranking and never an upstream having a bad hour
   * the `holdout` half of the frozen declared set (bench/declared-v1.json):
     recall@10 and MRR on queries publishers wrote about their own resources;
   * the capability battery (scripts/battery.py): hit@5 on ordinary requests whose
-    obvious answer is a named vendor.
+    obvious answer is a named vendor;
+  * known-item queries: each holdout target's own display name, recall@10 and MRR.
+
+And one structural property: `federation: auto` never scores below `none` on the
+holdout. Federated legs are additive by design (rank.py), so auto falling below local
+means that design broke, which is exactly the criticism a published review made of the
+old fusion. That leg touches the network, so it is compared to local measured in the
+same run, never to a pinned number.
 
 Each is a guard on the other. Tuning for publisher queries alone would switch the tool
 leg off and lose "charge a credit card"; tuning for the battery alone is how the 21%
@@ -66,6 +73,38 @@ async def measure() -> dict:
         if want in res:
             hits += 1
             rr += 1.0 / (res.index(want) + 1)
+    # Known-item queries: each holdout target's own display name. Built from the
+    # frozen tasks at run time, so it needs no second file and cannot drift from them.
+    n_hits, n_rr, n_n = 0, 0.0, 0
+    for t in tasks:
+        r = conn.execute("SELECT display_name FROM entries WHERE key=?", (t["key"],)).fetchone()
+        if not r or not r[0] or len(r[0]) < 4:
+            continue
+        n_n += 1
+        try:
+            out = await search.search(conn, r[0], None, 10, "none")
+        except Exception:
+            errors += 1
+            continue
+        res = [bench._norm(x.get("identifier")) for x in out.get("results") or []]
+        want = bench._norm(t["expect"])
+        if want in res:
+            n_hits += 1
+            n_rr += 1.0 / (res.index(want) + 1)
+    # auto on the same tasks: may not fall below local, measured in the same run.
+    a_hits, a_rr, a_fed = 0, 0.0, 0
+    for t in tasks:
+        try:
+            out = await search.search(conn, t["query"], None, 10, "auto")
+        except Exception:
+            errors += 1
+            continue
+        a_fed += bool((out.get("_gate") or {}).get("federated"))
+        res = [bench._norm(x.get("identifier")) for x in out.get("results") or []]
+        want = bench._norm(t["expect"])
+        if want in res:
+            a_hits += 1
+            a_rr += 1.0 / (res.index(want) + 1)
     b5 = b10 = 0
     for q, targets in CASES:
         try:
@@ -84,6 +123,12 @@ async def measure() -> dict:
         "holdout_n": n,
         "recall@10": round(hits / n, 4) if n else 0.0,
         "mrr": round(rr / n, 4) if n else 0.0,
+        "name_n": n_n,
+        "name_recall@10": round(n_hits / n_n, 4) if n_n else 0.0,
+        "name_mrr": round(n_rr / n_n, 4) if n_n else 0.0,
+        "auto_recall@10": round(a_hits / n, 4) if n else 0.0,
+        "auto_mrr": round(a_rr / n, 4) if n else 0.0,
+        "auto_federated": a_fed,
         "battery_n": len(CASES), "battery_hit@5": b5, "battery_hit@10": b10,
         "errors": errors,
         "p50_ms": int(lat[len(lat) // 2]) if lat else None,
@@ -99,9 +144,12 @@ def verdict(cur: dict, base: dict) -> list[str]:
         fails.append(f"instrument: {cur['errors']} searches raised")
     if cur["set_sha256"] != base.get("set_sha256"):
         fails.append("instrument: eval set differs from the one the baseline was pinned on")
-    for m in ("recall@10", "mrr"):
-        if cur[m] < base[m] - TOLERANCE:
+    for m in ("recall@10", "mrr", "name_recall@10", "name_mrr"):
+        if m in base and cur[m] < base[m] - TOLERANCE:
             fails.append(f"{m} {base[m]:.4f} -> {cur[m]:.4f}")
+    for m in ("recall@10", "mrr"):
+        if cur[f"auto_{m}"] < cur[m] - 0.01:
+            fails.append(f"auto below local on {m}: {cur['auto_' + m]:.4f} < {cur[m]:.4f}")
     if cur["battery_hit@5"] < base["battery_hit@5"]:
         fails.append(f"battery hit@5 {base['battery_hit@5']} -> {cur['battery_hit@5']}")
     return fails
@@ -110,7 +158,9 @@ def verdict(cur: dict, base: dict) -> list[str]:
 def main(argv: list[str]) -> int:
     cur = asyncio.run(measure())
     line = (f"holdout recall@10 {cur['recall@10']:.4f} mrr {cur['mrr']:.4f} "
-            f"(n={cur['holdout_n']}) | battery hit@5 {cur['battery_hit@5']}/{cur['battery_n']} "
+            f"(n={cur['holdout_n']}) | names {cur['name_recall@10']:.4f}/{cur['name_mrr']:.4f} "
+            f"| auto {cur['auto_recall@10']:.4f}/{cur['auto_mrr']:.4f} "
+            f"federated {cur['auto_federated']} | battery hit@5 {cur['battery_hit@5']}/{cur['battery_n']} "
             f"| p50 {cur['p50_ms']} ms")
     if "--accept" in argv:
         if cur["errors"]:

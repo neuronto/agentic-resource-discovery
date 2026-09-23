@@ -20,8 +20,10 @@ import urllib.error
 import urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://neuronto.com").rstrip("/")
+# `x-neuronto-probe` on every request: this suite's searches are ours, and
+# counting them as agent demand would put our own queries in a publisher's report.
 UA = {"User-Agent": "neuronto-e2e/1.0", "Content-Type": "application/json",
-      "Accept": "application/json, text/event-stream"}
+      "Accept": "application/json, text/event-stream", "x-neuronto-probe": "1"}
 
 _passed: list[str] = []
 _failed: list[tuple[str, str]] = []
@@ -580,13 +582,16 @@ def t_adoption_checks_both_paths():
 
 
 def t_submit_indexes_a_real_publisher():
-    """Fetched live from the domain, not taken from the form."""
-    s, d = not_rate_limited(*post("/submit", {"domain": "clickhouse.com"}, timeout=60))
+    """Fetched live from the domain, not taken from the form.
+
+    Our own domain, never a third party's: a test that submits a real publisher
+    re-indexes them and can alert on their behalf, for a check about our code."""
+    s, d = not_rate_limited(*post("/submit", {"domain": "neuronto.com"}, timeout=60))
     assert s == 200, f"{s} {d}"
     assert d["status"] == "indexed", d
     assert d["manifest_path"], "no manifest path recorded"
     assert d["resources_indexed"] > 0, d
-    assert d["page"].endswith("/ard-publishers/clickhouse.com"), d["page"]
+    assert d["page"].endswith("/ard-publishers/neuronto.com"), d["page"]
 
 
 def t_submit_rejects_a_domain_without_a_manifest():
@@ -1137,7 +1142,12 @@ def t_score_is_relative_and_the_envelope_says_so():
     assert s == 200, s
     m = d.get("queryMatch")
     assert m, "no queryMatch in the search envelope"
-    assert m["coverage"] == 0.0 and m["confidence"] == "none", \
+    # Two of its four words are real ("nonexistent", "capability"), so a top result
+    # may honestly account for one of them. This asserted exactly 0.0 while the
+    # top slot went to an OR-fallback tool match sharing no word with the query;
+    # that match no longer outranks lexical ones (2026-09-23), and the property
+    # that matters is unchanged: nonsense never reads as a medium or high match.
+    assert m["coverage"] < 0.4 and m["confidence"] in ("none", "low"), \
         f"nonsense query reported {m['confidence']} at coverage {m['coverage']}"
     assert "relative" in m["note"] and "never a trust" in m["note"]
 
@@ -1593,7 +1603,10 @@ def t_a_probe_is_not_a_publishers_demand():
                 h = cand.split("//", 1)[1].split("/", 1)[0].lower()
                 if h and h not in hosts:
                     hosts.append(h)
-    deadline = _t.time() + 8
+    # The log is written by a batching thread nobody waits for; under this
+    # suite's own concurrent load the row has taken longer than 8 s to land
+    # (passed 3/3 alone, inconclusive once in a full run, 2026-09-23).
+    deadline = _t.time() + 25
     seen_with = False
     while _t.time() < deadline:
         for host in hosts[:5]:

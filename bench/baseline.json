@@ -2,13 +2,19 @@
  "set": "declared-v1.json",
  "set_sha256": "7407698a12716e8f336d64564d6dcc708477b8ebf74e9e12dceb25c37d2a714f",
  "holdout_n": 106,
- "recall@10": 0.9151,
- "mrr": 0.7543,
+ "recall@10": 0.934,
+ "mrr": 0.7677,
+ "name_n": 106,
+ "name_recall@10": 0.9623,
+ "name_mrr": 0.8754,
+ "auto_recall@10": 0.934,
+ "auto_mrr": 0.7734,
+ "auto_federated": 15,
  "battery_n": 15,
  "battery_hit@5": 6,
  "battery_hit@10": 7,
  "errors": 0,
- "p50_ms": 476,
+ "p50_ms": 126,
  "weights": {
   "fts": [
    6.0,
@@ -21,5 +27,5 @@
   "tool_strict": 2.0,
   "tool_loose": 0.0
  },
- "ts": 1790171879
+ "ts": 1790175349
 }

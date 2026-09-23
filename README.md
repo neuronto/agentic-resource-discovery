@@ -247,14 +247,42 @@ call has an effect.
 ## Measuring whether any of this works
 
 `GET /bench` publishes ARD-Bench, a head to head retrieval measurement across the public
-ARD registries. Ground truth is the publishers' own `representativeQueries`, so nothing is
-hand labelled, and the harness is `app/bench.py` in this repository.
+ARD registries, and `GET /bench.json` serves the same run as plain JSON with its age.
+The harness is `app/bench.py` and it is refreshed weekly.
+
+**The task set is a file, and it is frozen.** [`bench/declared-v1.json`](bench/declared-v1.json)
+(also served at `/bench/tasks.json`) holds 192 tasks, one per publisher. Each query was read
+verbatim from the manifest on the publisher's own domain, and the task records that
+manifest's URL and the sha256 of the body it came from, so anyone can check that a query
+is the publisher's words and not ours. The file carries a digest over its tasks and is never
+edited in place; a new set is a new version. It is split by publisher into a `tune` half,
+the only half any ranking parameter may be chosen on, and a `holdout` half, which is what
+the benchmark reports.
 
 The response separates two things that are easy to confuse: `coverage`, whether a registry
 indexes the target at all, and `recall@k_when_carried`, whether it retrieves the target
-when it does hold it. It also states its own known bias, and it reports the results that
-do not flatter us. In the current run, federated search scores slightly below lexical only
-and costs far more latency.
+when it does hold it. Our own coverage is 1.0 by construction, because the tasks come from
+resources in this index, and the payload says so.
+
+**Ranking weights are measured, not asserted,** and each one in `app/rank.py` sits next to
+the table it was chosen from. `scripts/evalgate.py` runs daily against a pinned baseline
+([`bench/baseline.json`](bench/baseline.json)): holdout recall@10 and MRR, a battery of
+ordinary capability requests (`scripts/battery.py`) that may not lose a case, and the rule
+that federated search never scores below local search. A drop fails the gate.
+
+**Federation adds coverage, it does not re-rank.** In `federation: auto` the other
+registries are asked only when this index cannot answer with confidence, and what they
+return may add resources this index lacks without reordering the ones it found. On the
+holdout, `auto` and `none` both reach recall@10 0.934, `auto` with the higher MRR, at a
+median of 177 ms against 121 ms.
+
+## What happens to a query
+
+Every search response carries `queryHandling` and a `Neuronto-Query-Handling` header: whether
+the query text was kept, which registries it was sent to for this answer, and whether it was
+embedded. `"federation": "none"` never leaves the service. A search with an API key, or
+carrying `Sec-GPC: 1` or `DNT: 1`, is counted but its text is not kept, and search records
+are deleted after 90 days. The full statement is at [`/privacy`](https://neuronto.com/privacy).
 
 ## Who publishes an ARD manifest
 
