@@ -59,7 +59,7 @@ def _entry(s: dict) -> dict | None:
         "url": url_,
         "description": desc,
         "tags": tags,
-        "representativeQueries": ingest._queries_from(desc, name),
+        "_inferredQueries": ingest._queries_from(desc, name),
     }
 
 

@@ -110,7 +110,7 @@ async def from_mcp_registry(conn, max_pages: int = 1000) -> dict:
                     # Deprecated servers stay findable, labelled, because a caller
                     # may still depend on one; the registry is the one who says so.
                     "tags": ["mcp", "mcp-registry"] + (["deprecated"] if status == "deprecated" else []),
-                    "representativeQueries": _queries_from(desc, sv.get("title") or name),
+                    "_inferredQueries": _queries_from(desc, sv.get("title") or name),
                 }
                 if store.upsert_entry(conn, entry, "mcp-registry"):
                     n += 1

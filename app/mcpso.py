@@ -115,7 +115,7 @@ async def from_mcpso(conn, max_servers: int = 25000, concurrency: int = 6,
                 "url": repo or f"https://mcp.so/servers/{slug}",
                 "description": desc,
                 "tags": ["mcp", "mcp.so"],
-                "representativeQueries": ingest._queries_from(desc, name),
+                "_inferredQueries": ingest._queries_from(desc, name),
             }
             async with lock:
                 if store.upsert_entry(conn, entry, "mcpso"):

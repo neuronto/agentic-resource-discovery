@@ -167,7 +167,7 @@ def build_entry(key: str, api: dict) -> dict | None:
         "type": "application/vnd.oai.openapi+json",
         "url": url,
         "tags": sorted(set(tags)),
-        "representativeQueries": _queries(title, desc, cats),
+        "_inferredQueries": _queries(title, desc, cats),
         "version": str(info.get("version") or "")[:40],
     }
 

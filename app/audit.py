@@ -405,10 +405,10 @@ def competition(conn, domain: str, manifest: dict | None,
     # back to what we already hold for it, and then to its own name.
     if not qs:
         for r in conn.execute(
-                """SELECT rep_queries, display_name FROM entries
+                """SELECT rep_queries_declared, display_name FROM entries
                    WHERE lower(publisher)=? LIMIT 8""", (domain.lower(),)):
             try:
-                qs += [str(q) for q in (json.loads(r["rep_queries"] or "[]"))[:2]]
+                qs += [str(q) for q in (json.loads(r["rep_queries_declared"] or "[]"))[:2]]
             except Exception:
                 pass
             if not qs and r["display_name"]:

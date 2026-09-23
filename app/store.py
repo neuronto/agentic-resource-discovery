@@ -300,6 +300,22 @@ _ADD_COLUMNS = {
     "pay_protocols":   "TEXT",      # "x402,mpp"; NULL when no requirement is known
     "pay_price":       "REAL",      # cheapest known call, in dollars
     "pay_networks":    "TEXT",      # "base,solana"
+    # Provenance of representativeQueries. The spec defines the field as the
+    # publisher's statement of what they want to be found for, and we also
+    # synthesise queries for aggregator entries that never had any (the first
+    # sentence of a description, "<name> for this task"). Both are useful for
+    # MATCHING, but only the first may be presented as, or graded as, what a
+    # publisher wrote. They used to share one unioned column, and on 2026-09-23
+    # 7,530 of 7,898 queries on entries that also carried a publisher-declared
+    # source turned out to be ours.
+    #
+    # `rq_sources` is the truth: {source: {"d": [declared], "i": [inferred]}},
+    # each source's latest statement REPLACING only its own slot, so a query a
+    # publisher deletes stops matching instead of living forever in a union.
+    # `rep_queries` (all of it, for matching) and `rep_queries_declared` (the
+    # publisher's words only, for everything that makes a claim) are derived.
+    "rq_sources":           "TEXT",
+    "rep_queries_declared": "TEXT",
 }
 
 
@@ -480,6 +496,74 @@ def _jlist(v: Any) -> str:
     return json.dumps([str(x) for x in v if x is not None][:40], ensure_ascii=False)
 
 
+# The key a synthesiser writes its queries under. Leading underscore: it is ours,
+# never part of a manifest, and `_qlist` is the only thing that reads it.
+INFERRED_KEY = "_inferredQueries"
+
+# The slot a migrated row's queries sit in until every source that carries the
+# row has restated its own. See `rq_merge`.
+LEGACY = "legacy"
+
+
+def _qlist(v) -> list[str]:
+    if not isinstance(v, list):
+        return []
+    return [s for s in dict.fromkeys(str(q).strip() for q in v) if s]
+
+
+def _slots_of(row, srcs: set[str]) -> dict:
+    """The provenance map of an existing row. A row written before the split has
+    none yet; its union is kept, as inferred, until its sources restate it, so a
+    missing migration can under-claim what a publisher wrote but never over-claim."""
+    try:
+        slots = json.loads(row["rq_sources"]) if row["rq_sources"] else None
+    except Exception:
+        slots = None
+    if isinstance(slots, dict):
+        return slots
+    return {LEGACY: {"d": [], "i": _qlist(json.loads(row["rep_queries"] or "[]"))}}
+
+
+def rq_merge(slots: dict, source: str, e: dict) -> dict:
+    """Replace `source`'s own slot with what this write states.
+
+    Replace, not union: a publisher who deletes a query from their manifest must
+    stop being matched on it. A write that states nothing does not clear the
+    slot, because most sources never state queries at all, and a registry that
+    omits the field on one harvest has not retracted it.
+
+    The legacy slot is dropped once every source carrying the entry has written
+    its own, since by then everything it held has been restated with provenance
+    or has been withdrawn."""
+    d = _qlist(e.get("representativeQueries"))
+    i = [q for q in _qlist(e.get(INFERRED_KEY)) if q not in d]
+    out = dict(slots)
+    if d or i:
+        out[source] = {"d": d, "i": i}
+    else:
+        # Record that this source has spoken since the split, without clearing
+        # anything it said before; that is what lets the legacy slot retire.
+        out.setdefault(source, {"d": [], "i": []})
+    return out
+
+
+def rq_prune_legacy(slots: dict, srcs: set[str]) -> dict:
+    if LEGACY in slots and srcs and srcs <= (set(slots) - {LEGACY}):
+        return {k: v for k, v in slots.items() if k != LEGACY}
+    return slots
+
+
+def rq_derive(slots: dict) -> tuple[list[str], list[str]]:
+    """(everything, for matching; the publisher's words only, for claims)."""
+    decl: list[str] = []
+    for v in slots.values():
+        decl += [q for q in v.get("d", []) if q not in decl]
+    allq = list(decl)
+    for v in slots.values():
+        allq += [q for q in v.get("i", []) if q not in allq]
+    return allq, decl
+
+
 def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
     """Insert or merge one entry.
 
@@ -506,9 +590,8 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
         desc = _s(e.get("description")) or ""
         if len(desc) <= len(row["description"] or ""):
             desc = row["description"]
-        rq = json.loads(row["rep_queries"] or "[]")
-        for q in (e.get("representativeQueries") or []):
-            if q not in rq: rq.append(str(q))
+        slots = rq_prune_legacy(rq_merge(_slots_of(row, srcs), source, e), srcs)
+        rq, rq_decl = rq_derive(slots)
         tags = json.loads(row["tags"] or "[]")
         for t in (e.get("tags") or []):
             if t not in tags: tags.append(str(t))
@@ -518,21 +601,26 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
         conn.execute("""UPDATE entries SET display_name=COALESCE(NULLIF(?,''),display_name),
             description=?, type_raw=COALESCE(NULLIF(?,''),type_raw), type_family=?,
             url=COALESCE(NULLIF(?,''),url), publisher=COALESCE(?,publisher),
-            tags=?, capabilities=?, rep_queries=?, trust_identity=COALESCE(?,trust_identity),
+            tags=?, capabilities=?, rep_queries=?, rq_sources=?, rep_queries_declared=?,
+            trust_identity=COALESCE(?,trust_identity),
             version=COALESCE(NULLIF(?,''),version), sources=?, updated_at=?
             WHERE key=?""",
             (_s(e.get("displayName")) or "", _s(desc) or "", _s(e.get("type") or e.get("mediaType")) or "",
              fam, _s(url) or "", pub, json.dumps(tags), json.dumps(caps), json.dumps(rq),
+             json.dumps(slots), json.dumps(rq_decl),
              trust, _s(e.get("version")) or "", json.dumps(sorted(srcs)), now, key))
     else:
+        slots = rq_merge({}, source, e)
+        rq, rq_decl = rq_derive(slots)
         conn.execute("""INSERT INTO entries(key,identifier,identifier_raw,display_name,description,
-            type_raw,type_family,url,publisher,tags,capabilities,rep_queries,trust_identity,
-            version,sources,first_seen,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            type_raw,type_family,url,publisher,tags,capabilities,rep_queries,rq_sources,
+            rep_queries_declared,trust_identity,version,sources,first_seen,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (key, _s(ident or url), _s(ident_raw), _s(e.get("displayName")) or "",
              _s(e.get("description")) or "",
              _s(e.get("type") or e.get("mediaType")) or "", fam, _s(url) or "", pub,
-             _jlist(e.get("tags")), _jlist(e.get("capabilities")), _jlist(e.get("representativeQueries")),
+             _jlist(e.get("tags")), _jlist(e.get("capabilities")), json.dumps(rq),
+             json.dumps(slots), json.dumps(rq_decl),
              trust, _s(e.get("version")) or "", json.dumps([source]), now, now))
     declared = payments.from_entry(e)
     if declared:
@@ -899,6 +987,16 @@ def _label(identifier: str | None, url: str | None) -> str | None:
     return ident or None
 
 
+def _declared(r) -> list[str]:
+    """rep_queries_declared, tolerating a row selected without that column."""
+    try:
+        return json.loads(r["rep_queries_declared"] or "[]")
+    except (IndexError, KeyError):
+        return []
+    except Exception:
+        return []
+
+
 def row_to_entry(r: sqlite3.Row) -> dict:
     """The public shape. `identifier` is the only term the spec requires."""
     j = lambda s: json.loads(s or "[]")
@@ -910,7 +1008,10 @@ def row_to_entry(r: sqlite3.Row) -> dict:
         "description": r["description"] or None,
         "tags": j(r["tags"]) or None,
         "capabilities": j(r["capabilities"]) or None,
-        "representativeQueries": j(r["rep_queries"]) or None,
+        # The publisher's words only. Queries we synthesised still drive matching
+        # (they are in `rep_queries` and the FTS row) but are never presented under
+        # a field the spec defines as the publisher's statement.
+        "representativeQueries": _declared(r) or None,
     }
     if r["trust_identity"]:
         out["trustManifest"] = {"identity": r["trust_identity"]}

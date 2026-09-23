@@ -54,7 +54,7 @@ async def from_dockerhub(conn, max_pages: int = 20) -> dict:
                     "url": f"https://hub.docker.com/r/mcp/{name}",
                     "description": desc or f"Containerised MCP server published by Docker as mcp/{name}.",
                     "tags": ["mcp", "docker", "container"],
-                    "representativeQueries": ingest._queries_from(desc, name),
+                    "_inferredQueries": ingest._queries_from(desc, name),
                 }
                 if store.upsert_entry(conn, entry, "dockerhub"):
                     n += 1
