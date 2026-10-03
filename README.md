@@ -190,11 +190,14 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /manifest/build` | Generate a manifest for a domain from resources fetched there. |
 | `GET /m/{host}.json` | That generated manifest, hosted. |
 | `GET /agents.md` | What to call and how, for an agent that has already arrived. |
-| `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. |
+| `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. `GET /claim` describes the steps. |
 | `POST /private/entries` | Register internal services. Key required. |
 | `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
 | `GET /.well-known/ard.json` | Our own publisher manifest. |
 | `GET /openapi.json` | OpenAPI 3.1 for everything above. |
+| `GET /.well-known/api-catalog` | RFC 9727 catalogue of the descriptions above. |
+
+Every `GET` route also answers `HEAD` with the same headers and no body.
 
 ### Knowing when the answer is weak
 
