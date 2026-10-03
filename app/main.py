@@ -1173,6 +1173,10 @@ PAGE_CACHE = {"Cache-Control": "public, max-age=900"}
 VIEWS: dict[str, Any] = {}
 # Fields a deployment adds to, or replaces in, the JSON privacy summary, for what its own pages load.
 PRIVACY_OVERRIDES: dict[str, Any] = {}
+# A deployment may add fields to a successful submission's answer. Each hook takes
+# the publisher host and returns a dict; it can only add keys, never replace one, and
+# a hook that fails is skipped, so it can never cost a publisher their answer.
+SUBMIT_EXTRAS: list = []
 
 
 @app.get("/", include_in_schema=False)
@@ -1780,6 +1784,8 @@ else:
             "host_arg": _host_arg,
             "page_cache": PAGE_CACHE,
             "limited": _LIMITED,
+            "submit_extras": SUBMIT_EXTRAS,
+            "privacy_overrides": PRIVACY_OVERRIDES,
         })
         print(f"commercial layer: {', '.join(COMMERCIAL)}", flush=True)
     except Exception as _e:                      # never take the registry down with it
@@ -2321,6 +2327,13 @@ async def submit_endpoint(body: dict, request: Request = None) -> JSONResponse:
             host = (d.get("identifier") or "").split(":")[2] if (d.get("identifier") or "").count(":") > 2 else ""
             host = host or str(b.get("domain") or "").strip().lower()
             if host:
+                # Before the badge, which is always the last thing suggested.
+                for hook in SUBMIT_EXTRAS:
+                    try:
+                        for k, v in (hook(host) or {}).items():
+                            d.setdefault(k, v)
+                    except Exception:
+                        pass
                 d["badge"] = {
                     **badge.snippet(host),
                     "customise": f"{config.PUBLIC_BASE}/badge?domain={host}",
