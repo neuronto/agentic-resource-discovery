@@ -32,6 +32,7 @@ from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.routing import Match
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
 
@@ -47,6 +48,36 @@ app = FastAPI(title="Neuronto ARD Registry: Agentic Resource Discovery (ARD) Ind
               servers=[{"url": config.PUBLIC_BASE}],
               license_info={"name": "Apache-2.0",
                             "url": "https://www.apache.org/licenses/LICENSE-2.0"})
+# HEAD is GET without the body (RFC 9110 9.3.2), and a general-purpose server must
+# support both. FastAPI registers GET routes for GET only, so until 2026-10-03 every
+# page answered HEAD with 405: the homepage, /llms.txt, /.well-known/ard.json, the
+# agent card and the MCP server card. Link checkers, uptime monitors and manifest
+# validators probe with HEAD, so to them our manifest did not exist. A route that
+# declares HEAD itself (media, openapi.json) keeps its own handling; every other HEAD
+# runs as GET and the body is dropped, so the headers, Content-Length included, are
+# exactly the ones GET sends. Added first, so it sits innermost: analytics and the
+# 405 middleware outside it still see HEAD.
+class _HeadAsGet:
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method") != "HEAD":
+            return await self.app(scope, receive, send)
+        for r in app.router.routes:
+            if r.matches(scope)[0] == Match.FULL:
+                return await self.app(scope, receive, send)
+
+        async def headers_only(message):
+            if message.get("type") == "http.response.body":
+                message = {"type": "http.response.body", "body": b"",
+                           "more_body": message.get("more_body", False)}
+            await send(message)
+
+        await self.app({**scope, "method": "GET"}, receive, headers_only)
+
+
+app.add_middleware(_HeadAsGet)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"],
                    expose_headers=["X-Response-Time-Ms", "X-RateLimit-Limit",
@@ -1574,6 +1605,29 @@ def hosted_manifest(host: str):
     })
 
 
+@app.get("/claim", include_in_schema=False)
+def claim_howto(request: Request):
+    """How to prove a domain. The console links here; until 2026-10-03 the link
+    answered 405, because /claim existed only as the POST that starts a proof."""
+    view = VIEWS.get("claim")
+    if view is not None and _wants_html(request):
+        return view(request)
+    B = config.PUBLIC_BASE
+    return JSONResponse({
+        "what": ("prove you control a domain and receive an API key scoped to it, "
+                 "for registering private entries"),
+        "steps": [
+            f'POST {B}/claim with {{"domain": "example.com"}}: returns a DNS TXT record',
+            "publish that TXT record on the domain",
+            f"POST {B}/claim/verify with the same domain: returns the key, shown once",
+        ],
+        "txt_prefix": publisher.TXT_PREFIX,
+        "not_needed_for": (f"being listed or found. Submitting an endpoint "
+                           f"(POST {B}/submit) needs no proof"),
+        "html": f"{B}/claim",
+    }, headers={"Cache-Control": "public, max-age=3600", "Vary": "Accept"})
+
+
 @app.post("/claim")
 def claim_start(body: dict) -> JSONResponse:
     """Begin proving you own a domain."""
@@ -2065,6 +2119,31 @@ def liveness_feed(dead: int = Query(0, ge=0, le=1),
     if len(items) == limit and rows:
         body["nextCursor"] = rows[-1]["rowid"]
     return JSONResponse(body, headers={"Cache-Control": "public, max-age=600"})
+
+
+# RFC 9727: where an agent looks for this host's API descriptions. Five agent and
+# curl sessions asked for it in the week to 2026-10-03 and got a 404.
+@app.get("/.well-known/api-catalog", include_in_schema=False)
+def api_catalog():
+    B = config.PUBLIC_BASE
+    return JSONResponse({"linkset": [{
+        "anchor": B,
+        "service-desc": [{"href": f"{B}/openapi.json", "type": "application/json",
+                          "title": "OpenAPI description"},
+                         {"href": f"{B}/apis.json", "type": "application/json",
+                          "title": "APIs.json"}],
+        "service-doc": [{"href": f"{B}/api-docs", "type": "text/html",
+                         "title": "API reference"},
+                        {"href": f"{B}/connect", "type": "text/html",
+                         "title": "Setup for every client"},
+                        {"href": f"{B}/llms.txt", "type": "text/plain",
+                         "title": "Agent guide"}],
+        "service-meta": [{"href": f"{B}/.well-known/ard.json", "type": "application/json",
+                          "title": "Agentic Resource Discovery manifest"}],
+        "status": [{"href": f"{B}/reliability", "type": "text/html",
+                    "title": "Observed reliability"}],
+    }]}, media_type="application/linkset+json",
+        headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/privacy", include_in_schema=False)

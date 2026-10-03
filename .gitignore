@@ -8,6 +8,9 @@ __pycache__/
 
 # runtime state and anything with credentials in it
 .env
+# scratch work, backups (an .env copy lived here unignored) and run logs
+_work/
+*.log
 *.db
 *.db-wal
 *.db-shm

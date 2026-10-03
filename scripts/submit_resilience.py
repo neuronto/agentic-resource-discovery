@@ -38,6 +38,14 @@ os.environ["NEURONTO_TELEGRAM"] = "0"
 os.environ["NEURONTO_INTROSPECT_TIMEOUT"] = "4"
 
 from app import main, submissions, store  # noqa: E402  (after the env is set)
+from app import resolve  # noqa: E402
+
+# /submit refuses non-public addresses (383824a), and the fake MCP server here
+# listens on loopback, so from that commit until 2026-10-03 this suite stopped at
+# its first check with a KeyError. Admit loopback for this process only; every
+# other host still goes through the real check.
+_safe = resolve.is_safe_target
+resolve.is_safe_target = lambda h: h in ("127.0.0.1", "localhost") or _safe(h)
 
 # ---------------------------------------------------------------- fake server
 MODE = {"state": "down"}
