@@ -112,8 +112,16 @@ async def embed_query(text: str) -> list[float] | None:
     return vecs[0]
 
 
+# Why the last batch failed. `embed_texts` must never raise, so a dead key used to
+# come back as None and the jobs reported a quiet `embedded: 0` for six days
+# (2026-10-25 to 10-31) while 8,968 entries went without a vector. The jobs now
+# report this string, so a failure reads as a failure.
+last_error: str | None = None
+
+
 async def embed_texts(texts: list[str]) -> list[list[float]] | None:
     """Embed a batch. Returns None if embedding is unavailable, never raises."""
+    global last_error
     if not config.EMBED_API_KEY or not texts:
         return None
     payload = {"model": config.EMBED_MODEL, "input": texts}
@@ -124,16 +132,30 @@ async def embed_texts(texts: list[str]) -> list[list[float]] | None:
                                       "Content-Type": "application/json"},
                              timeout=config.EMBED_TIMEOUT_S)
         if r.status_code != 200:
+            last_error = f"HTTP {r.status_code}: {r.text[:160]}"
             return None
         data = r.json().get("data") or []
         out = [d.get("embedding") for d in data]
-        return out if all(isinstance(v, list) and v for v in out) else None
-    except Exception:
+        if all(isinstance(v, list) and v for v in out):
+            return out
+        last_error = "malformed embedding response"
         return None
+    except Exception as e:
+        last_error = f"{type(e).__name__}: {str(e)[:160]}"
+        return None
+
+
+def _result(done: int) -> dict:
+    out = {"embedded": done, "model": config.EMBED_MODEL}
+    if last_error:
+        out["error"] = last_error
+    return out
 
 
 async def build(conn, limit: int = 2000, only_missing: bool = True) -> dict:
     """Embed entries that have no current vector."""
+    global last_error
+    last_error = None
     if not config.EMBED_API_KEY:
         return {"embedded": 0, "skipped": "no embedding key configured"}
     where = ("LEFT JOIN vectors v ON v.key = e.key WHERE v.key IS NULL"
@@ -173,7 +195,7 @@ async def build(conn, limit: int = 2000, only_missing: bool = True) -> dict:
             done += 1
         conn.commit()
     invalidate()
-    return {"embedded": done, "model": config.EMBED_MODEL}
+    return _result(done)
 
 
 # How much tool text one entry contributes. The cap exists because a handful of
@@ -218,6 +240,8 @@ async def build_tools(conn, limit: int = 2000, only_missing: bool = True) -> dic
     so if it turns out to help nothing, deleting the table restores exactly the
     previous behaviour.
     """
+    global last_error
+    last_error = None
     if not config.EMBED_API_KEY:
         return {"embedded": 0, "skipped": "no embedding key configured"}
     join = ("LEFT JOIN tool_vectors tv ON tv.key = e.key WHERE tv.key IS NULL"
@@ -263,7 +287,7 @@ async def build_tools(conn, limit: int = 2000, only_missing: bool = True) -> dic
             done += 1
         conn.commit()
     invalidate()
-    return {"embedded": done, "model": config.EMBED_MODEL}
+    return _result(done)
 
 
 def invalidate() -> None:
@@ -273,7 +297,13 @@ def invalidate() -> None:
     rebuild from scratch on the request path; marking it stale keeps serving
     the previous build, minutes out of date at worst, while the rebuild runs
     behind the request.
+
+    With an external builder this does nothing: the builder notices new vectors
+    by itself (`build_if_changed`). Backdating the file there was harmful, it
+    made every worker schedule the in-process rebuild the external one replaced.
     """
+    if config.DENSE_BUILDER == "external":
+        return
     vec_p, _, _ = _dense_paths()
     try:
         old = time.time() - config.DENSE_REBUILD_S - 1
@@ -298,38 +328,90 @@ def load(conn, force: bool = False):
     Never call it from the event loop; `ensure_matrix` is the query path's
     entry point. Writes are atomic, so a worker mapping the file never sees a
     half-written build.
+
+    Streamed: rows go from the cursor to the file a chunk at a time, so peak
+    memory is one chunk. The first version held the matrix three times over
+    (`fetchall`, `b"".join`, `astype`), which grows with the index until it no
+    longer fits beside the processes serving search. A memmap target was tried
+    and measured several times larger than this (its dirty pages count as
+    resident), so this writes plain bytes.
     """
     vec_p, key_p, _ = _dense_paths()
     try:
         np = _np()
     except Exception:
         return None
-    rows = conn.execute(
-        "SELECT key, vec, dim FROM vectors "
-        "UNION ALL SELECT key, vec, dim FROM tool_vectors").fetchall()
-    if not rows:
+    sql = ("SELECT key, vec, dim FROM vectors "
+           "UNION ALL SELECT key, vec, dim FROM tool_vectors")
+    first = conn.execute(sql + " LIMIT 1").fetchone()
+    if not first:
         return None
-    dim = rows[0]["dim"]
+    dim = first["dim"]
+    tmp_v, tmp_k = vec_p + ".tmp", key_p + ".tmp"
+    keys: list[str] = []
     # Both vectors of every entry, in one matrix. The key list therefore holds an
     # entry key twice, once for its prose and once for its tools, and
     # `dense_ranking` collapses them keeping the better rank. Fusing here rather
     # than running two matmuls keeps the query path a single matrix multiply.
-    keep = [r for r in rows if r["dim"] == dim and len(r["vec"]) == dim * 4]
-    if not keep:
+    cur = conn.execute(sql)
+    with io.open(tmp_v, "wb") as out:
+        while True:
+            rows = cur.fetchmany(2048)
+            if not rows:
+                break
+            rows = [r for r in rows if r["dim"] == dim and len(r["vec"]) == dim * 4]
+            if not rows:
+                continue
+            c = np.frombuffer(b"".join(r["vec"] for r in rows),
+                              dtype="<f4").reshape(len(rows), dim)
+            norms = np.linalg.norm(c, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            out.write((c / norms).astype("<f4").tobytes())
+            keys.extend(r["key"] for r in rows)
+    cur.close()
+    conn.commit()                         # do not hold the read snapshot
+    if not keys:
+        os.unlink(tmp_v)
         return None
-    m = np.frombuffer(b"".join(r["vec"] for r in keep),
-                      dtype="<f4").reshape(len(keep), dim).astype("float32")
-    norms = np.linalg.norm(m, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    m /= norms
-    tmp_v, tmp_k = vec_p + ".tmp", key_p + ".tmp"
-    m.tofile(tmp_v)
     with io.open(tmp_k, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(r["key"] for r in keep))
+        fh.write("\n".join(keys))
     os.replace(tmp_v, vec_p)
     os.replace(tmp_k, key_p)
-    del m
     return True
+
+
+def _stamp(conn) -> str:
+    """What the matrix was built from: the count and newest write of both tables."""
+    r = conn.execute("SELECT (SELECT COUNT(*) FROM vectors), (SELECT MAX(ts) FROM vectors), "
+                     "(SELECT COUNT(*) FROM tool_vectors), (SELECT MAX(ts) FROM tool_vectors)"
+                     ).fetchone()
+    conn.commit()
+    return ",".join(str(x) for x in r)
+
+
+def build_if_changed(conn, force: bool = False) -> dict:
+    """The external builder's entry point (`ingest_cli dense`, on a timer).
+
+    Builds outside every serving process, so its memory is its own and a slow
+    build costs search nothing. Skips when no vector was written since the last
+    build, so a frequent timer costs a stat and two counts.
+    """
+    vec_p, _, _ = _dense_paths()
+    stamp_p = vec_p + ".stamp"
+    now = _stamp(conn)
+    try:
+        prev = io.open(stamp_p, encoding="utf-8").read().strip()
+    except OSError:
+        prev = ""
+    if not force and prev == now and os.path.exists(vec_p):
+        return {"built": False, "reason": "unchanged"}
+    t0 = time.time()
+    ok = load(conn, force=True)
+    if ok:
+        with io.open(stamp_p + ".tmp", "w", encoding="utf-8") as fh:
+            fh.write(now)
+        os.replace(stamp_p + ".tmp", stamp_p)
+    return {"built": bool(ok), "rows": now, "seconds": round(time.time() - t0, 1)}
 
 
 def _rebuild() -> None:
@@ -422,6 +504,8 @@ async def ensure_matrix():
     dense leg, which contributes nothing to RRF, and a later one has it.
     """
     vec_p, _, _ = _dense_paths()
+    if config.DENSE_BUILDER == "external":
+        return _map_file()          # a timer builds it; a worker only ever maps it
     try:
         age = time.time() - os.path.getmtime(vec_p)
     except OSError:

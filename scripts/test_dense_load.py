@@ -138,6 +138,58 @@ async def run():
     check("invalidate marks it stale", time.time() - os.path.getmtime(VEC) > embed.config.DENSE_REBUILD_S)
     clear()
 
+    # ── 8. the streamed build is the same matrix the old one was ──────────
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE vectors(key TEXT, model TEXT, dim INT, vec BLOB, ts INT)")
+    db.execute("CREATE TABLE tool_vectors(key TEXT, model TEXT, dim INT, vec BLOB, n INT, ts INT)")
+    rng = np.random.default_rng(3)
+    prose = rng.normal(size=(5000, 8)).astype("<f4")
+    tools = rng.normal(size=(7, 8)).astype("<f4")
+    db.executemany("INSERT INTO vectors VALUES(?,?,8,?,1)",
+                   [(f"e{i}", "m", v.tobytes()) for i, v in enumerate(prose)])
+    db.executemany("INSERT INTO tool_vectors VALUES(?,?,8,?,1,1)",
+                   [(f"e{i}", "m", v.tobytes()) for i, v in enumerate(tools)])
+    db.execute("INSERT INTO vectors VALUES('bad','m',4,?,1)", (b"x" * 16,))
+    db.commit()
+    clear()
+    check("a streamed build succeeds", embed.load(db) is True)
+    want = np.vstack([prose, tools])
+    want = want / np.linalg.norm(want, axis=1, keepdims=True)
+    got = np.fromfile(VEC, dtype="<f4").reshape(-1, 8)
+    keys = open(KEYS).read().split("\n")
+    check("every row of both tables, in order, normalised",
+          got.shape == want.shape and np.allclose(got, want, atol=1e-6))
+    check("a vector of the wrong size is skipped", "bad" not in keys and len(keys) == 5007)
+    check("no temporary file is left behind", not os.path.exists(VEC + ".tmp"))
+
+    # ── 9. the external builder: skips when nothing changed, workers only map ──
+    clear()
+    r1 = embed.build_if_changed(db)
+    r2 = embed.build_if_changed(db)
+    check("the external builder builds once", r1["built"] and not r2["built"])
+    db.execute("INSERT INTO vectors VALUES('new','m',8,?,2)", (prose[0].tobytes(),))
+    db.commit()
+    check("and again once a vector is written", embed.build_if_changed(db)["built"])
+    builds["n"] = 0
+    embed._rebuild = slow_rebuild
+    embed.config.DENSE_BUILDER = "external"
+    t = time.time() - embed.config.DENSE_REBUILD_S - 60
+    os.utime(VEC, (t, t))
+    m, keys = await embed.ensure_matrix()
+    embed.invalidate()
+    await asyncio.sleep(slow_s + 0.3)
+    check("with an external builder a stale file is mapped, never rebuilt by a worker",
+          m is not None and builds["n"] == 0)
+    check("and invalidate leaves the file alone", abs(os.path.getmtime(VEC) - t) < 1)
+    embed.config.DENSE_BUILDER = "inprocess"
+    embed._rebuild = real_rebuild
+    for p in (VEC + ".stamp",):
+        try: os.unlink(p)
+        except OSError: pass
+    clear()
+
 
 asyncio.run(run())
 print(f"  {_p} passed, {_f} failed")

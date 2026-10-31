@@ -11,6 +11,7 @@
   python -m scripts.ingest_cli liveness [n] # probe a batch of endpoints
   python -m scripts.ingest_cli introspect [n]  # tools/list on MCP endpoints
   python -m scripts.ingest_cli embed [n]    # build dense vectors (prose + tools)
+  python -m scripts.ingest_cli dense [force]  # build the dense matrix out of process
   python -m scripts.ingest_cli adoption     # re-probe the adoption watchlist
   python -m scripts.ingest_cli bench [k] [n]# run ARD-Bench
   python -m scripts.ingest_cli reindex      # rebuild the FTS table
@@ -91,6 +92,11 @@ async def main() -> None:
         # tools have been read.
         print("embed-tools:", await embed.build_tools(conn, limit=_num(2, 2000)),
               flush=True)
+    if cmd == "dense":
+        # Build the shared dense matrix in this process, only if a vector changed.
+        # `dense force` rebuilds regardless.
+        force = len(sys.argv) > 2 and sys.argv[2] == "force"
+        print("dense:", embed.build_if_changed(conn, force=force), flush=True)
     if cmd in ("adoption", "all"):
         print("adoption:", await adoption.refresh_watchlist(conn), flush=True)
     if cmd == "bench":

@@ -160,6 +160,12 @@ EMBED_CACHE_S  = _i("NEURONTO_EMBED_CACHE_S", 300)
 # follows the data rather than a clock.
 DENSE_REBUILD_S = _i("NEURONTO_DENSE_REBUILD_S", 3600)
 DENSE_ENABLED  = _b("NEURONTO_DENSE", True)
+# Who builds the matrix. "inprocess" (the default, right for a small index): a
+# search worker rebuilds it on a thread when stale. "external": workers only map
+# it, and `python -m scripts.ingest_cli dense` on a timer builds it in its own
+# process. A large index wants the second, so a build can never take memory from
+# the processes serving search.
+DENSE_BUILDER  = os.getenv("NEURONTO_DENSE_BUILDER", "inprocess").strip().lower()
 
 # Adoption tracking. The watchlist is public and deliberately includes the
 # organisations in the ARD working group, because the interesting measurement
