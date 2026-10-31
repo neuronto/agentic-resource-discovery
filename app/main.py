@@ -1786,6 +1786,9 @@ else:
             "limited": _LIMITED,
             "submit_extras": SUBMIT_EXTRAS,
             "privacy_overrides": PRIVACY_OVERRIDES,
+            # The one indexing path, for a deployment that lists on its own schedule
+            # (a review queue): the same verification as POST /submit, no second copy.
+            "submit_now": lambda body, source="review": _submit(body, source=source),
         })
         print(f"commercial layer: {', '.join(COMMERCIAL)}", flush=True)
     except Exception as _e:                      # never take the registry down with it
