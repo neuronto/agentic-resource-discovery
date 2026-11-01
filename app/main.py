@@ -379,7 +379,7 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     ref = secrets.token_hex(4)
     try:
         events.emit("error", a=request.url.path[:80], b=type(exc).__name__,
-                    ok=False, detail=f"{ref} {str(exc)[:140]}")
+                    ok=False, detail=f"{ref} {str(exc)[:140]}", scope=request.scope)
     except Exception:
         pass
     return JSONResponse(status_code=500, headers={"Cache-Control": "no-store"}, content={
