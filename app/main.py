@@ -1090,6 +1090,11 @@ indefinitely. To be indexed here, send the domain or the endpoint.
 Nothing is taken on the submitter's word: everything listed was fetched from
 the domain that claims it. Publishing guide: https://neuronto.com/publish
 
+## Pricing
+
+Searching, listing and claiming are free. Prices, free allowances and how to
+pay are listed as JSON at {B}/x402 (or {B}/pricing with Accept: application/json).
+
 ## What is different here
 
 - federation: auto is implemented. The ARD specification makes it the default
