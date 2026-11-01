@@ -1213,8 +1213,9 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
     # outbound call, so it carries the same allowance as the HTTP submit route
     # it delegates to; limiting the whole endpoint would throttle search for no
     # reason. Checked here because the tool name is only known from the body.
-    if (body or {}).get("method") == "tools/call" and \
-            ((body.get("params") or {}).get("name")) == "publish_resource":
+    params = (body or {}).get("params")
+    params = params if isinstance(params, dict) else {}       # a malformed one is answered by handle()
+    if (body or {}).get("method") == "tools/call" and params.get("name") == "publish_resource":
         ok, retry, hdrs = limits.check("submit", request)
         if not ok:
             _, verified = limits.caller(request)
@@ -1232,7 +1233,7 @@ async def mcp_endpoint(body: dict, request: Request) -> Response:
     finally:
         _PROBE.reset(tok)
     if (body or {}).get("method") == "tools/call":
-        events.emit("mcp_call", a=str((body.get("params") or {}).get("name") or "?")[:60],
+        events.emit("mcp_call", a=str(params.get("name") or "?")[:60],
                     ok=not ((payload or {}).get("result") or {}).get("isError", False))
     if payload is None:
         return Response(status_code=status)

@@ -24,6 +24,21 @@ from typing import Any
 
 from . import config, payments, search, store
 
+
+def arguments_of(params: Any) -> dict | None:
+    """The tool arguments as a dict, or None when the caller sent something that is not one.
+
+    Some clients send `arguments` as a JSON-encoded string; that is read as the object it holds."""
+    if not isinstance(params, dict):
+        return None
+    args = params.get("arguments") or {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return None
+    return args if isinstance(args, dict) else None
+
 PROTOCOL = "2025-06-18"
 
 TOOLS = [
@@ -221,8 +236,11 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
 
     if method == "tools/call":
         params = body.get("params") or {}
+        args = arguments_of(params)
+        if args is None:
+            return 200, {"jsonrpc": "2.0", "id": rid, "error": {
+                "code": -32602, "message": "invalid params: `params` and `params.arguments` must be JSON objects"}}
         name = params.get("name")
-        args = params.get("arguments") or {}
 
         if name == "publish_resource":
             endpoint = str(args.get("endpoint") or "").strip()
