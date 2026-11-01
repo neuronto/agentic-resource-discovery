@@ -76,3 +76,7 @@ website/
 
 # Server-only: hardcodes server paths and reads the analytics store. Never public.
 app/badge_watch.py
+
+# every .env variant (backups included): production secrets, never in this public tree
+.env.*
+!.env.example
