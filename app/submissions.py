@@ -247,6 +247,19 @@ def latest_for(kind: str, target: str) -> dict | None:
         return None
 
 
+def recently_indexed(kind: str, target: str, within_s: int = 86400) -> int:
+    """Submissions of this target that indexed in the window, our probes excluded."""
+    c = _conn()
+    if c is None:
+        return 0
+    try:
+        return c.execute("""SELECT COUNT(*) FROM submissions WHERE kind=? AND target=?
+                            AND status='indexed' AND probe=0 AND created>=?""",
+                         (kind, target, int(time.time()) - within_s)).fetchone()[0]
+    except Exception:
+        return 0
+
+
 def due(limit: int = 5, now: int | None = None) -> list[dict]:
     """Claim up to `limit` pending rows whose time has come. The claim is a
     conditional UPDATE, so two workers running this loop never take the same

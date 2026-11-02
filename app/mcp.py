@@ -19,10 +19,37 @@ reimplementing it, so the two cannot drift apart.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 
 from . import config, payments, search, store
+
+
+_INSTRUCTIONS = {"t": 0.0, "text": ""}
+
+
+def instructions(conn) -> str:
+    """What a client puts in front of its model on connect.
+
+    Most sessions that complete the handshake list the tools and stop; nothing
+    told the model when this server is worth calling. The count is read at most
+    once an hour, because every connect asks for it."""
+    if time.time() - _INSTRUCTIONS["t"] > 3600 or not _INSTRUCTIONS["text"]:
+        try:
+            n = f"{store.counts(conn)['entries']:,} "
+        except Exception:
+            n = ""
+        _INSTRUCTIONS["text"] = (
+            f"Neuronto is an Agentic Resource Discovery (ARD) registry: an index of {n}MCP servers, "
+            "APIs and agents, with the tools each one was verified to offer. Use it when the task "
+            "needs a capability you do not have. Call find_tool with the task in plain words, for "
+            "example \"convert a PDF to text\", to get specific tools and the endpoint that serves "
+            "each; call find_resource to find whole servers, APIs or agents. Every result carries the "
+            "URL to connect to. registry_stats describes the index, and publish_resource lists your "
+            "own MCP server or domain.")
+        _INSTRUCTIONS["t"] = time.time()
+    return _INSTRUCTIONS["text"]
 
 
 def arguments_of(params: Any) -> dict | None:
@@ -226,7 +253,8 @@ async def handle(conn, body: dict) -> tuple[int, dict | None]:
             "protocolVersion": PROTOCOL,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "neuronto", "version": "1.0.0",
-                           "title": "Neuronto Discovery"}}}
+                           "title": "Neuronto Discovery"},
+            "instructions": instructions(conn)}}
 
     if method == "tools/list":
         return 200, {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}}

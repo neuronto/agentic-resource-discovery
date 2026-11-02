@@ -1308,8 +1308,35 @@ def sse_transport_not_served() -> Response:
 
 @app.get("/.well-known/agent-card.json", include_in_schema=False)
 @app.get("/.well-known/agent.json", include_in_schema=False)
+# Some clients resolve the card relative to the endpoint URL. Served, not redirected:
+# not every JSON client follows a redirect, and every one of these sessions gave up.
+@app.get("/a2a/.well-known/agent-card.json", include_in_schema=False)
+@app.get("/a2a/.well-known/agent.json", include_in_schema=False)
+@app.get("/a2a/agent-card.json", include_in_schema=False)
 def agent_card():
     return JSONResponse(a2a.card(), headers=CACHE)
+
+
+# MCP clients look for authorization metadata before connecting. There is none to
+# find, and a bare Not Found left some of them unsure whether to go on.
+_NO_AUTH_PATHS = [f"{pre}/.well-known/{doc}{suf}"
+                  for pre in ("", "/mcp")
+                  for doc in ("oauth-protected-resource", "oauth-authorization-server",
+                              "openid-configuration")
+                  for suf in (("", "/mcp") if pre == "" else ("",))]
+
+
+def no_authorization() -> JSONResponse:
+    B = config.PUBLIC_BASE
+    return JSONResponse(status_code=404, headers={"Cache-Control": "public, max-age=3600"}, content={
+        "error": "not_found",
+        "detail": ("no authorization required: connecting needs no OAuth, login or token. "
+                   "POST JSON-RPC to /mcp (streamable HTTP)."),
+        "mcp": f"{B}/mcp", "a2a": f"{B}/a2a", "setup": f"{B}/connect"})
+
+
+for _p in _NO_AUTH_PATHS:
+    app.add_api_route(_p, no_authorization, methods=["GET"], include_in_schema=False)
 
 
 @app.post("/a2a", include_in_schema=False)
@@ -1333,7 +1360,13 @@ def a2a_no_stream() -> Response:
     return JSONResponse({"jsonrpc": "2.0", "id": None,
                          "error": {"code": -32000,
                                    "message": "POST a JSON-RPC message/send here",
-                                   "data": {"card": "/.well-known/agent-card.json"}}},
+                                   "data": {"card": f"{config.PUBLIC_BASE}/.well-known/agent-card.json",
+                                            "example": {"jsonrpc": "2.0", "id": 1, "method": "message/send",
+                                                        "params": {"message": {
+                                                            "role": "user", "messageId": "1",
+                                                            "parts": [{"kind": "text",
+                                                                       "text": "find a tool that converts a PDF to text"}]}}},
+                                            "mcp": f"{config.PUBLIC_BASE}/mcp"}}},
                         status_code=405,
                         headers={"Allow": "POST", "Cache-Control": "no-store"})
 
@@ -2358,6 +2391,15 @@ async def submit_endpoint(body: dict, request: Request = None) -> JSONResponse:
         if resp.status_code < 400 and d.get("status") == "indexed":
             host = (d.get("identifier") or "").split(":")[2] if (d.get("identifier") or "").count(":") > 2 else ""
             host = host or str(b.get("domain") or "").strip().lower()
+            # One client re-sent the same 15 indexed endpoints 210 times in a day.
+            kind, target = (("endpoint", d["endpoint"]) if d.get("endpoint")
+                            else ("domain", d.get("domain") or host))
+            n = 0 if probe else submissions.recently_indexed(kind, target)
+            if n >= 3:
+                d["resubmit"] = {"needed": False, "detail": (
+                    f"already indexed {n} times in the last 24 hours. Re-submitting is not needed: "
+                    "listed servers are re-checked automatically. Submit again after you change "
+                    "what it serves.")}
             if host:
                 # Before the badge, which is always the last thing suggested.
                 for hook in SUBMIT_EXTRAS:
