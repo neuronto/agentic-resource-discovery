@@ -1116,6 +1116,8 @@ under the name Agent Resource Discovery: draft-bu-dawn-ard-architecture,
 draft-jimenez-dawn-ard-initial-contact and draft-bu-dawn-ard-discovery. Same
 protocol; manifests are served as application/ard+json, and a registry entry
 carries the base URL. Write-up: {B}/blog/ard-ietf-internet-draft
+Daily readiness of every known ARD publisher against the drafts: {B}/ard-ietf-readiness
+(data: {B}/data/ard-ietf-readiness.json, CC BY 4.0)
 
 ## What is an ARD registry?
 
