@@ -1378,7 +1378,7 @@ def t_no_top_level_definition_is_duplicated_in_the_app():
 
 def t_malformed_and_oversized_input_is_refused_not_crashed():
     s, d = post("/search", {"query": {"text": "a" * 2001}, "federation": "none"})
-    assert s == 400 and d.get("error") == "invalid_request", (s, d)
+    assert s == 400 and d.get("error") == "INVALID_ARGUMENT" and d.get("status") == 400, (s, d)
     req = urllib.request.Request(BASE + "/search", data=("[" * 3000 + "]" * 3000).encode(),
                                  headers=UA, method="POST")
     try:
@@ -1868,6 +1868,57 @@ def main():
             print(f"   - {n}: {e}")
     return 1 if _failed else 0
 
+
+
+# --------------------------------------------------------------------------
+# The IETF ARD drafts of 2026-10-30 (draft-bu-dawn-ard-discovery-00,
+# draft-jimenez-dawn-ard-initial-contact-00)
+
+def _raw(path, method="GET", body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(BASE + path, data=data, method=method,
+                                 headers={**UA, "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+def t_manifest_is_served_as_application_ard_json():
+    """Initial contact treats a well-known response of any other media type as "no manifest"."""
+    s, h, b = _raw("/.well-known/ard.json?v=" + str(int(time.time())))
+    ct = {k.lower(): v for k, v in h.items()}.get("content-type", "")
+    assert s == 200 and ct.startswith("application/ard+json"), f"{s} {ct}"
+    reg = [e for e in json.loads(b)["entries"] if e["type"] == "application/ai-registry+json"]
+    assert reg and reg[0]["url"].rstrip("/") == BASE.rstrip("/"), \
+        f"the registry entry must carry the base URL, not an endpoint: {reg}"
+
+
+def t_root_advertises_the_manifest_with_link_rel_ard():
+    s, h, _ = _raw("/", method="HEAD")
+    link = {k.lower(): v for k, v in h.items()}.get("link", "")
+    assert 'rel="ard"' in link and "/.well-known/ard.json" in link, link
+
+
+def t_search_pages_with_next_page_token():
+    s, d = post("/search", {"query": {"text": "weather forecast"}, "federation": "none", "pageSize": 3})
+    assert s == 200 and d.get("nextPageToken"), d.keys()
+    s2, d2 = post("/search", {"query": {"text": "weather forecast"}, "federation": "none",
+                              "pageSize": 3, "pageToken": d["nextPageToken"]})
+    _, whole = post("/search", {"query": {"text": "weather forecast"}, "federation": "none", "pageSize": 6})
+    ids = [r["identifier"] for r in d["results"] + d2["results"]]
+    assert ids == [r["identifier"] for r in whole["results"]], "two pages are not the first six results"
+
+
+def t_discovery_errors_are_problem_details():
+    for body in ({"query": {}}, {"query": {"text": "x"}, "federation": "sideways"},
+                 {"query": {"text": "x"}, "federation": "none", "pageToken": "zz"}):
+        s, h, b = _raw("/search", "POST", body)
+        ct = {k.lower(): v for k, v in h.items()}.get("content-type", "")
+        d = json.loads(b)
+        assert s == 400 and ct.startswith("application/problem+json"), (s, ct, body)
+        assert d["error"] == "INVALID_ARGUMENT" and d["status"] == 400 and d["title"] and d["type"], d
 
 if __name__ == "__main__":
     sys.exit(main())

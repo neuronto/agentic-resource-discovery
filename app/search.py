@@ -552,7 +552,8 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         dense_task = asyncio.ensure_future(
             _dense_keys(conn, text, max(page_size, 20) * 3))
 
-    ups = await federation.fan_out(text, page_size=max(page_size, 20), budget_ms=budget_ms)
+    ups = await federation.fan_out(text, page_size=min(max(page_size, 20), 100),
+                                   budget_ms=budget_ms)
 
     dense_order: list[str] = []
     dense_state = "off"

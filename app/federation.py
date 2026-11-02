@@ -118,7 +118,10 @@ async def _one(client: httpx.AsyncClient, up: tuple, text: str, page_size: int,
     uid, name, url, source = up
     t0 = time.perf_counter()
     try:
-        r = await client.post(url, json={"query": {"text": text}, "pageSize": page_size},
+        # "none": we fan out to every registry ourselves, so asking one to fan
+        # out again could send the query back here.
+        r = await client.post(url, json={"query": {"text": text}, "pageSize": page_size,
+                                         "federation": "none"},
                               headers=_HEADERS,
                               timeout=timeout or config.UPSTREAM_TIMEOUT_S)
         ms = int((time.perf_counter() - t0) * 1000)

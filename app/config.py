@@ -30,6 +30,7 @@ DB_PATH  = Path(os.getenv("NEURONTO_DB", str(DATA_DIR / "neuronto.db")))
 # Search defaults, straight from the spec (§5.3.2).
 PAGE_SIZE_DEFAULT = 10
 PAGE_SIZE_MAX     = 100
+SEARCH_DEPTH_MAX  = 200     # pageToken pages through this many ranked results
 
 # Federation. `auto` is the spec default and the thing no other registry
 # implements. Upstreams are mirrored into our own index by the ingest job, so

@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import Match
 from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
@@ -365,10 +367,47 @@ async def _wrong_verb_is_405(request: Request, call_next):
                            f"Allowed: {', '.join(sorted(allowed))}. Contract: /api-docs"})
 
 
+# The discovery interface answers errors as RFC 9457 Problem Details with a
+# machine-readable code (draft-bu-dawn-ard-discovery, section 4.2.5). Scoped to
+# the three discovery endpoints; the rest of the API keeps its own shape.
+ARD_PATHS = ("/search", "/explore", "/agents")
+_PROBLEMS = {400: ("INVALID_ARGUMENT", "Invalid Argument"),
+             401: ("UNAUTHENTICATED", "Unauthenticated"),
+             403: ("PERMISSION_DENIED", "Permission Denied"),
+             404: ("NOT_FOUND", "Not Found"),
+             429: ("RATE_LIMIT_EXCEEDED", "Rate Limit Exceeded"),
+             500: ("INTERNAL_ERROR", "Internal Error"),
+             501: ("NOT_IMPLEMENTED", "Not Implemented")}
+
+
+def ard_problem(status: int, detail: str, headers: dict | None = None, **extra) -> JSONResponse:
+    code, title = _PROBLEMS[status]
+    return JSONResponse(status_code=status, headers=headers, media_type="application/problem+json",
+                        content={"type": "https://agenticresourcediscovery.org/problems/"
+                                         + code.lower().replace("_", "-"),
+                                 "title": title, "status": status, "detail": detail,
+                                 "error": code, **extra})
+
+
+def _is_ard(request: Request) -> bool:
+    return (request.url.path.rstrip("/") or "/") in ARD_PATHS
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if _is_ard(request):
+        first = (exc.errors() or [{}])[0]
+        where = ".".join(str(x) for x in first.get("loc", ()) if x not in ("body", "query"))
+        return ard_problem(400, f"{where or 'request'}: {first.get('msg', 'invalid value')}")
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
+
+
 @app.exception_handler(RecursionError)
 async def _too_deep(request: Request, exc: RecursionError) -> JSONResponse:
     # A body nested thousands of levels deep exhausts the parser's stack. That
     # is the caller's problem, and it was being reported as ours.
+    if _is_ard(request):
+        return ard_problem(400, "request body is nested too deeply")
     return JSONResponse(status_code=400, content={"error": "invalid_request",
                                                   "detail": "request body is nested too deeply"})
 
@@ -388,6 +427,10 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
                     ok=False, detail=f"{ref} {str(exc)[:140]}", scope=request.scope)
     except Exception:
         pass
+    if _is_ard(request):
+        return ard_problem(500, "this is a fault on our side, not in your request, and it has "
+                                "been recorded. Quote the ref if you write to us.",
+                           headers={"Cache-Control": "no-store"}, ref=ref)
     return JSONResponse(status_code=500, headers={"Cache-Control": "no-store"}, content={
         "error": "internal",
         "ref": ref,
@@ -434,29 +477,21 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     if isinstance(q, str):
         q = {"text": q}
     elif not isinstance(q, dict):
-        return JSONResponse(status_code=400, content={
-            "error": "invalid_request",
-            "detail": "query must be an object with a `text` field (spec 5.3.2), "
-                      "for example {\"query\": {\"text\": \"read a pdf\"}}."})
+        return ard_problem(400, "query must be an object with a `text` field (spec 5.3.2), "
+                      "for example {\"query\": {\"text\": \"read a pdf\"}}.")
     raw_text = q.get("text")
     # A wrong type here used to reach .strip() and raise, which answered 500 and
     # told the caller it was our fault. It is theirs, and the message says which.
     if raw_text is not None and not isinstance(raw_text, str):
-        return JSONResponse(status_code=400, content={
-            "error": "invalid_request",
-            "detail": ("query.text must be a string (spec 5.3.2), got "
+        return ard_problem(400, ("query.text must be a string (spec 5.3.2), got "
                        f"{type(raw_text).__name__}. For example "
-                       "{\"query\": {\"text\": \"read a pdf\"}}.")})
+                       "{\"query\": {\"text\": \"read a pdf\"}}."))
     text = (raw_text or "").strip()
     if not text:
-        return JSONResponse(status_code=400, content={
-            "error": "invalid_request",
-            "detail": "query.text is required for Search (spec 5.3.2)."})
+        return ard_problem(400, "query.text is required for Search (spec 5.3.2).")
     if len(text) > 2000:
-        return JSONResponse(status_code=400, content={
-            "error": "invalid_request",
-            "detail": "query.text is longer than 2000 characters. A query is a request "
-                      "in a sentence or two, not a document."})
+        return ard_problem(400, "query.text is longer than 2000 characters. A query is a request "
+                      "in a sentence or two, not a document.")
     # The spec nests filter inside query (5.3.2). A caller who puts it at the top
     # level previously got unfiltered results and no indication anything was
     # wrong, which is worse than either honouring it or rejecting it. We honour
@@ -470,6 +505,19 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
     except (TypeError, ValueError):
         page_size = config.PAGE_SIZE_DEFAULT
     mode = str(body.get("federation") or "auto")
+    if mode not in ("auto", "referrals", "none"):
+        return ard_problem(400, f"federation must be auto, referrals or none, not {mode[:40]!r}.")
+    # pageToken is the offset of the next page, opaque to the caller.
+    offset = 0
+    if body.get("pageToken") is not None:
+        try:
+            offset = max(0, int(str(body["pageToken"])))
+        except ValueError:
+            return ard_problem(400, "pageToken is not one this registry issued. Send the "
+                                    "nextPageToken of a previous response, or omit it.")
+        if offset + page_size > config.SEARCH_DEPTH_MAX:
+            return ard_problem(400, f"results are ranked to a depth of {config.SEARCH_DEPTH_MAX}; "
+                                    "this page lies beyond it.")
     # Only the federated modes go outbound, so only they are limited. Local
     # search is the product and stays unmetered.
     if mode in ("auto", "referrals"):
@@ -480,8 +528,8 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
             body_out = limits.too_many("search_fed", retry, hdrs, verified)
             body_out["detail"] += (" Set \"federation\": \"none\" to search this index "
                                    "only, which is not limited.")
-            return JSONResponse(status_code=429, content=body_out,
-                                headers={**hdrs, "retry-after": str(retry)})
+            return ard_problem(429, body_out["detail"], headers={**hdrs, "retry-after": str(retry)},
+                               **{k: v for k, v in body_out.items() if k not in ("error", "detail")})
 
     t0 = time.perf_counter()
     conn = db()
@@ -508,8 +556,11 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
                             min(int(raw_budget), config.FEDERATION_BUDGET_MAX_MS))
         except ValueError:
             budget_ms = None
-    out = await search.search(conn, text, flt, page_size, mode, owner_domain=owner,
+    # One more than the page, so we know whether another page exists.
+    out = await search.search(conn, text, flt, offset + page_size + 1, mode, owner_domain=owner,
                               budget_ms=budget_ms)
+    more = len(out["results"]) > offset + page_size
+    out["results"] = out["results"][offset:offset + page_size]
     took = int((time.perf_counter() - t0) * 1000)
     fed_ok = sum(1 for f in (out.get("_federated") or []) if f.get("ok"))
     # The homepage asks twice for one search: this index first, because it
@@ -536,6 +587,8 @@ async def search_endpoint(body: dict, request: Request) -> JSONResponse:
                     n=len(cleaned), ok=bool(cleaned))
     if out.get("referrals"):
         payload["referrals"] = out["referrals"]
+    if more:
+        payload["nextPageToken"] = str(offset + page_size)
     fed = out.get("_federated") or []
     gate = out.get("_gate")
     if gate and not gate["federated"]:
@@ -811,7 +864,9 @@ def _manifest() -> dict:
             "identifier": "urn:air:neuronto.com:registry:neuronto",
             "displayName": "Neuronto ARD Registry: Agentic Resource Discovery (ARD) registry",
             "type": "application/ai-registry+json",
-            "url": f"{B}/search",
+            # The base URL: a client appends /search, /explore or /agents
+            # (ard-spec section 5.3 since 2026-09-23, IETF draft section 4.2).
+            "url": B,
             "description": ("A federated ARD registry and index. Implements "
                             "federation: auto with reciprocal rank fusion across every other "
                             "public ARD registry, normalises the competing MCP media types and "
@@ -926,11 +981,14 @@ def apis_json():
     }, headers={"Cache-Control": "public, max-age=3600"})
 
 
+ARD_MEDIA_TYPE = "application/ard+json"
+
+
 @app.get("/.well-known/ard.json", include_in_schema=False)
-def ard_json(): return JSONResponse(_manifest(), headers=CACHE)
+def ard_json(): return JSONResponse(_manifest(), headers=CACHE, media_type=ARD_MEDIA_TYPE)
 
 @app.get("/.well-known/ai-catalog.json", include_in_schema=False)
-def ai_catalog(): return JSONResponse(_manifest(), headers=CACHE)
+def ai_catalog(): return JSONResponse(_manifest(), headers=CACHE, media_type=ARD_MEDIA_TYPE)
 
 @app.get("/.well-known/did.json", include_in_schema=False)
 def did_json():
@@ -1207,11 +1265,16 @@ PRIVACY_OVERRIDES: dict[str, Any] = {}
 SUBMIT_EXTRAS: list = []
 
 
+_ARD_LINK = f'<{config.PUBLIC_BASE}/.well-known/ard.json>; rel="ard"; type="application/ard+json"'
+
+
 @app.get("/", include_in_schema=False)
 def home(request: Request):
     view = VIEWS.get("home")
     if view is not None:
-        return view(request)
+        resp = view(request)
+        resp.headers.append("Link", _ARD_LINK)
+        return resp
     B = config.PUBLIC_BASE
     c = store.counts(db())
     return JSONResponse({
@@ -1224,7 +1287,7 @@ def home(request: Request):
         "mcp": f"{B}/mcp", "a2a": f"{B}/a2a",
         "openapi": f"{B}/openapi.json", "reference": f"{B}/api-docs",
         "llms": f"{B}/llms.txt", "agents": f"{B}/agents.md",
-    }, headers={"Cache-Control": "public, max-age=300"})
+    }, headers={"Cache-Control": "public, max-age=300", "Link": _ARD_LINK})
 
 
 # ─────────────────────────── MCP wrapper (§5.3.5) ───────────────────────────
@@ -1664,7 +1727,7 @@ def hosted_manifest(host: str):
         return JSONResponse(status_code=404, content={
             "error": "not_built",
             "detail": f"POST {config.PUBLIC_BASE}/manifest/build with this domain first"})
-    return JSONResponse(json.loads(r["v"]), headers={
+    return JSONResponse(json.loads(r["v"]), media_type=ARD_MEDIA_TYPE, headers={
         "Cache-Control": "public, max-age=1800",
         "X-Manifest-Source": ("generated by neuronto.com from resources fetched on "
                               "this domain; not authored by the domain owner"),
