@@ -1111,6 +1111,12 @@ An agentic resource is anything an AI client can call to get work done. ARD
 answers "what is available for this task?" and then gets out of the way. It is a
 discovery layer, not a runtime, and does not replace MCP or A2A.
 
+Since 30 October 2026 ARD is also three IETF Internet-Drafts in the DAWN effort,
+under the name Agent Resource Discovery: draft-bu-dawn-ard-architecture,
+draft-jimenez-dawn-ard-initial-contact and draft-bu-dawn-ard-discovery. Same
+protocol; manifests are served as application/ard+json, and a registry entry
+carries the base URL. Write-up: {B}/blog/ard-ietf-internet-draft
+
 ## What is an ARD registry?
 
 A registry indexes the resource descriptions publishers serve on their own
@@ -1122,7 +1128,7 @@ offer at /.well-known/ard.json. Neuronto is an ARD registry and a publisher.
 {c['entries']} resources from {c['publishers']} publishers, {c['live']} verified
 to respond. Refreshed continuously.
 
-## API (ARD v0.91, no key, no signup)
+## API (ARD v0.91 and the IETF drafts, no key, no signup)
 
 - POST {B}/search    {{"query":{{"text":"..."}},"federation":"auto"}}
 - POST {B}/explore   facet counts over the index

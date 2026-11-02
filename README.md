@@ -25,6 +25,11 @@ ARD answers one question, **"what is available for this task?"**, and then gets 
 of the way. It is not a runtime and does not replace MCP or A2A. It tells an agent
 what exists; the agent connects using the resource's own protocol.
 
+Since **30 October 2026** ARD is also three IETF Internet-Drafts in the DAWN effort
+(Discovery of Agents With Names), under the name **Agent Resource Discovery**. Same
+protocol, same `/.well-known/ard.json`, same `urn:air` identifiers. This registry follows
+both the specification (v0.91) and the drafts; see [IETF drafts](#ietf-drafts) below.
+
 ## The problem it solves
 
 Today an agent can only use capabilities someone installed for it in advance. Every
@@ -178,7 +183,7 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /search` | Ranked results. `federation`: `auto` (default), `referrals`, `none`. |
+| `POST /search` | Ranked results. `federation`: `auto` (default), `referrals`, `none`. Pages with `pageSize`, `pageToken` and `nextPageToken`. |
 | `POST /explore` | Facet counts over the index. |
 | `GET /agents` | Deterministic paginated listing, for browsing rather than ranking. |
 | `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. `GET` and `DELETE` answer `405`: there is no server-initiated stream, every tool answers inside the request that asked. |
@@ -193,11 +198,14 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. `GET /claim` describes the steps. |
 | `POST /private/entries` | Register internal services. Key required. |
 | `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
-| `GET /.well-known/ard.json` | Our own publisher manifest. |
+| `GET /.well-known/ard.json` | Our own publisher manifest, served as `application/ard+json`. Its `application/ai-registry+json` entry carries the base URL, `https://neuronto.com`. |
 | `GET /openapi.json` | OpenAPI 3.1 for everything above. |
 | `GET /.well-known/api-catalog` | RFC 9727 catalogue of the descriptions above. |
 
-Every `GET` route also answers `HEAD` with the same headers and no body.
+Every `GET` route also answers `HEAD` with the same headers and no body. The root answers
+with `Link: <https://neuronto.com/.well-known/ard.json>; rel="ard"`, and errors from
+`/search`, `/explore` and `/agents` are RFC 9457 Problem Details
+(`application/problem+json`) carrying the draft's codes, for example `INVALID_ARGUMENT`.
 
 ### Knowing when the answer is weak
 
@@ -286,6 +294,39 @@ the query text was kept, which registries it was sent to for this answer, and wh
 embedded. `"federation": "none"` never leaves the service. A search with an API key, or
 carrying `Sec-GPC: 1` or `DNT: 1`, is counted but its text is not kept, and search records
 are deleted after 90 days. The full statement is at [`/privacy`](https://neuronto.com/privacy).
+
+## IETF drafts
+
+On 30 October 2026 ARD was submitted to the IETF as three Internet-Drafts. They are
+individual drafts, version 00, valid until 3 May 2027; not an RFC.
+
+| Draft | Covers |
+|---|---|
+| [draft-bu-dawn-ard-architecture](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-architecture/) | Roles, deployment settings, design principles, the three-domain trust model |
+| [draft-jimenez-dawn-ard-initial-contact](https://datatracker.ietf.org/doc/draft-jimenez-dawn-ard-initial-contact/) | Finding a manifest: the well-known URI, SVCB at `_index._agents`, DNS-SD `_ard._tcp`, `Link: rel="ard"`, Multicast DNS |
+| [draft-bu-dawn-ard-discovery](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-discovery/) | Entry and manifest format (CDDL), `/search`, `/explore`, `/agents`, errors, federation, IANA registrations |
+
+What this registry does for each requirement that differs from v0.91 of the specification:
+
+| Requirement | Here | Check |
+|---|---|---|
+| Manifest media type `application/ard+json` | Yes | `curl -sI https://neuronto.com/.well-known/ard.json` |
+| Registry entry `url` is the base URL | Yes | the `application/ai-registry+json` entry in the manifest |
+| `Link: rel="ard"` on `HEAD /` | Yes | `curl -sI https://neuronto.com/` |
+| SVCB at `_index._agents.<domain>` (optional) | Yes | `dig _index._agents.neuronto.com TYPE64` |
+| DNS-SD `_ard._tcp` (optional) | Not yet | the SVCB record carries the same entry point; DNS-SD matters most for enumerating several manifests |
+| Problem Details errors with draft codes | Yes | `POST /search` with `{"query":{}}` |
+| Federation bounded in hops | Yes, one hop: upstream registries are asked with `federation: none` | |
+| `pageToken` / `nextPageToken` on `/search` | Yes | `POST /search` with `"pageSize": 3` |
+| Score 0 to 100 and `source` on every result | Yes | |
+
+The specification's conformance tool still reports PASS with 0 errors and 0 warnings for
+both the manifest and the registry.
+
+On 2 November 2026 we checked the 460 domains our crawler knows publish a manifest. 179
+serve one at `/.well-known/ard.json`, **none of them as `application/ard+json`** (170 as
+`application/json`); 34 send `Link: rel="ard"` on the root; 50 publish an SVCB record at
+`_index._agents`, of which 14 lead to a manifest; none publish a DNS-SD record.
 
 ## Who publishes an ARD manifest
 
@@ -453,6 +494,10 @@ query their own text accounts for, which means the same thing at any size.
 
 - [Agentic Resource Discovery](https://agenticresourcediscovery.org/spec), v0.91
 - [ards-project/ard-spec](https://github.com/ards-project/ard-spec)
+- IETF Internet-Drafts, Agent Resource Discovery (October 2026):
+  [architecture](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-architecture/),
+  [initial contact](https://datatracker.ietf.org/doc/draft-jimenez-dawn-ard-initial-contact/),
+  [manifest and lookup](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-discovery/)
 
 ## Licence
 
