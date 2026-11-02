@@ -48,11 +48,28 @@ CONFORMANT_TYPES = {
 
 
 async def _get(client: httpx.AsyncClient, url: str) -> tuple[int | None, str]:
+    st, body, _ = await _get_h(client, url)
+    return st, body
+
+
+async def _get_h(client: httpx.AsyncClient, url: str) -> tuple[int | None, str, dict]:
     try:
         r = await client.get(url)
-        return r.status_code, r.text
+        return r.status_code, r.text, {k.lower(): v for k, v in r.headers.items()}
     except Exception:
-        return None, ""
+        return None, "", {}
+
+
+async def _svcb(client: httpx.AsyncClient, domain: str) -> bool | None:
+    """An SVCB record at _index._agents.<domain> (initial contact draft, 4.2.1), over DoH.
+    Only a real SVCB answer counts: a wildcard CNAME answers every name."""
+    try:
+        r = await client.get("https://cloudflare-dns.com/dns-query", timeout=5,
+                             params={"name": f"_index._agents.{domain}", "type": "SVCB"},
+                             headers={"accept": "application/dns-json"})
+        return any(a.get("type") == 64 for a in (r.json().get("Answer") or []))
+    except Exception:
+        return None
 
 
 async def discovery(client: httpx.AsyncClient, base: str) -> dict:
@@ -66,9 +83,22 @@ async def discovery(client: httpx.AsyncClient, base: str) -> dict:
     case is one timeout, whatever the domain does.
     """
     out: dict[str, Any] = {"paths": {}, "manifest": None, "manifest_url": None}
-    (wk, lg, rb, hp) = await asyncio.gather(
-        _get(client, base + WELL_KNOWN), _get(client, base + LEGACY),
-        _get(client, base + "/robots.txt"), _get(client, base + "/"))
+    (wkh, lg, rb, hph, svcb) = await asyncio.gather(
+        _get_h(client, base + WELL_KNOWN), _get(client, base + LEGACY),
+        _get(client, base + "/robots.txt"), _get_h(client, base + "/"),
+        _svcb(client, base.split("://", 1)[-1]))
+    wk, hp = wkh[:2], hph[:2]
+    # What the IETF drafts of October 2026 add. Reported, not scored: the score's
+    # rubric is published, and a draft three days old should not move a grade.
+    ct = (wkh[2].get("content-type") or "").split(";")[0].strip().lower()
+    link = hph[2].get("link") or ""
+    out["ietf"] = {
+        "media_type": {"ok": wkh[0] == 200 and ct == "application/ard+json", "value": ct or None,
+                       "want": "application/ard+json"},
+        "link_header": {"ok": bool(re.search(r'rel="?ard"?', link)), "value": link[:200] or None},
+        "svcb_index": {"ok": svcb, "name": "_index._agents." + base.split("://", 1)[-1],
+                       "optional": True},
+    }
 
     for label, path, (st, body) in (("well_known", WELL_KNOWN, wk), ("legacy", LEGACY, lg)):
         ok = st == 200 and body.strip().startswith("{")
@@ -276,6 +306,15 @@ def recommendations(disc: dict, conf: dict, cov: list[dict], domain: str = "") -
         out.append("Your manifest is only on the predecessor path. A conformant "
                    "consumer MUST fetch /.well-known/ard.json and MAY ignore "
                    "ai-catalog.json, so serve both.")
+    ietf = disc.get("ietf") or {}
+    if disc["paths"]["well_known"]["found"] and not (ietf.get("media_type") or {}).get("ok", True):
+        out.append("Serve /.well-known/ard.json as application/ard+json (it is served as "
+                   f"{ietf['media_type'].get('value') or 'no type'}). The IETF ARD drafts of October 2026 "
+                   "register that type, and a client that follows them may treat any other as no "
+                   "manifest. Anything that reads JSON still reads it.")
+    if ietf.get("link_header") and not ietf["link_header"]["ok"]:
+        out.append('Answer HEAD / with Link: </.well-known/ard.json>; rel="ard". The IETF '
+                   "initial contact draft has clients read that header before parsing any HTML.")
     missing = [k for k, v in disc["paths"].items() if not v["found"]]
     if "agentmap" in missing:
         out.append("Add an Agentmap: line to robots.txt pointing at your manifest. "
@@ -348,6 +387,7 @@ async def run(domain: str, local_hits: int = 0) -> dict:
     return {"domain": dom, "checked_at": int(time.time()),
             "took_ms": int((time.perf_counter() - t0) * 1000),
             "discovery": disc["paths"], "manifest_url": disc["manifest_url"],
+            "ietf": disc.get("ietf"),
             "conformance": conf, "coverage": cov,
             "score": score(disc, conf, cov),
             "recommendations": recommendations(disc, conf, cov, dom),

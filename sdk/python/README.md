@@ -50,6 +50,16 @@ Salesforce and Snowflake.
 It answers one question, *"what is available for this task?"*, then gets out of the
 way. It is a discovery layer, not a runtime, and it does not replace MCP or A2A.
 
+Since 30 October 2026 ARD is also three IETF Internet-Drafts, under the name **Agent
+Resource Discovery**. Same manifest, same path. Two serving details matter more under
+them, and `ard-publish check` now reports both:
+
+- serve `/.well-known/ard.json` as **`application/ard+json`**; a client that follows the
+  drafts may treat any other media type as no manifest
+- answer `HEAD /` with **`Link: </.well-known/ard.json>; rel="ard"`**
+
+An SVCB record at `_index._agents.<your-domain>` is optional and is reported too.
+
 ## Why this package exists
 
 Publishing a manifest is a small job that is easy to get subtly wrong, and **the
@@ -189,6 +199,9 @@ Helpers are provided for each resource kind:
 ## Links
 
 - [Agentic Resource Discovery specification](https://agenticresourcediscovery.org/spec)
+- IETF Internet-Drafts: [architecture](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-architecture/),
+  [initial contact](https://datatracker.ietf.org/doc/draft-jimenez-dawn-ard-initial-contact/),
+  [manifest and lookup](https://datatracker.ietf.org/doc/draft-bu-dawn-ard-discovery/)
 - [Publishing guide](https://neuronto.com/publish)
 - [Free ARD audit, which registries return you](https://neuronto.com/console)
 - [Neuronto, the federated ARD index](https://neuronto.com)

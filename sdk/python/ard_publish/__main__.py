@@ -27,7 +27,7 @@ REGISTRY = os.getenv("ARD_REGISTRY", "https://neuronto.com").rstrip("/")
 
 def _call(path: str, payload: dict) -> dict:
     """POST to the registry. A refusal is returned as data, never raised."""
-    headers = {"content-type": "application/json", "user-agent": "ard-publish/1.2"}
+    headers = {"content-type": "application/json", "user-agent": "ard-publish/1.3"}
     key = os.getenv("ARD_KEY", "").strip()
     if key:
         headers["authorization"] = f"Bearer {key}"
@@ -77,6 +77,10 @@ def _init(domain: str) -> int:
     print("# and in your <head>:", file=sys.stderr)
     for line in m.link_tags().splitlines():
         print("#   " + line, file=sys.stderr)
+    # The IETF ARD drafts of October 2026 (draft-bu-dawn-ard-discovery,
+    # draft-jimenez-dawn-ard-initial-contact).
+    print("# Serve it with Content-Type: application/ard+json, and answer HEAD / with", file=sys.stderr)
+    print(f'#   Link: <https://{domain}/.well-known/ard.json>; rel="ard"', file=sys.stderr)
     print(f"#\n# Then: ard-publish validate .well-known/ard.json", file=sys.stderr)
     print(f"# And once it is live:  ard-publish submit {domain}", file=sys.stderr)
     print(f"# Last step, once indexed: add the badge, {REGISTRY}/badge?domain={domain}",
@@ -198,7 +202,7 @@ def _status(target: str) -> int:
         path = "/submit/status?endpoint=" + urllib.parse.quote(target, safe="")
     else:
         path = "/submit/status?domain=" + urllib.parse.quote(target, safe="")
-    req = urllib.request.Request(REGISTRY + path, headers={"user-agent": "ard-publish/1.2"})
+    req = urllib.request.Request(REGISTRY + path, headers={"user-agent": "ard-publish/1.3"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             d = json.loads(r.read().decode() or "{}")
