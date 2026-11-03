@@ -156,7 +156,8 @@ async def _rate_limit(request: Request, call_next):
     return resp
 
 
-events.install(app)
+# events.install(app) is at the END of this module: analytics must be the outermost
+# middleware, or a response produced by a layer outside it is never recorded.
 
 _conn: sqlite3.Connection | None = None
 
@@ -3343,6 +3344,14 @@ if _website is not None:
         print(f"website failed to load: {type(_e).__name__}: {_e}", flush=True)
 
 
-# LAST, so it is the outermost of every middleware the engine, the commercial package
-# and the website registered: a client hang-up raised in any of them ends here.
+# The two outermost layers, added last because the last one added is the outermost.
+#
+# The hang-up layer sits outside every middleware the engine, the commercial package
+# and the website registered, so a client hang-up raised in any of them ends there.
 app.add_middleware(_ClientGoneLayer)
+#
+# Analytics sits outside everything, the hang-up layer included, so it records every
+# response the service sends. Until 2026-11-04 it was installed early, which put the
+# commercial meters OUTSIDE it: every paywall refusal (402) they answered never reached
+# the recorder. 34 refusals a day per caller, for weeks, left no trace in the hits.
+events.install(app)
