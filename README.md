@@ -199,6 +199,7 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /private/entries` | Register internal services. Key required. |
 | `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
 | `GET /.well-known/ard.json` | Our own publisher manifest, served as `application/ard+json`. Its `application/ai-registry+json` entry carries the base URL, `https://neuronto.com`. |
+| `GET /v0.1/servers`, `GET /v0.1/servers/{name}/versions[/{version}]` | The MCP Registry v0.1 read API, so an MCP host can use this index as its server gallery. `/verified/v0.1/...` serves only servers whose endpoint answered a handshake. See below. |
 | `GET /openapi.json` | OpenAPI 3.1 for everything above. |
 | `GET /.well-known/api-catalog` | RFC 9727 catalogue of the descriptions above. |
 
@@ -206,6 +207,47 @@ Every `GET` route also answers `HEAD` with the same headers and no body. The roo
 with `Link: <https://neuronto.com/.well-known/ard.json>; rel="ard"`, and errors from
 `/search`, `/explore` and `/agents` are RFC 9457 Problem Details
 (`application/problem+json`) carrying the draft's codes, for example `INVALID_ARGUMENT`.
+
+### As the MCP registry of an IDE
+
+MCP hosts that accept a custom registry URL read the
+[MCP Registry v0.1 API](https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/api/openapi.yaml):
+they append `/v0.1/servers` to a base URL. This deployment serves that API at two base URLs.
+
+| Base URL | What the gallery lists |
+|---|---|
+| `https://neuronto.com` | The official MCP Registry's latest record for every server this index holds, passed through as published, plus independently published remote servers whose endpoint answered an MCP `initialize` and reported its version. |
+| `https://neuronto.com/verified` | Only servers whose remote endpoint answered an MCP handshake, or answered `401`/`403` (sign-in required) or an x402 `402` (payment required), and was reachable at the last liveness check. |
+
+Every record validates against the `ServerResponse` schema of that OpenAPI, and the build
+checks it before storing it. What this index observed goes beside the record, never into it,
+under `_meta["com.neuronto/registry"]`:
+
+```json
+"com.neuronto/registry": {
+  "identifier": "urn:air:ac.tandem:mcp:docs-mcp",
+  "source": "official-registry",
+  "remoteCheck": {"url": "https://tandem.ac/mcp", "result": "handshake-ok", "checkedAt": "...", "tools": 13},
+  "liveness": {"reachable": true, "checkedAt": "...", "probes": 10, "succeeded": 10}
+}
+```
+
+- **GitHub Copilot** (organization or enterprise): Copilot settings, Policies, MCP, set
+  *MCP Registry URL* to `https://neuronto.com` or `https://neuronto.com/verified`. The
+  base URL only: Copilot appends `/v0.1/servers` itself.
+- **VS Code**: the same value in `chat.mcp.gallery.serviceUrl`, which an organization's
+  Copilot policy normally supplies. Then search `@mcp` in the Extensions view.
+
+Limits, stated plainly. The API is read-only (`POST /v0.1/publish` answers `405`): publish
+to the official MCP Registry and the next nightly build picks the server up. Each server has
+one version, its latest. `search` matches the name, title and description as a substring,
+and results come in name order, as the official registry returns them. A server is not
+listed when it has neither a package nor a remote, when its record fails the schema, or,
+if it is not in the official registry, when its endpoint did not report a version. Names
+of servers outside the official registry are assigned here, reversed from the endpoint's
+host, and say so in `_meta` (`"nameAssignedBy": "neuronto"`).
+
+Validation, against the live API: `python scripts/test_subregistry.py https://neuronto.com --full`.
 
 ### Knowing when the answer is weak
 

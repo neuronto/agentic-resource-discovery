@@ -1920,5 +1920,56 @@ def t_discovery_errors_are_problem_details():
         assert s == 400 and ct.startswith("application/problem+json"), (s, ct, body)
         assert d["error"] == "INVALID_ARGUMENT" and d["status"] == 400 and d["title"] and d["type"], d
 
+
+# --------------------------------------------------------------------------
+# The MCP Registry v0.1 read API (app/subregistry.py): what an MCP host's gallery reads.
+# scripts/test_subregistry.py validates every record against the official OpenAPI.
+
+def t_mcp_registry_v0_1_list_is_a_server_list_with_cors():
+    s, h, b = _raw("/v0.1/servers?limit=3&version=latest")
+    hl = {k.lower(): v for k, v in h.items()}
+    d = json.loads(b)
+    assert s == 200 and len(d["servers"]) == 3 and d["metadata"]["count"] == 3, (s, d.get("metadata"))
+    assert hl.get("access-control-allow-origin") == "*", hl
+    for x in d["servers"]:
+        sv = x["server"]
+        assert sv["name"] and sv["description"] and sv["version"] and (sv.get("packages") or sv.get("remotes")), sv
+
+
+def t_mcp_registry_v0_1_cursor_continues_without_repeats():
+    _, _, b1 = _raw("/v0.1/servers?limit=5")
+    d1 = json.loads(b1)
+    cur = d1["metadata"]["nextCursor"]
+    _, _, b2 = _raw("/v0.1/servers?limit=5&cursor=" + urllib.parse.quote(cur, safe=""))
+    _, _, b3 = _raw("/v0.1/servers?limit=10")
+    n = lambda d: [x["server"]["name"] for x in d["servers"]]
+    assert n(d1) + n(json.loads(b2)) == n(json.loads(b3)), "two pages of 5 are not the first 10"
+
+
+def t_mcp_registry_v0_1_name_round_trips_url_encoded():
+    _, _, b = _raw("/verified/v0.1/servers?limit=1")
+    sv = json.loads(b)["servers"][0]["server"]
+    enc = urllib.parse.quote(sv["name"], safe="")
+    for tail in ("latest", urllib.parse.quote(sv["version"], safe="")):
+        s, _, b2 = _raw(f"/v0.1/servers/{enc}/versions/{tail}")
+        assert s == 200 and json.loads(b2)["server"]["name"] == sv["name"], (s, tail)
+    s, _, b3 = _raw(f"/v0.1/servers/{enc}/versions")
+    assert s == 200 and json.loads(b3)["servers"][0]["server"]["version"] == sv["version"]
+
+
+def t_mcp_registry_v0_1_verified_gallery_carries_our_check():
+    _, _, b = _raw("/verified/v0.1/servers?limit=20")
+    for x in json.loads(b)["servers"]:
+        m = x["_meta"]["com.neuronto/registry"]
+        assert m["remoteCheck"]["result"] in ("handshake-ok", "authorization-required", "payment-required"), m
+        assert m["liveness"]["reachable"] is True, m
+
+
+def t_mcp_registry_v0_1_unknown_server_is_404_and_publish_is_405():
+    s, _, b = _raw("/v0.1/servers/" + urllib.parse.quote("com.example/does-not-exist", safe="") + "/versions/latest")
+    assert s == 404 and json.loads(b).get("error"), (s, b[:80])
+    s2, _, _ = _raw("/v0.1/publish", "POST", {})
+    assert s2 == 405, s2
+
 if __name__ == "__main__":
     sys.exit(main())

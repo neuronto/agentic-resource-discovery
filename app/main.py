@@ -1118,6 +1118,9 @@ protocol; manifests are served as application/ard+json, and a registry entry
 carries the base URL. Write-up: {B}/blog/ard-ietf-internet-draft
 Daily readiness of every known ARD publisher against the drafts: {B}/ard-ietf-readiness
 (data: {B}/data/ard-ietf-readiness.json, CC BY 4.0)
+Monthly Agent Readiness Index of the Tranco top 10,000: llms.txt, MCP and A2A cards,
+ARD manifests and API catalogs per site: {B}/agent-readiness-index
+(data: {B}/data/agent-readiness-index.json, CC BY 4.0)
 
 ## What is an ARD registry?
 
@@ -1136,6 +1139,10 @@ to respond. Refreshed continuously.
 - POST {B}/explore   facet counts over the index
 - GET  {B}/agents    deterministic paginated listing
 - POST {B}/mcp       the same search as an MCP tool
+- GET  {B}/v0.1/servers   the MCP Registry v0.1 read API, so an MCP host can use this
+  index as its server gallery: set the host's registry URL to {B}, or to
+  {B}/verified for only the servers whose endpoint answered a handshake.
+  Setup for VS Code and Copilot: {B}/mcp-registry
 
 ## How to be listed (no key, no signup, no allowlist)
 
@@ -3140,6 +3147,9 @@ def submit_status_for(endpoint: str = Query(None), domain: str = Query(None)) ->
             "error": "not_found", "detail": "nothing has been submitted for that target"})
     return JSONResponse(submissions.public(row), headers={"Cache-Control": "no-store"})
 
+
+# The MCP Registry v0.1 read API (app/subregistry.py), above the website's catch-all.
+from .subregistry import router as _subregistry_router; app.include_router(_subregistry_router)
 
 # The website, if this deployment has one: every page, its assets and its views.
 # A separate package that is never published, loaded here and nowhere else, and
