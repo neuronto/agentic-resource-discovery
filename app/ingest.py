@@ -138,19 +138,37 @@ def _queries_from(desc: str, name: str) -> list[str]:
     return out[:3]
 
 
+# Consecutive failed queries after which an upstream is left for the rest of a run.
+HARVEST_GIVE_UP_AFTER = 5
+
+
 async def from_upstreams(conn, queries: list[str] | None = None) -> list[dict]:
-    """Harvest the upstream registries across the probe battery."""
+    """Harvest the upstream registries across the probe battery.
+
+    An upstream that stops answering is left for the rest of the run after
+    HARVEST_GIVE_UP_AFTER consecutive failures. Before 2026-11-04 one that timed out
+    on every query cost 96 x 20 s, about 45 minutes, inside the ingest, under the index
+    lock, for zero entries; the read-only jobs queued behind it. Live federation has
+    had a circuit breaker for that since September; the harvest had none.
+    """
     qs = queries or PROBE_QUERIES
     stats = []
     async with httpx.AsyncClient(headers={**HEADERS, "content-type": "application/json"},
                                  timeout=20) as client:
         for uid, name, url, source in config.UPSTREAMS:
             n = 0
+            failed_in_a_row = 0
+            abandoned = None
             for q in qs:
+                if failed_in_a_row >= HARVEST_GIVE_UP_AFTER:
+                    abandoned = f"{failed_in_a_row} queries in a row failed"
+                    break
                 try:
                     r = await client.post(url, json={"query": {"text": q}, "pageSize": 100})
                     if r.status_code != 200:
+                        failed_in_a_row += 1
                         continue
+                    failed_in_a_row = 0
                     for e in (r.json().get("results") or []):
                         if isinstance(e, dict) and store.upsert_entry(conn, e, uid):
                             n += 1
@@ -163,9 +181,14 @@ async def from_upstreams(conn, queries: list[str] | None = None) -> list[dict]:
                     # publisher on 2026-09-01, three times in five minutes.
                     conn.commit()
                 except Exception:
+                    failed_in_a_row += 1
                     continue
                 await asyncio.sleep(0.05)
             conn.commit()
+            if abandoned:
+                # Not ok: the last time it answered stays the last time it answered.
+                stats.append({"source": uid, "entries": n, "abandoned": abandoned})
+                continue
             conn.execute("""INSERT INTO registries(id,name,search_url,source,entries_seen,last_ok)
                             VALUES(?,?,?,?,?,?)
                             ON CONFLICT(id) DO UPDATE SET entries_seen=excluded.entries_seen,
