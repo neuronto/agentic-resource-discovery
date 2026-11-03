@@ -22,6 +22,8 @@ import json
 import os
 import re
 import secrets
+
+from starlette.requests import ClientDisconnect
 import sys
 import sqlite3
 import threading
@@ -406,6 +408,84 @@ async def _too_deep(request: Request, exc: RecursionError) -> JSONResponse:
                                                   "detail": "request body is nested too deeply"})
 
 
+# HTTP 499, nginx's code for "client closed request". Nothing is sent back: there is
+# no one to send it to. It exists so the access record says what happened.
+CLIENT_CLOSED = 499
+
+
+def _client_gone(request: Request) -> Response:
+    """The caller hung up before its request was read. Not a server error.
+
+    `ClientDisconnect` is raised when we read a body the client stopped sending. Until
+    2026-11-04 it reached the generic handler and was recorded as `error`, ten a day on
+    /mcp alone, which buried the real errors in the same series. It is counted as its
+    own event, `client_disconnect`, and never paged.
+    """
+    try:
+        events.emit("client_disconnect", a=request.url.path[:80], ok=True, scope=request.scope)
+    except Exception:
+        pass
+    return Response(status_code=CLIENT_CLOSED)
+
+
+@app.exception_handler(ClientDisconnect)
+async def _client_disconnect(request: Request, exc: ClientDisconnect) -> Response:
+    return _client_gone(request)
+
+
+def _only_disconnects(exc: BaseException) -> bool:
+    """True for a ClientDisconnect, or a group of nothing but ClientDisconnects (an HTTP
+    middleware runs the route in a task group, so that is how one arrives from there)."""
+    if isinstance(exc, ClientDisconnect):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return all(_only_disconnects(e) for e in exc.exceptions)
+    return False
+
+
+class _ClientGoneLayer:
+    """Outermost layer: a hang-up raised anywhere inside, a middleware included, ends here.
+
+    The exception handlers above cannot catch one raised inside an HTTP middleware:
+    there it reaches Starlette's outermost error layer, which re-raises after any
+    handler, so it was logged as a traceback and recorded as a server error. Caught at
+    this layer it is recorded once as `client_disconnect` and answered 499 if nothing
+    was sent yet. Anything else propagates unchanged.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def tracked(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracked)
+        except BaseException as e:
+            if not _only_disconnects(e):
+                raise
+            try:
+                events.emit("client_disconnect", a=str(scope.get("path") or "")[:80], ok=True,
+                            scope=scope)
+            except Exception:
+                pass
+            if not started:
+                try:
+                    await send({"type": "http.response.start", "status": CLIENT_CLOSED,
+                                "headers": []})
+                    await send({"type": "http.response.body", "body": b""})
+                except Exception:
+                    pass
+
+
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     """Every unhandled error is answered, recorded and alerted on.
@@ -415,6 +495,9 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     the journal (the server middleware re-raises after this returns), but the
     fact now also goes to the event sink, which is where someone is looking.
     """
+    if isinstance(exc, ClientDisconnect):
+        # Raised inside a middleware it never reaches the route-level handler above.
+        return _client_gone(request)
     ref = secrets.token_hex(4)
     try:
         events.emit("error", a=request.url.path[:80], b=type(exc).__name__,
@@ -3183,3 +3266,8 @@ if _website is not None:
         print(f"website: {len(WEBSITE)} routes", flush=True)
     except Exception as _e:                      # never take the registry down with it
         print(f"website failed to load: {type(_e).__name__}: {_e}", flush=True)
+
+
+# LAST, so it is the outermost of every middleware the engine, the commercial package
+# and the website registered: a client hang-up raised in any of them ends here.
+app.add_middleware(_ClientGoneLayer)
