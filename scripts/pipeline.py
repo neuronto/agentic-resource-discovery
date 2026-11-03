@@ -46,13 +46,23 @@ PY = sys.executable
 ALERT = ROOT / "deploy" / "pipeline_alert.py"
 
 # stage -> (command, takes the lock, minimum seconds between good runs, timeout s,
-#           exit code -> outcome)
+#           exit code -> outcome, memory limit)
+# Each stage keeps its own memory limit, as it had as its own unit: one cap on the
+# whole pipeline would have to be the largest stage's and would loosen the others.
 STAGES = {
-    "ingest":      ([PY, "-m", "scripts.ingest_cli", "all"], True, 0, 6 * 3600, {0: "ok"}),
-    "subregistry": ([PY, "-m", "app.subregistry", "build"], False, DAILY_S, 3600, {0: "ok"}),
+    "ingest":      ([PY, "-m", "scripts.ingest_cli", "all"], True, 0, 6 * 3600, {0: "ok"}, "650M"),
+    "subregistry": ([PY, "-m", "app.subregistry", "build"], False, DAILY_S, 3600, {0: "ok"}, "800M"),
     "evalgate":    ([PY, "-P", "-m", "scripts.evalgate"], False, DAILY_S, 3600,
-                    {0: "ok", 1: "regression", 3: "instrument"}),
+                    {0: "ok", 1: "regression", 3: "instrument"}, "1536M"),
 }
+SYSTEMD_RUN = "/usr/bin/systemd-run"
+
+
+def _scoped(cmd: list[str], mem: str) -> list[str]:
+    """Run a stage in its own transient scope with its memory limit, when we can."""
+    if os.geteuid() == 0 and os.path.exists(SYSTEMD_RUN) and os.getenv("NEURONTO_PIPELINE_SCOPES", "1") == "1":
+        return [SYSTEMD_RUN, "--scope", "--quiet", "--collect", "-p", f"MemoryMax={mem}", "--"] + cmd
+    return cmd
 
 
 def _acquire(wait_s: int):
@@ -90,7 +100,7 @@ def _alert(stage: str, outcome: str, cause: str, detail: str) -> None:
 
 
 def run_stage(conn, stage: str) -> str:
-    cmd, locked, every_s, timeout_s, outcomes = STAGES[stage]
+    cmd, locked, every_s, timeout_s, outcomes, mem = STAGES[stage]
     if not _due(conn, stage, every_s):
         print(f"[{stage}] not due", flush=True)
         return "skipped"
@@ -108,8 +118,8 @@ def run_stage(conn, stage: str) -> str:
     tail: list[str] = []
     killed = False
     try:
-        print(f"[{stage}] start: {' '.join(cmd[1:])}", flush=True)
-        p = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        print(f"[{stage}] start: {' '.join(cmd[1:])} (memory {mem})", flush=True)
+        p = subprocess.Popen(_scoped(cmd, mem), cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, bufsize=1)
         # The limit is enforced by a timer, not by the read loop: a stage that hangs
         # without printing would never reach a check placed between lines.
