@@ -31,7 +31,8 @@ baseline, or battery hit@5 loses a case. Fail too when the instrument is broken:
 whose digest does not match, or searches that raised. A gate that cannot fail tests
 nothing, so `scripts/test_provenance.py` plants the old defect and checks it is caught.
 
-    python -m scripts.evalgate               # measure, compare, exit 1 on regression
+    python -m scripts.evalgate               # measure, compare; exit 0 ok, 1 regression,
+                                             # 3 the instrument itself is broken
     python -m scripts.evalgate --accept      # measure and pin as the new baseline
 
 `--accept` is a deliberate human act after a change that was meant to move a number.
@@ -52,6 +53,8 @@ from app.evalset import load
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SET = os.path.join(ROOT, "bench", "declared-v1.json")
 BASELINE = os.path.join(ROOT, "bench", "baseline.json")
+EXIT_REGRESSION = 1     # a measured drop against the pinned baseline
+EXIT_INSTRUMENT = 3     # the measurement itself could not be trusted
 TOLERANCE = 0.02     # two points of recall or MRR; below that is noise at n=106
 
 
@@ -181,13 +184,17 @@ def main(argv: list[str]) -> int:
         with open(BASELINE, encoding="utf-8") as f:
             base = json.load(f)
     except FileNotFoundError:
-        print("  no baseline pinned; run with --accept once")
-        return 1
+        print("  INSTRUMENT: no baseline pinned; run with --accept once")
+        return EXIT_INSTRUMENT
     fails = verdict(cur, base)
-    print(f"  {'REGRESSION' if fails else 'ok'}: {line}")
+    # A broken instrument outranks a measured drop: numbers from a set that does not
+    # match its baseline, or from searches that raised, are not a measurement.
+    broken = [x for x in fails if x.startswith("instrument:")]
+    label = "INSTRUMENT" if broken else ("REGRESSION" if fails else "ok")
+    print(f"  {label}: {line}")
     for x in fails:
         print(f"    - {x}")
-    return 1 if fails else 0
+    return EXIT_INSTRUMENT if broken else (EXIT_REGRESSION if fails else 0)
 
 
 if __name__ == "__main__":

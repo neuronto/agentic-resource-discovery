@@ -200,12 +200,6 @@ def _warm_all() -> None:
                 directory.published(db(), refresh=False)
         except Exception:
             pass
-        for key, build in (("embed-status", lambda: embed.status(db())),
-                           ("stats-series:30", lambda: store.daily_series(db(), 30))):
-            try:
-                built += pagecache.warm_value(key, VALUE_TTL, build)
-            except Exception:
-                pass
         for key, ttl, build in _warmable():
             try:
                 if pagecache.warm(key, ttl, build):
@@ -1204,29 +1198,46 @@ no allowlist.
 
 # ─────────────────────────── Operations ─────────────────────────────────────
 
+# The index is stale when no ingest has succeeded for this long. The pipeline runs
+# every six hours, so two missed runs and some slack.
+STALE_AFTER_S = 15 * 3600
+
+
 @app.get("/health")
 def health():
-    c = store.counts(db())
-    t = store.tool_counts(db())
-    return {"status": "ok", "entries": c["entries"], "publishers": c["publishers"],
-            "live": c["live"], "dead": c["dead"],
-            "verified_tools": t["tools"], "servers_introspected": t["introspected"]}
+    """Liveness, never a scan.
 
-# Aggregates too slow for a request while an ingest runs. Counting the vector tables
-# reads every embedding blob: 19 s measured mid-ingest on 2026-11-02, so /stats timed
-# out for visitors and /metrics.json, which asked twice, took longer still. Served
-# from the page cache, at most VALUE_TTL old, and warmed with the pages. The headline
-# counts stay live, so /stats agrees exactly with what the MCP tools report.
-VALUE_TTL = 600
-
-
-def _dense_status() -> dict:
-    return pagecache.cached_value("embed-status", VALUE_TTL, lambda: embed.status(db()))
-
-
-def _series(days: int) -> list:
-    return pagecache.cached_value(f"stats-series:{days}", VALUE_TTL,
-                                  lambda: store.daily_series(db(), days))
+    The process answered, the database answered a trivial query, and how old the
+    data is. Until 2026-11-04 this counted the index live, which took over 30 s while
+    an ingest was writing, so a monitor read a healthy service as down. Staleness is
+    reported, not failed on: a liveness check that fails on old data gets a healthy
+    process restarted, which fixes nothing. The counts are the stored snapshot (O(1)),
+    the same row every other surface reads, with the time it was computed.
+    """
+    conn = db()
+    t0 = time.perf_counter()
+    try:
+        conn.execute("SELECT 1").fetchone()
+    except Exception as e:
+        return JSONResponse(status_code=503, headers={"Cache-Control": "no-store"}, content={
+            "status": "down", "database": f"unreachable: {type(e).__name__}"})
+    db_ms = round((time.perf_counter() - t0) * 1000, 1)
+    now = int(time.time())
+    last = store.last_good(conn, "ingest")
+    as_of = store.stats_as_of(conn)
+    c = store.counts(conn)
+    t = store.tool_counts(conn)
+    stale = last is None or now - last > STALE_AFTER_S
+    return JSONResponse(headers={"Cache-Control": "no-store"}, content={
+        "status": "degraded" if stale else "ok",
+        "database_ms": db_ms,
+        "last_ingest": last, "ingest_age_s": None if last is None else now - last,
+        "stale": stale,
+        "entries": c["entries"], "publishers": c["publishers"],
+        "live": c["live"], "dead": c["dead"],
+        "verified_tools": t["tools"], "servers_introspected": t["introspected"],
+        "asOf": as_of,
+    })
 
 
 @app.get("/stats")
@@ -1241,13 +1252,15 @@ def stats(days: int = Query(30, ge=7, le=90)):
             "verified": store.tool_counts(conn),
             "payments": store.payment_counts(conn),
             "history": store.history_counts(conn),
-            "dense": _dense_status(),
+            "dense": embed.status(conn),
             "searches_7d": q["n"] or 0,
             "avg_search_ms": round(q["avg_ms"] or 0, 1),
             # This worker's view; each of the four learns independently.
             "circuits": federation.breaker_snapshot(),
             "federation_budget_ms": config.FEDERATION_BUDGET_MS,
-            "series": _series(days),
+            "series": store.daily_series(conn, days),
+            # When the stored statistics above were computed (store.refresh_stats).
+            "asOf": store.stats_as_of(conn),
             "manifests": store.manifest_adoption(conn),
             "publishers_top": store.top_publishers(conn, 12),
             "recent": store.recent_searches(conn, 8),
@@ -1586,9 +1599,12 @@ def metrics_json():
     # `verified_manifests` was the ambiguous name that let three surfaces
     # diverge. Kept as an alias so an existing consumer does not break.
     _ardp["verified_manifests"] = _ardp["manifest_hosts"]
-    dense = _dense_status()
+    dense = embed.status(conn)
     return JSONResponse({
         "generated": int(time.time()),
+        # When the index statistics below were computed. They are materialised by the
+        # jobs that change the index, never counted on a request.
+        "asOf": store.stats_as_of(conn),
         # Published rather than kept private, because a limit a caller cannot
         # read is one they can only discover by hitting it.
         "limits": limits.stats(),

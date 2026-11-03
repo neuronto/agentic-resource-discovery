@@ -315,6 +315,11 @@ def _category_stats_sql(conn: sqlite3.Connection, slug: str) -> dict:
 
 
 def composition(conn: sqlite3.Connection) -> dict:
+    """The stored snapshot (store.refresh_stats)."""
+    return store.stat(conn, "composition")
+
+
+def compute_composition(conn: sqlite3.Connection) -> dict:
     """What the index actually holds, and how the ecosystem actually spells it."""
     kinds = [{"kind": r[0] or "unclassified", "n": r[1]} for r in conn.execute(
         "SELECT type_family, COUNT(*) FROM entries GROUP BY 1 ORDER BY 2 DESC")]
@@ -384,7 +389,7 @@ def publisher_list(conn: sqlite3.Connection) -> list[dict]:
                   SUM(COALESCE(e.mcp_tools,0)) tools,
                   GROUP_CONCAT(DISTINCT e.type_family) fams,
                   MIN(e.first_seen) first_seen,
-                  MAX(e.updated_at) seen,
+                  MAX(COALESCE(e.seen_at, e.updated_at)) seen,
                   cs.manifest_path
            FROM entries e
            JOIN crawl_seen cs ON cs.domain = lower(e.publisher)

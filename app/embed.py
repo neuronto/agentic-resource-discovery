@@ -36,7 +36,7 @@ import time
 
 import httpx
 
-from . import config
+from . import config, store
 
 # One snapshot, swapped in a single assignment. A reader takes the matrix and
 # its keys in one read, so a refresh landing mid-search can never pair one
@@ -556,6 +556,13 @@ async def dense_ranking(conn, text: str, limit: int = 50) -> list[str]:
 
 
 def status(conn) -> dict:
+    """The stored snapshot (store.refresh_stats). Counting the vector tables reads
+    every embedding blob, 22 s on the production index, so it is never done on a
+    request path."""
+    return store.stat(conn, "embed")
+
+
+def compute_status(conn) -> dict:
     row = conn.execute("SELECT COUNT(*) n, MAX(ts) t FROM vectors").fetchone()
     total = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
     tv = conn.execute("SELECT COUNT(*) n, MAX(ts) t FROM tool_vectors").fetchone()

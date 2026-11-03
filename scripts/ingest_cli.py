@@ -16,6 +16,7 @@
   python -m scripts.ingest_cli bench [k] [n]# run ARD-Bench
   python -m scripts.ingest_cli reindex      # rebuild the FTS table
   python -m scripts.ingest_cli payments [n] # re-read servers that answered 402, probe stated prices
+  python -m scripts.ingest_cli stats [light|heavy|all]  # recompute the stored index statistics
   python -m scripts.ingest_cli all
 
 `all` is what the timer runs. Order matters: introspection must precede
@@ -119,7 +120,17 @@ async def main() -> None:
     if cmd == "reindex":
         print("reindexed:", store.rebuild_fts(conn), flush=True)
 
-    print("counts:", store.counts(conn), flush=True)
+    # Writers publish, readers read: the statistics every page and API reports are
+    # recomputed here, by the job that changed the data, and only the groups it
+    # changed (store.STATS_FOR). Nothing on a request path computes them.
+    if cmd == "stats":
+        which = sys.argv[2] if len(sys.argv) > 2 else "light"
+        groups = store.STATS_FOR.get(which, store.STATS_FOR["light"])
+    else:
+        groups = store.STATS_FOR.get(cmd, ())
+    if groups is None or groups:
+        print("stats refreshed (ms):", store.refresh_stats(conn, groups), flush=True)
+    print("counts:", {k: v for k, v in store.counts(conn).items() if k != "sources"}, flush=True)
     if cmd in ("introspect", "all", "reindex"):
         print("verified:", store.tool_counts(conn), flush=True)
     print(f"done in {time.time()-t0:.1f}s", flush=True)

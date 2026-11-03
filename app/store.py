@@ -266,11 +266,41 @@ CREATE INDEX IF NOT EXISTS idx_entries_publisher_lower ON entries(lower(publishe
 CREATE VIRTUAL TABLE IF NOT EXISTS private_fts USING fts5(
   key UNINDEXED, display_name, description, rep_queries, tags, tokenize='porter'
 );
+
+-- Materialised index statistics (internal/ARCHITECTURE.md, "Read path, write path
+-- and the job pipeline"). Every aggregate a page or an API reports is computed out
+-- of the request path by `refresh_stats`, which the writing jobs call, and read
+-- here in O(1). One row per group, so a writer refreshes only what it changed.
+-- Public counts are computed over `entries` only, never `private_entries`.
+CREATE TABLE IF NOT EXISTS index_stats (
+  grp         TEXT PRIMARY KEY,
+  computed_at INTEGER NOT NULL,
+  took_ms     INTEGER NOT NULL,
+  data        TEXT NOT NULL
+);
+
+-- One row per pipeline stage run: what ran, when, and how it ended. `outcome` is
+-- ok | regression | instrument | lock_timeout | error, so a gate that could not run
+-- is never reported as a gate that failed. /health reads the last good ingest here.
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  stage    TEXT NOT NULL,
+  started  INTEGER NOT NULL,
+  ended    INTEGER,
+  outcome  TEXT,
+  cause    TEXT,
+  detail   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stage ON pipeline_runs(stage, ended);
 """
 
 # Columns added after the first deployment. SQLite has no "ADD COLUMN IF NOT
 # EXISTS", so this is applied by inspection in `init`.
 _ADD_COLUMNS = {
+    # The last time any source listed this entry. `updated_at` is the last time
+    # something about it CHANGED; before 2026-11-04 every re-sighting rewrote the
+    # row and its full-text document, which made one registry walk take 2.5 hours.
+    "seen_at":         "INTEGER",
     # Vestigial: private entries were briefly stored here behind these two
     # columns before moving to `private_entries`. Retained only so the one-time
     # migration in `init` can find any row left over from that design, and as a
@@ -598,17 +628,48 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
         caps = json.loads(row["capabilities"] or "[]")
         for c_ in (e.get("capabilities") or []):
             if c_ not in caps: caps.append(str(c_))
+        # The row this upsert would write, column for column, with the same
+        # COALESCE/NULLIF semantics as the UPDATE below. When it equals what is
+        # stored, nothing about the entry changed: record the sighting and stop.
+        # Rewriting an unchanged row and its full-text document on every
+        # re-sighting is what made a six-hourly registry walk take 2.5 hours under
+        # the index lock (16 s per page of 100, against 0.6 s of network).
+        new = {
+            "display_name": _s(e.get("displayName")) or row["display_name"],
+            "description": _s(desc) or "",
+            "type_raw": _s(e.get("type") or e.get("mediaType")) or row["type_raw"],
+            "type_family": fam,
+            "url": _s(url) or row["url"],
+            "publisher": pub if pub is not None else row["publisher"],
+            "tags": json.dumps(tags), "capabilities": json.dumps(caps),
+            "rep_queries": json.dumps(rq), "rq_sources": json.dumps(slots),
+            "rep_queries_declared": json.dumps(rq_decl),
+            "trust_identity": trust if trust is not None else row["trust_identity"],
+            "version": _s(e.get("version")) or row["version"],
+            "sources": json.dumps(sorted(srcs)),
+        }
+        changed = any(new[k] != row[k] for k in new)
+        declared = payments.from_entry(e)
+        pay_changed = bool(declared) and _json_or_none(row["pay_declared"]) != declared
+        if not changed and not pay_changed:
+            conn.execute("UPDATE entries SET seen_at=? WHERE key=?", (now, key))
+            return key
         conn.execute("""UPDATE entries SET display_name=COALESCE(NULLIF(?,''),display_name),
             description=?, type_raw=COALESCE(NULLIF(?,''),type_raw), type_family=?,
             url=COALESCE(NULLIF(?,''),url), publisher=COALESCE(?,publisher),
             tags=?, capabilities=?, rep_queries=?, rq_sources=?, rep_queries_declared=?,
             trust_identity=COALESCE(?,trust_identity),
-            version=COALESCE(NULLIF(?,''),version), sources=?, updated_at=?
+            version=COALESCE(NULLIF(?,''),version), sources=?, updated_at=?, seen_at=?
             WHERE key=?""",
             (_s(e.get("displayName")) or "", _s(desc) or "", _s(e.get("type") or e.get("mediaType")) or "",
              fam, _s(url) or "", pub, json.dumps(tags), json.dumps(caps), json.dumps(rq),
              json.dumps(slots), json.dumps(rq_decl),
-             trust, _s(e.get("version")) or "", json.dumps(sorted(srcs)), now, key))
+             trust, _s(e.get("version")) or "", json.dumps(sorted(srcs)), now, now, key))
+        if pay_changed:
+            set_payment(conn, key, declared=declared)
+        if changed:
+            _reindex(conn, key)
+        return key
     else:
         slots = rq_merge({}, source, e)
         rq, rq_decl = rq_derive(slots)
@@ -622,11 +683,19 @@ def upsert_entry(conn: sqlite3.Connection, e: dict, source: str) -> str:
              _jlist(e.get("tags")), _jlist(e.get("capabilities")), json.dumps(rq),
              json.dumps(slots), json.dumps(rq_decl),
              trust, _s(e.get("version")) or "", json.dumps([source]), now, now))
+    conn.execute("UPDATE entries SET seen_at=? WHERE key=?", (now, key))
     declared = payments.from_entry(e)
     if declared:
         set_payment(conn, key, declared=declared)
     _reindex(conn, key)
     return key
+
+
+def _json_or_none(raw):
+    try:
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
 
 
 _KEEP = object()
@@ -673,7 +742,7 @@ def mark_payment_live(conn: sqlite3.Connection, key: str, terms: dict | None,
             set_payment(conn, key, live=None)
 
 
-def payment_counts(conn: sqlite3.Connection) -> dict:
+def compute_payment_counts(conn: sqlite3.Connection) -> dict:
     """How much of the index states a price, and how much a live 402 confirmed."""
     q = lambda s: conn.execute(s).fetchone()[0]
     by_protocol: dict[str, int] = {}
@@ -902,7 +971,7 @@ def demand_for(conn: sqlite3.Connection, host: str, days: int = 30,
             "resources": resources, "days": days}
 
 
-def history_counts(conn: sqlite3.Connection) -> dict:
+def compute_history_counts(conn: sqlite3.Connection) -> dict:
     """Size of the accumulating record. Surfaced so it cannot rot unnoticed."""
     q = lambda s: conn.execute(s).fetchone()
     o = q("SELECT COUNT(*), MIN(ts), MAX(ts) FROM observations")
@@ -911,7 +980,7 @@ def history_counts(conn: sqlite3.Connection) -> dict:
             "impressions": i[0] or 0}
 
 
-def tool_counts(conn: sqlite3.Connection) -> dict:
+def compute_tool_counts(conn: sqlite3.Connection) -> dict:
     q = lambda s: conn.execute(s).fetchone()[0]
     return {
         "tools":             q("SELECT COUNT(*) FROM tools"),
@@ -948,7 +1017,7 @@ def mark_liveness(conn: sqlite3.Connection, key: str, alive: bool,
                      (key, now, 1 if alive else 0, status, ms))
 
 
-def counts(conn: sqlite3.Connection) -> dict:
+def compute_counts(conn: sqlite3.Connection) -> dict:
     q = lambda s, *a: conn.execute(s, a).fetchone()[0]
     return {
         "entries":    q("SELECT COUNT(*) FROM entries"),
@@ -1181,7 +1250,7 @@ def log_search(conn: sqlite3.Connection, q: str, mode: str, results: int,
         _logthread.start()
 
 
-def daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:
+def compute_daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:
     """Per-day counts for the front page sparklines.
 
     Buckets are filled for every day in the window, including zeros, so a chart
@@ -1204,7 +1273,7 @@ def daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:
     }
 
 
-def manifest_adoption(conn) -> dict:
+def compute_manifest_adoption(conn) -> dict:
     """Domains serving a well-known manifest, and the path they serve it at.
 
     Not the same as `publishers`. A publisher is any domain with an entry, and
@@ -1244,12 +1313,12 @@ def manifest_adoption(conn) -> dict:
     }
 
 
-def top_publishers(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
+def compute_top_publishers(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
     rows = conn.execute("""
         SELECT publisher,
                COUNT(*) n,
                SUM(CASE WHEN live=1 THEN 1 ELSE 0 END) live,
-               MAX(updated_at) seen,
+               MAX(COALESCE(seen_at, updated_at)) seen,
                GROUP_CONCAT(DISTINCT type_family) fams
         FROM entries WHERE publisher IS NOT NULL AND publisher != ''
         GROUP BY publisher ORDER BY n DESC LIMIT ?""", (limit,)).fetchall()
@@ -1348,7 +1417,7 @@ def private_row_to_entry(r: sqlite3.Row) -> dict:
     return {k: v for k, v in out.items() if v is not None}
 
 
-def ard_publisher_counts(conn: sqlite3.Connection) -> dict:
+def compute_ard_publisher_counts(conn: sqlite3.Connection) -> dict:
     """The ARD publisher numbers, defined once so surfaces cannot disagree.
 
     Three surfaces were each computing their own and reporting three different
@@ -1391,3 +1460,178 @@ def ard_publisher_counts(conn: sqlite3.Connection) -> dict:
                                    "resources it declares"),
         },
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Materialised statistics. Writers publish, readers read.
+#
+# Each group is computed by exactly one function, out of the request path, and
+# stored in `index_stats`. The public names (`counts`, `tool_counts`, ...) return
+# the stored snapshot, so every surface reads the same row and two surfaces can
+# no longer disagree about the same number. Measured cost of the computations on
+# the production index (2026-11-04): embed 22 s, tools 9 s, series 7 s, counts
+# 2.6 s; on a request path under ingest load they took 19-30 s.
+
+SERIES_DAYS = 90        # the widest window /stats accepts; narrower ones are a slice
+
+# Which groups each writer changes, so it refreshes only those. `light` is what
+# the 10-minute timer covers: request-side writes (a submission adds entries, a
+# search appends impressions) touch nothing else.
+STATS_FOR = {
+    "all":        None,                     # every group
+    "mcp":        ("counts", "composition", "series", "payments"),
+    "upstreams":  ("counts", "composition", "series"),
+    "glama":      ("counts", "composition", "series"),
+    "smithery":   ("counts", "composition", "series"),
+    "dockerhub":  ("counts", "composition", "series"),
+    "mcpso":      ("counts", "composition", "series"),
+    "crawl":      ("counts", "composition", "series", "ard_publishers", "payments",
+                   "manifests", "publishers_top"),
+    "liveness":   ("counts", "series"),
+    "introspect": ("tools", "counts", "payments"),
+    "embed":      ("embed",),
+    "payments":   ("payments", "tools"),
+    "reindex":    ("tools",),
+    "adoption":   (),
+    "light":      ("counts", "composition", "series", "history", "ard_publishers",
+                   "manifests", "publishers_top"),
+    "heavy":      ("tools", "embed", "payments"),
+}
+
+
+def _stat_groups() -> dict:
+    from . import directory, embed      # both import store; resolved at call time
+    return {
+        "counts":         compute_counts,
+        "tools":          compute_tool_counts,
+        "payments":       compute_payment_counts,
+        "history":        compute_history_counts,
+        "ard_publishers": compute_ard_publisher_counts,
+        "embed":          embed.compute_status,
+        "series":         lambda c: compute_daily_series(c, SERIES_DAYS),
+        "composition":    directory.compute_composition,
+        "manifests":      compute_manifest_adoption,
+        "publishers_top": lambda c: compute_top_publishers(c, 50),
+    }
+
+
+def refresh_stats(conn: sqlite3.Connection, groups=None) -> dict:
+    """Recompute the named groups (all when None) and store them. Returns ms per group.
+
+    Each computation reads in its own statements under WAL, so it never blocks a
+    writer and needs no index lock; the only write is one small row per group.
+    """
+    fns = _stat_groups()
+    names = list(fns) if groups is None else [g for g in groups if g in fns]
+    took = {}
+    for g in names:
+        t0 = time.time()
+        data = fns[g](conn)
+        ms = int((time.time() - t0) * 1000)
+        conn.execute("INSERT INTO index_stats(grp, computed_at, took_ms, data) VALUES(?,?,?,?) "
+                     "ON CONFLICT(grp) DO UPDATE SET computed_at=excluded.computed_at, "
+                     "took_ms=excluded.took_ms, data=excluded.data",
+                     (g, int(time.time()), ms, json.dumps(data)))
+        conn.commit()
+        took[g] = ms
+    return took
+
+
+def stat(conn: sqlite3.Connection, group: str) -> dict:
+    """The stored snapshot of one group. O(1).
+
+    A group never computed (a fresh database, a test fixture) is computed once
+    here and stored. On the production index that happens exactly once, at the
+    first refresh, never in front of a visitor afterwards.
+    """
+    try:
+        row = conn.execute("SELECT data FROM index_stats WHERE grp=?", (group,)).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is not None:
+        return json.loads(row[0])
+    data = _stat_groups()[group](conn)
+    try:
+        conn.execute("INSERT OR REPLACE INTO index_stats(grp, computed_at, took_ms, data) "
+                     "VALUES(?,?,?,?)", (group, int(time.time()), 0, json.dumps(data)))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass                    # a read-only connection still gets the numbers
+    return data
+
+
+def stats_as_of(conn: sqlite3.Connection, group: str = "counts") -> int | None:
+    """When a group was last computed, unix seconds."""
+    try:
+        row = conn.execute("SELECT computed_at FROM index_stats WHERE grp=?", (group,)).fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def counts(conn: sqlite3.Connection) -> dict:
+    return stat(conn, "counts")
+
+
+def tool_counts(conn: sqlite3.Connection) -> dict:
+    return stat(conn, "tools")
+
+
+def payment_counts(conn: sqlite3.Connection) -> dict:
+    return stat(conn, "payments")
+
+
+def history_counts(conn: sqlite3.Connection) -> dict:
+    return stat(conn, "history")
+
+
+def ard_publisher_counts(conn: sqlite3.Connection) -> dict:
+    return stat(conn, "ard_publishers")
+
+
+def manifest_adoption(conn) -> dict:
+    return stat(conn, "manifests")
+
+
+def top_publishers(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
+    return stat(conn, "publishers_top")[:max(0, int(limit))]
+
+
+def daily_series(conn: sqlite3.Connection, days: int = 30) -> dict:
+    """A slice of the stored 90-day series. The buckets are calendar days, so the
+    last `days + 1` of the wide window are exactly the narrow window's buckets."""
+    full = stat(conn, "series")
+    days = max(1, min(int(days), SERIES_DAYS))
+    out = {"days": days}
+    for k, v in full.items():
+        if isinstance(v, list):
+            out[k] = v[-(days + 1):]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Pipeline record
+
+def pipeline_start(conn: sqlite3.Connection, stage: str) -> int:
+    cur = conn.execute("INSERT INTO pipeline_runs(stage, started) VALUES(?,?)",
+                       (stage, int(time.time())))
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def pipeline_end(conn: sqlite3.Connection, run_id: int, outcome: str,
+                 cause: str | None = None, detail: str | None = None) -> None:
+    conn.execute("UPDATE pipeline_runs SET ended=?, outcome=?, cause=?, detail=? WHERE id=?",
+                 (int(time.time()), outcome, cause, (detail or "")[:2000], run_id))
+    conn.commit()
+
+
+def last_good(conn: sqlite3.Connection, stage: str) -> int | None:
+    """When `stage` last ended ok, unix seconds."""
+    try:
+        row = conn.execute("SELECT MAX(ended) FROM pipeline_runs WHERE stage=? AND outcome='ok'",
+                           (stage,)).fetchone()
+        return int(row[0]) if row and row[0] else None
+    except sqlite3.OperationalError:
+        return None
