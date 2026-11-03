@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """The analytics recorder sees every response, refusals included.
 
-Until 2026-11-04 the analytics middleware was installed early, so the commercial
-meters, installed later, sat OUTSIDE it: a 402 they answered never reached the
-recorder. This loads the real app with a stand-in sink that installs a recording
+Until 2026-11-04 the analytics middleware was installed early, so middlewares
+registered later sat OUTSIDE it: a response one of them answered by itself never
+reached the recorder. This loads the real app with a stand-in sink that installs a recording
 middleware the same way the real one does (events.install -> sink.install(app)),
 then requires:
   * the recorder is the outermost user middleware, and the hang-up layer next;
-  * a response produced by a middleware registered after the engine (as the
-    commercial package's are) is recorded, status and all;
+  * a response produced by a middleware registered after the engine is recorded,
+    status and all;
   * a client hang-up is recorded as a 499 hit.
 
     python3 scripts/test_middleware_order.py
@@ -86,11 +86,11 @@ def main_() -> int:
     check("the analytics recorder is the outermost middleware", names[0] == "_Recorder", names[:4])
     check("the hang-up layer is next", names[1] == "_ClientGoneLayer", names[:4])
 
-    # A meter registered after the engine, as commercial/ registers its own. Starlette
+    # A middleware registered after the engine that answers by itself. Starlette
     # builds the stack on first use, so it must be added before the first request.
-    main.app.user_middleware.insert(2, main.app.user_middleware[0].__class__(_Paywall))
-    asyncio.run(call("POST", "/paid-route-for-test", [{"type": "http.request", "body": b"{}"}]))
-    check("a 402 answered by an outer meter is recorded", ("/paid-route-for-test", 402) in HITS, HITS)
+    main.app.user_middleware.insert(2, main.app.user_middleware[0].__class__(_AnswersItself))
+    asyncio.run(call("POST", "/answered-by-middleware", [{"type": "http.request", "body": b"{}"}]))
+    check("a response answered by an outer middleware is recorded", ("/answered-by-middleware", 402) in HITS, HITS)
 
     asyncio.run(call("POST", "/mcp", [{"type": "http.disconnect"}]))
     check("a client hang-up is recorded as a 499", ("/mcp", 499) in HITS, HITS)
@@ -98,13 +98,13 @@ def main_() -> int:
     return 1 if FAILS else 0
 
 
-class _Paywall:
+class _AnswersItself:
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"] == "/paid-route-for-test":
-            r = JSONResponse({"error": "payment required"}, status_code=402)
+        if scope["type"] == "http" and scope["path"] == "/answered-by-middleware":
+            r = JSONResponse({"error": "answered here"}, status_code=402)
             return await r(scope, receive, send)
         return await self.app(scope, receive, send)
 

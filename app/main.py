@@ -3346,12 +3346,12 @@ if _website is not None:
 
 # The two outermost layers, added last because the last one added is the outermost.
 #
-# The hang-up layer sits outside every middleware the engine, the commercial package
+# The hang-up layer sits outside every middleware the engine, an optional package
 # and the website registered, so a client hang-up raised in any of them ends there.
 app.add_middleware(_ClientGoneLayer)
 #
 # Analytics sits outside everything, the hang-up layer included, so it records every
-# response the service sends. Until 2026-11-04 it was installed early, which put the
-# commercial meters OUTSIDE it: every paywall refusal (402) they answered never reached
-# the recorder. 34 refusals a day per caller, for weeks, left no trace in the hits.
+# response the service sends. Until 2026-11-04 it was installed early, so every
+# middleware registered after the engine sat outside it, and a response one of them
+# answered by itself never reached the recorder: those callers left no trace at all.
 events.install(app)
