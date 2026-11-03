@@ -1954,7 +1954,8 @@ def t_mcp_registry_v0_1_name_round_trips_url_encoded():
         s, _, b2 = _raw(f"/v0.1/servers/{enc}/versions/{tail}")
         assert s == 200 and json.loads(b2)["server"]["name"] == sv["name"], (s, tail)
     s, _, b3 = _raw(f"/v0.1/servers/{enc}/versions")
-    assert s == 200 and json.loads(b3)["servers"][0]["server"]["version"] == sv["version"]
+    vs = [x["server"]["version"] for x in json.loads(b3)["servers"]]
+    assert s == 200 and sv["version"] in vs and vs == sorted(vs), (s, vs)
 
 
 def t_mcp_registry_v0_1_verified_gallery_carries_our_check():
@@ -1965,11 +1966,36 @@ def t_mcp_registry_v0_1_verified_gallery_carries_our_check():
         assert m["liveness"]["reachable"] is True, m
 
 
-def t_mcp_registry_v0_1_unknown_server_is_404_and_publish_is_405():
+def t_mcp_registry_v0_1_unknown_server_is_404_and_writes_are_501():
+    # The OpenAPI marks every write optional and documents 501 for a read-only registry.
     s, _, b = _raw("/v0.1/servers/" + urllib.parse.quote("com.example/does-not-exist", safe="") + "/versions/latest")
     assert s == 404 and json.loads(b).get("error"), (s, b[:80])
-    s2, _, _ = _raw("/v0.1/publish", "POST", {})
-    assert s2 == 405, s2
+    s2, _, b2 = _raw("/v0.1/publish", "POST", {})
+    assert s2 == 501 and json.loads(b2).get("error"), s2
+
+
+def t_mcp_registry_v0_1_names_its_snapshot_and_honours_etag():
+    s, h, _ = _raw("/v0.1/servers?limit=1&version=latest")
+    hl = {k.lower(): v for k, v in h.items()}
+    assert s == 200 and hl.get("x-registry-snapshot") and hl.get("etag"), hl
+    req = urllib.request.Request(BASE + "/v0.1/servers?limit=1&version=latest",
+                                 headers={**UA, "If-None-Match": hl["etag"]})
+    try:
+        code = urllib.request.urlopen(req, timeout=30).status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    assert code == 304, code
+
+
+def t_mcp_registry_v0_1_deleted_records_only_on_request():
+    def deleted(x):
+        m = x.get("_meta") or {}
+        return ((m.get("io.modelcontextprotocol.registry/official") or {}).get("status") == "deleted"
+                or (m.get("com.neuronto/registry") or {}).get("status") == "deleted")
+    _, _, b1 = _raw("/v0.1/servers?limit=100")
+    _, _, b2 = _raw("/v0.1/servers?limit=100&include_deleted=true")
+    assert not any(deleted(x) for x in json.loads(b1)["servers"])
+    assert any(deleted(x) for x in json.loads(b2)["servers"]), "no deleted record on the first page"
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -8,7 +8,10 @@ verified gallery to its end (and the full gallery with --full) checking that the
 cursor never repeats or skips, and replays what VS Code's gallery client does: probe
 `/v0.1/servers?limit=1`, query with `limit`, `version=latest`, `search` and `cursor`,
 drop any record without name, description, version and a package or remote, then
-fetch `{name}/versions/latest` with the name URL-encoded.
+fetch `{name}/versions/latest` with the name URL-encoded. Then the rest of the
+contract: one record per version without `version=latest`, deleted records only on
+request or with `updated_since`, writes answered 501, and snapshot headers with a
+working ETag.
 """
 import json
 import sys
@@ -121,13 +124,65 @@ for n in sample:
         print("         round trip failed:", n, one.status_code, vs.status_code)
 check(rt_ok == len(sample), f"name round-trips through /versions, /versions/latest and /versions/{{version}} ({rt_ok}/{len(sample)})")
 
-# Search, the way the gallery's search box sends it.
-s = c.get(f"{BASE}/v0.1/servers", params={"limit": 50, "version": "latest", "search": "github"}).json()
+# Search, the way the gallery's search box sends it: the OpenAPI defines it as a
+# case-insensitive substring match on the name.
+s = c.get(f"{BASE}/v0.1/servers", params={"limit": 50, "version": "latest", "search": "GitHub"}).json()
 hits = s["servers"]
-check(bool(hits) and all("github" in json.dumps([x["server"]["name"], x["server"].get("title", ""),
-                                                  x["server"]["description"]]).lower() for x in hits),
-      f"search=github returns only matching servers ({len(hits)})")
+check(bool(hits) and all("github" in x["server"]["name"].lower() for x in hits),
+      f"search=GitHub matches names case-insensitively, and only names ({len(hits)})")
 check(all(vscode_keeps(x) for x in hits), "a client keeps every search result")
+s2 = c.get(f"{BASE}/v0.1/servers", params={"limit": 50, "version": "latest", "search": "io"}).json()["servers"]
+check(bool(s2) and all("io" in x["server"]["name"].lower() for x in s2), "a two-letter search still matches names")
+
+# One record per version: the list without a version filter, and the versions endpoints.
+allv = c.get(f"{BASE}/v0.1/servers?limit=100").json()["servers"]
+pairs = [(x["server"]["name"], x["server"]["version"]) for x in allv]
+check(pairs == sorted(pairs) and len(pairs) == len(set(pairs)), "without version=latest: one record per version, name then version order")
+multi = next((n for n in {p[0] for p in pairs} if sum(1 for p in pairs if p[0] == n) > 1), None)
+if multi:
+    enc = urllib.parse.quote(multi, safe="")
+    vs = c.get(f"{BASE}/v0.1/servers/{enc}/versions").json()
+    lat = c.get(f"{BASE}/v0.1/servers/{enc}/versions/latest").json()
+    flags = [((x.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("isLatest") for x in vs["servers"]]
+    check(len(vs["servers"]) > 1 and not list(V_LIST.iter_errors(vs)), f"/versions lists every version of {multi} ({len(vs['servers'])})")
+    check(flags.count(True) <= 1 and (not any(flags) or
+          ((lat.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("isLatest")),
+          "/versions/latest is the version the registry marks latest")
+cur = None
+seen = []
+for _ in range(3):
+    u = f"{BASE}/v0.1/servers?limit=100" + ("&cursor=" + urllib.parse.quote(cur, safe="") if cur else "")
+    d = c.get(u).json()
+    seen += [(x["server"]["name"], x["server"]["version"]) for x in d["servers"]]
+    cur = d["metadata"].get("nextCursor")
+check(seen == sorted(seen) and len(seen) == len(set(seen)), "the all-versions cursor never repeats or reorders")
+
+# Deleted records: hidden by default, shown on request, always shown with updated_since.
+
+
+def is_deleted(x):
+    m = x.get("_meta") or {}
+    return ((m.get("io.modelcontextprotocol.registry/official") or {}).get("status") == "deleted"
+            or (m.get("com.neuronto/registry") or {}).get("status") == "deleted")
+
+
+dflt = c.get(f"{BASE}/v0.1/servers?limit=100").json()["servers"]
+withd = c.get(f"{BASE}/v0.1/servers?limit=100&include_deleted=true").json()["servers"]
+check(not any(is_deleted(x) for x in dflt), "deleted records are left out by default")
+check(any(is_deleted(x) for x in withd), "include_deleted=true returns deleted records")
+old = c.get(f"{BASE}/v0.1/servers?limit=100&updated_since=2020-01-01T00:00:00Z").json()["servers"]
+check(any(is_deleted(x) for x in old), "updated_since always includes deleted records")
+check(c.get(f"{BASE}/v0.1/servers?include_deleted=maybe").status_code == 400, "a bad include_deleted is a 400")
+
+# Snapshot freshness and conditional requests.
+h = c.get(f"{BASE}/v0.1/servers?limit=1")
+check(bool(h.headers.get("x-registry-snapshot")) and bool(h.headers.get("last-modified")),
+      f"every answer names its snapshot ({h.headers.get('x-registry-snapshot')})")
+et = h.headers.get("etag")
+check(bool(et) and c.get(f"{BASE}/v0.1/servers?limit=1", headers={"If-None-Match": et}).status_code == 304,
+      "If-None-Match with the ETag is a 304")
+check("x-registry-snapshot" in (h.headers.get("access-control-expose-headers") or "").lower(),
+      "CORS exposes the snapshot headers to browser clients")
 
 # Errors and edges.
 check(c.get(f"{BASE}/v0.1/servers?limit=500").json()["metadata"]["count"] <= 100, "limit is capped at 100")
@@ -137,7 +192,11 @@ nf = c.get(f"{BASE}/v0.1/servers/{urllib.parse.quote('com.example/does-not-exist
 check(nf.status_code == 404 and nf.json().get("error"), "an unknown server is a 404 with an error body")
 check(c.get(f"{BASE}/v0.1/servers/{urllib.parse.quote(names[0], safe='')}/versions/0.0.0-not-a-version").status_code == 404,
       "an unknown version is a 404")
-check(c.post(f"{BASE}/v0.1/publish", json={}).status_code == 405, "publishing is a 405: this registry is read-only")
+pub = c.post(f"{BASE}/v0.1/publish", json={})
+check(pub.status_code == 501 and pub.json().get("error"), "publishing is a 501 with an error body, as the OpenAPI documents for a read-only registry")
+enc0 = urllib.parse.quote(names[0], safe="")
+check(c.put(f"{BASE}/v0.1/servers/{enc0}/versions/1.0.0", json={}).status_code == 501, "PUT a version is a 501")
+check(c.delete(f"{BASE}/v0.1/servers/{enc0}/versions/1.0.0").status_code == 501, "DELETE a version is a 501")
 since = c.get(f"{BASE}/verified/v0.1/servers?limit=5&updated_since=2099-01-01T00:00:00Z").json()
 check(since["metadata"]["count"] == 0, "updated_since in the future returns nothing")
 

@@ -216,7 +216,7 @@ they append `/v0.1/servers` to a base URL. This deployment serves that API at tw
 
 | Base URL | What the gallery lists |
 |---|---|
-| `https://neuronto.com` | The official MCP Registry's latest record for every server this index holds, passed through as published, plus independently published remote servers whose endpoint answered an MCP `initialize` and reported its version. |
+| `https://neuronto.com` | Every version of every server in the official MCP Registry, passed through as published with its own status and dates, plus independently published remote servers whose endpoint answered an MCP `initialize` and reported its version. |
 | `https://neuronto.com/verified` | Only servers whose remote endpoint answered an MCP handshake, or answered `401`/`403` (sign-in required) or an x402 `402` (payment required), and was reachable at the last liveness check. |
 
 Every record validates against the `ServerResponse` schema of that OpenAPI, and the build
@@ -238,14 +238,25 @@ under `_meta["com.neuronto/registry"]`:
 - **VS Code**: the same value in `chat.mcp.gallery.serviceUrl`, which an organization's
   Copilot policy normally supplies. Then search `@mcp` in the Extensions view.
 
-Limits, stated plainly. The API is read-only (`POST /v0.1/publish` answers `405`): publish
-to the official MCP Registry and the next nightly build picks the server up. Each server has
-one version, its latest. `search` matches the name, title and description as a substring,
-and results come in name order, as the official registry returns them. A server is not
-listed when it has neither a package nor a remote, when its record fails the schema, or,
-if it is not in the official registry, when its endpoint did not report a version. Names
-of servers outside the official registry are assigned here, reversed from the endpoint's
-host, and say so in `_meta` (`"nameAssignedBy": "neuronto"`).
+The contract is the OpenAPI's. The list returns one record per server version, ordered by
+name then version as text; `version=latest` narrows it to each server's latest version, which
+is what IDE galleries ask for. `search` is a case-insensitive substring match on the name.
+Deleted records are left out unless `include_deleted=true` and are always included with
+`updated_since`, so a client keeping its own copy learns removals; a server this registry
+stops listing stays as a record marked deleted for 90 days
+(`_meta["com.neuronto/registry"].status`). Writes are optional in the OpenAPI and answer
+`501`: publish to the official MCP Registry and the next snapshot picks the server up.
+
+Limits, stated plainly. A server is not listed when it has neither a package nor a remote,
+when its record fails the schema, or, if it is not in the official registry, when its
+endpoint did not report a version. Names of servers outside the official registry are
+assigned here, reversed from the endpoint's host, and say so in `_meta`
+(`"nameAssignedBy": "neuronto"`).
+
+The registry is a snapshot, rebuilt each day after the index refresh, built outside the
+serving process and replaced in one step, so a page never mixes two snapshots and a
+cursor stays valid across a rebuild. Every answer names its snapshot (`X-Registry-Snapshot`,
+`Last-Modified`) and carries an `ETag`; `If-None-Match` gets a `304`.
 
 Validation, against the live API: `python scripts/test_subregistry.py https://neuronto.com --full`.
 
