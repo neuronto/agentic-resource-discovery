@@ -2622,6 +2622,11 @@ def _emit_submit(b: dict, code: int, d: dict, probe: bool = False,
     if b.get("dry_run") or d.get("dry_run"):
         return          # nothing happened, so nothing to record or alert on
     target = str(b.get("endpoint") or b.get("mcp") or b.get("domain") or b.get("url") or "")[:120]
+    if d.get("deduplicated"):
+        # Answered from the record: nothing was verified, so it is not a submission.
+        events.emit("submit_repeat", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
+                    b=target, ok=True, probe=probe, source=source)
+        return
     ok = code < 400 and d.get("status") == "indexed"
     sub = d.get("submission") or {}
     events.emit("submit", a="endpoint" if (b.get("endpoint") or b.get("mcp")) else "domain",
@@ -2793,6 +2798,70 @@ def _invalidate_after_submit(body) -> None:
     pagecache.invalidate([f"pub-{h}", f"pubx-{h}"] if h else [])
 
 
+def _already_verified(endpoint: str, dom: str, reverify: bool) -> JSONResponse | None:
+    """A target verified within the resubmission window, answered from its record.
+
+    Returns None when the submission should be verified for real: nothing on record,
+    the window has passed, the indexed entry is gone, or a `reverify` that is allowed
+    (once per REVERIFY_EVERY_S). Never for our own probes or the retrier; the caller
+    checks that. The answer has the shape of a fresh one plus `deduplicated`,
+    `lastVerified` and `reverifyAfter`, so a client that reads the old fields is
+    unaffected.
+    """
+    kind, target = ("endpoint", endpoint) if endpoint else ("domain", dom)
+    prev = submissions.verified_within(kind, target)
+    if prev is None:
+        return None
+    now = int(time.time())
+    last = submissions.last_attempt(kind, target) or prev["updated"]
+    reverify_at = last + submissions.REVERIFY_EVERY_S
+    if reverify and now >= reverify_at:
+        return None
+    conn = db()
+    entry = None
+    if prev.get("entry_key"):
+        entry = conn.execute("""SELECT key, identifier, url, mcp_server_name, mcp_tools, mcp_auth,
+                                       live, live_checked, mcp_checked FROM entries WHERE key=?""",
+                             (prev["entry_key"],)).fetchone()
+        if entry is None:
+            return None                      # it left the index; verify it again
+    window_end = prev["updated"] + submissions.RESUBMIT_WINDOW_S
+    out: dict = {"status": "indexed", "deduplicated": True}
+    if entry is not None:
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM tools WHERE entry_key=? ORDER BY name LIMIT 40", (entry["key"],))]
+        out.update({"endpoint": entry["url"] or submissions.normalize(kind, target),
+                    "server_name": entry["mcp_server_name"],
+                    "verified_tools": entry["mcp_tools"] or 0, "tools": names,
+                    "auth_required": bool(entry["mcp_auth"]), "identifier": entry["identifier"],
+                    "lastChecked": entry["live_checked"] or entry["mcp_checked"]})
+    else:
+        host = submissions.normalize("domain", target)
+        n = conn.execute("SELECT COUNT(*) FROM entries WHERE lower(publisher)=?",
+                         (host,)).fetchone()[0]
+        out.update({"domain": host, "resources_indexed": n,
+                    "page": f"{config.PUBLIC_BASE}/ard-publishers/{host}"})
+    out.update({
+        "submission": submissions.public(prev),
+        "lastVerified": prev["updated"],
+        "reverifyAfter": window_end,
+        "note": (f"already verified and indexed {_human_age(now - prev['updated'])} ago, so this "
+                 "answer is the record of that verification and nothing was re-probed. Listed "
+                 "servers are re-checked automatically. A resubmission after reverifyAfter is "
+                 "verified again; if you changed what it serves, send {\"reverify\": true}"
+                 + (f" (accepted again from {time.strftime('%H:%M UTC', time.gmtime(reverify_at))})"
+                    if reverify else "") + "."),
+    })
+    return JSONResponse(out)
+
+
+def _human_age(s: int) -> str:
+    s = max(0, int(s))
+    if s < 3600:
+        return f"{max(1, s // 60)} minutes"
+    return f"{s // 3600} hours"
+
+
 async def _submit(body: dict, source: str = "http", probe: bool = False,
                   client: str | None = None) -> JSONResponse:
     """Two ways in, because most MCP developers have no manifest.
@@ -2826,6 +2895,12 @@ async def _submit(body: dict, source: str = "http", probe: bool = False,
         u = str(b.get("url") or "").strip()
         if u:
             endpoint = u if "://" in u else "https://" + u
+
+    # ---- already verified: answer from the record, no probe ---------------
+    if source != "retry" and not dry and not probe and (endpoint or dom):
+        repeat = await asyncio.to_thread(_already_verified, endpoint, dom, bool(b.get("reverify")))
+        if repeat is not None:
+            return repeat
 
     # ---- an MCP endpoint, or anything that leads to one ------------------
     if endpoint:

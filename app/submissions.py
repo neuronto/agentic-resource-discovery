@@ -94,6 +94,7 @@ def _conn() -> sqlite3.Connection | None:
         c.execute("PRAGMA busy_timeout=5000")
         c.executescript(_SCHEMA)
         c.commit()
+        _normalize_existing(c)
     except Exception:
         return None
     _local.c = c
@@ -102,6 +103,84 @@ def _conn() -> sqlite3.Connection | None:
 
 def new_id() -> str:
     return secrets.token_hex(6)
+
+
+# A target verified this recently is answered from its record, without a probe
+# (internal/ARCHITECTURE.md, 2026-11-04). Re-checking listed servers is the liveness
+# system's job; a submission is how something gets IN. One publisher re-sent the
+# same 15 indexed endpoints every hour, 225 handshakes in 36 hours, each one ours.
+RESUBMIT_WINDOW_S = int(os.getenv("NEURONTO_RESUBMIT_WINDOW_S", str(24 * 3600)))
+# `{"reverify": true}` forces a fresh verification after a real change, once per this.
+REVERIFY_EVERY_S = int(os.getenv("NEURONTO_REVERIFY_EVERY_S", "3600"))
+
+
+def normalize(kind: str, target: str) -> str:
+    """One spelling per target, so `HTTPS://Example.com:443/mcp/` and
+    `https://example.com/mcp` are the same submission. Idempotent."""
+    from urllib.parse import urlsplit, urlunsplit
+    t = (target or "").strip()
+    if kind == "domain":
+        t = t.lower()
+        if "://" in t:
+            t = urlsplit(t).hostname or ""
+        return t.split("/")[0].rstrip(".")
+    try:
+        u = urlsplit(t)
+    except ValueError:
+        return t
+    if not u.scheme or not u.hostname:
+        return t
+    scheme = u.scheme.lower()
+    host = u.hostname.lower().rstrip(".")
+    port = u.port
+    netloc = host if port is None or (scheme, port) in (("https", 443), ("http", 80)) \
+        else f"{host}:{port}"
+    path = u.path.rstrip("/") if u.path not in ("", "/") else ""
+    return urlunsplit((scheme, netloc, path, u.query, ""))
+
+
+def verified_within(kind: str, target: str, within_s: int | None = None) -> dict | None:
+    """The latest publisher submission of this target that indexed within the window."""
+    c = _conn()
+    if c is None:
+        return None
+    try:
+        row = c.execute("""SELECT * FROM submissions WHERE kind=? AND target=? AND
+                           status='indexed' AND probe=0 AND updated>=?
+                           ORDER BY updated DESC LIMIT 1""",
+                        (kind, normalize(kind, target),
+                         int(time.time()) - (RESUBMIT_WINDOW_S if within_s is None else within_s))
+                        ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def last_attempt(kind: str, target: str) -> int | None:
+    """When this target was last actually verified (a probe sent), by anyone but us."""
+    c = _conn()
+    if c is None:
+        return None
+    try:
+        row = c.execute("""SELECT MAX(updated) FROM submissions WHERE kind=? AND target=?
+                           AND probe=0 AND attempts>0""",
+                        (kind, normalize(kind, target))).fetchone()
+        return int(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+def _normalize_existing(c: sqlite3.Connection) -> None:
+    """One-time: rows written before 2026-11-04 kept the target as typed."""
+    done = c.execute("SELECT 1 FROM sqlite_master WHERE name='normalized_v1'").fetchone()
+    if done:
+        return
+    for r in c.execute("SELECT id, kind, target FROM submissions").fetchall():
+        n = normalize(r["kind"], r["target"])
+        if n != r["target"]:
+            c.execute("UPDATE submissions SET target=? WHERE id=?", (n, r["id"]))
+    c.execute("CREATE TABLE IF NOT EXISTS normalized_v1 (x INTEGER)")
+    c.commit()
 
 
 def open(kind: str, target: str, source: str, probe: bool = False,
@@ -113,6 +192,7 @@ def open(kind: str, target: str, source: str, probe: bool = False,
     if c is None:
         return None
     now = int(time.time())
+    target = normalize(kind, target)
     try:
         # Older databases predate the column.
         cols = {r[1] for r in c.execute('PRAGMA table_info(submissions)')}
@@ -239,6 +319,7 @@ def latest_for(kind: str, target: str) -> dict | None:
     c = _conn()
     if c is None:
         return None
+    target = normalize(kind, target)
     try:
         row = c.execute("""SELECT * FROM submissions WHERE kind=? AND target=?
                            ORDER BY created DESC LIMIT 1""", (kind, target)).fetchone()
@@ -252,6 +333,7 @@ def recently_indexed(kind: str, target: str, within_s: int = 86400) -> int:
     c = _conn()
     if c is None:
         return 0
+    target = normalize(kind, target)
     try:
         return c.execute("""SELECT COUNT(*) FROM submissions WHERE kind=? AND target=?
                             AND status='indexed' AND probe=0 AND created>=?""",
