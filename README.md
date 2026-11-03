@@ -189,7 +189,7 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /mcp` | Search, tool search, index statistics and publishing, as MCP tools. `GET` and `DELETE` answer `405`: there is no server-initiated stream, every tool answers inside the request that asked. |
 | `POST /a2a` | The same index over A2A. `message/send` returns a Message. Card at `/.well-known/agent-card.json` and `/.well-known/agent.json`. |
 | `POST /tools`, `GET /tools?q=` | Tool level search over verified tools rather than servers. |
-| `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. `200` indexed, `202` kept and retried. |
+| `POST /submit` | Index an MCP endpoint or a manifest-publishing domain. `200` indexed, `202` kept and retried. A target verified in the last 24 hours is answered from its record (`"deduplicated": true`). |
 | `GET /submit/status/{id}` | Where a submission stands, with the last answer its endpoint gave. |
 | `POST /audit` | Publishing report: discovery, conformance, coverage, competition. |
 | `POST /manifest/build` | Generate a manifest for a domain from resources fetched there. |
@@ -198,6 +198,8 @@ claude mcp add --transport http neuronto https://neuronto.com/mcp
 | `POST /claim`, `POST /claim/verify` | Prove domain ownership by DNS TXT, receive a key. `GET /claim` describes the steps. |
 | `POST /private/entries` | Register internal services. Key required. |
 | `GET /bench`, `GET /adoption` | Retrieval measurement, and who publishes a manifest. |
+| `GET /health` | Liveness: the service and its database answer, and how old the last index refresh is (`ingest_age_s`, `stale`). Never counts anything; the counts it shows are the stored statistics, with `asOf`. |
+| `GET /stats`, `GET /metrics.json` | The index statistics. They are computed by the jobs that change the index and stored, so every surface reports the same numbers; `asOf` says when. |
 | `GET /.well-known/ard.json` | Our own publisher manifest, served as `application/ard+json`. Its `application/ai-registry+json` entry carries the base URL, `https://neuronto.com`. |
 | `GET /v0.1/servers`, `GET /v0.1/servers/{name}/versions[/{version}]` | The MCP Registry v0.1 read API, so an MCP host can use this index as its server gallery. `/verified/v0.1/...` serves only servers whose endpoint answered a handshake. See below. |
 | `GET /openapi.json` | OpenAPI 3.1 for everything above. |
@@ -451,6 +453,13 @@ the registry itself, such as the index being busy, costs none of those attempts.
 server that was mid-deploy, a DNS record that had not propagated, or a client that gave up
 after one call still ends up indexed with no second submission from anyone. The queue is
 counted publicly at `/metrics.json` under `submissions`.
+
+**Submitting again is not needed, and costs nothing.** A target verified in the last 24
+hours (one spelling per target: scheme and host lower-cased, default port and trailing
+slash dropped) is answered from its record: `"deduplicated": true`, the verified tools,
+`lastVerified` and `reverifyAfter`, and nothing is re-probed. Listed servers are
+re-checked by the registry on its own schedule. If you changed what a server serves, send
+`{"endpoint": "...", "reverify": true}`; that verifies it again, once an hour at most.
 
 **The other write endpoints answer honestly when the index is busy.** `POST /claim/verify`,
 `POST /private/add` and `POST /private/delete` return `503` with a `Retry-After` header and
