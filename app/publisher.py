@@ -196,6 +196,9 @@ def issue_key(conn, domain: str) -> str:
     return key
 
 
+_touched: dict[str, float] = {}
+
+
 def domain_for_key(conn, key: str | None) -> str | None:
     """Resolve a bearer key to its verified domain, or None."""
     if not key or not key.startswith("nk_"):
@@ -207,7 +210,16 @@ def domain_for_key(conn, key: str | None) -> str | None:
     # connection waits up to 45 s for the crawl's lock, on the event loop, on
     # every authenticated request. Own connection, one second of patience,
     # in a thread nobody waits for; a lost timestamp costs nothing.
-    threading.Thread(target=_touch_key, args=(key.strip(),), daemon=True).start()
+    k = key.strip()
+    now = time.time()
+    if now - _touched.get(k, 0.0) >= 60:           # one timestamp write a minute per key
+        if len(_touched) > 5000:
+            _touched.clear()
+        _touched[k] = now
+        try:
+            threading.Thread(target=_touch_key, args=(k,), daemon=True).start()
+        except RuntimeError:
+            pass                                   # a lost timestamp costs nothing
     return r["domain"]
 
 

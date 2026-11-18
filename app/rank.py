@@ -56,6 +56,11 @@ _FLOOR = 4
 TOOL_LEG_WEIGHT = 2.0         # a phrase or conjunction matched a tool
 TOOL_LEG_LOOSE_WEIGHT = 0.0   # only the OR fallback matched: not evidence
 
+# The lexical leg's first LEXICAL_KEEP results always stay on the page (search.protect_lexical).
+# Tune split recall@10 0.930 -> 0.953 at 3, holdout 0.887 -> 0.906, battery unchanged (7/6);
+# at 6 the battery falls to 5/3, so the value is the largest one the battery tolerates.
+LEXICAL_KEEP = 3
+
 
 # ── Federation and the dense leg: coverage, not ranking (2026-09-23) ─────────
 # Recorded every leg's ranking for all 192 declared tasks and the battery, then

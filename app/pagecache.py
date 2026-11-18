@@ -15,7 +15,63 @@ import threading
 import time
 from pathlib import Path
 
-_cache: dict[str, tuple[float, str]] = {}
+class _Lru:
+    """A byte-bounded in-process copy of the shared page cache.
+
+    The durable store is the shared cache file; this dict only saves a read on a
+    hot page. It was unbounded, so every worker ended up holding every page it had
+    ever served and its resident memory grew for days. Least recently used pages
+    are dropped once the budget is spent, and a single page above a quarter of the
+    budget is never kept (it is read from the shared file).
+    """
+
+    def __init__(self, max_bytes: int):
+        from collections import OrderedDict
+        self._d = OrderedDict()
+        self._bytes = 0
+        self._max = max_bytes
+        self._lock = threading.Lock()
+
+    def get(self, key, default=None):
+        with self._lock:
+            v = self._d.get(key)
+            if v is None:
+                return default
+            self._d.move_to_end(key)
+            return v
+
+    def __setitem__(self, key, val):
+        n = len(val[1]) if val and isinstance(val[1], str) else 0
+        with self._lock:
+            old = self._d.pop(key, None)
+            if old is not None:
+                self._bytes -= len(old[1])
+            if n > self._max // 4:
+                return
+            self._d[key] = val
+            self._bytes += n
+            while self._bytes > self._max and self._d:
+                _k, v = self._d.popitem(last=False)
+                self._bytes -= len(v[1])
+
+    def pop(self, key, default=None):
+        with self._lock:
+            v = self._d.pop(key, None)
+            if v is None:
+                return default
+            self._bytes -= len(v[1])
+            return v
+
+    def clear(self):
+        with self._lock:
+            self._d.clear()
+            self._bytes = 0
+
+    def __len__(self):
+        return len(self._d)
+
+
+_cache = _Lru(int(os.getenv("NEURONTO_PAGECACHE_MB", "48")) * 1024 * 1024)
 
 
 # The page cache is on disk, shared by every worker, and survives a restart.
@@ -82,6 +138,7 @@ def stamp() -> str:
     return _stamp
 _local = threading.local()
 _building: set[str] = set()
+_MAX_REBUILDS = 4
 _build_lock = threading.Lock()
 
 
@@ -260,11 +317,19 @@ def _stale_rebuild(key: str, build) -> None:
     if time.time() - _claim_miss.get(key, 0.0) < 10:
         return
     with _build_lock:
-        if key in _building:
+        # A crawler walking thousands of stale pages used to start one thread per
+        # page at once; past the cap the stale copy is simply served again.
+        if key in _building or len(_building) >= _MAX_REBUILDS:
             return
         _building.add(key)
-    threading.Thread(target=_rebuild, args=(key, build, True),
-                     name=f"rebuild:{key}", daemon=True).start()
+    try:
+        threading.Thread(target=_rebuild, args=(key, build, True),
+                         name=f"rebuild:{key}", daemon=True).start()
+    except RuntimeError:
+        # No thread available (resource pressure): the stale copy is still a
+        # correct answer, so a refresh must never fail the request.
+        with _build_lock:
+            _building.discard(key)
 
 
 def _lookup(key: str, ttl: int):

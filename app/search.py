@@ -667,9 +667,42 @@ async def search(conn: sqlite3.Connection, text: str, flt: dict | None,
         e["score"] = rank.apply_liveness(s, e.get("_live"))
         results.append(e)
     results.sort(key=lambda x: -x["score"])
-    return {"results": diversify(results, page_size)[:page_size], "_federated": ups,
+    return {"results": protect_lexical(diversify(results, page_size)[:page_size], local, by_key),
+            "_federated": ups,
             "_dense": {"state": dense_state, "candidates": len(dense_order)},
             "_gate": {"federated": True, "coverage": cov}}
+
+
+def protect_lexical(page: list[dict], local: list[dict], by_key: dict[str, dict],
+                    keep: int = rank.LEXICAL_KEEP) -> list[dict]:
+    """The lexical leg's best `keep` entries may be reordered but never dropped.
+
+    The tool leg is weighted above the lexical leg, so when a query happens to match
+    many tools strictly (a dozen servers each carrying a tool that contains every
+    query word) their whole top ten outscores a lexical result in second place and
+    that result leaves the page entirely, although both legs agree it is relevant.
+    As the index grew that began to happen on queries a publisher wrote about their
+    own resource. Measured on the tune half and confirmed on the holdout half
+    (scripts/evalgate.py, internal/LESSONS.md 2026-11-18): protecting the top three
+    raises recall and costs the capability battery nothing; six or more costs it.
+    An evicted slot is the page's lowest-ranked unprotected entry.
+    """
+    if keep <= 0 or not local:
+        return page
+    prot = [e["_key"] for e in local[:keep]]
+    have = {e.get("_key") for e in page}
+    out = list(page)
+    for k in prot:
+        if k in have or k not in by_key:
+            continue
+        for j in range(len(out) - 1, -1, -1):
+            if out[j].get("_key") not in prot:
+                out.pop(j)
+                break
+        else:
+            continue
+        out.append(by_key[k])
+    return out
 
 
 def _fuse_local(local: list[dict], tool_order: list[str],
@@ -705,7 +738,7 @@ def _fuse_local(local: list[dict], tool_order: list[str],
         e["score"] = rank.apply_liveness(sc, e.get("_live"))
         out.append(e)
     out.sort(key=lambda x: -x["score"])
-    return diversify(out, page_size)[:page_size]
+    return protect_lexical(diversify(out, page_size)[:page_size], local, by_key)
 
 
 async def _dense_keys(conn: sqlite3.Connection, text: str, limit: int) -> list[str]:
