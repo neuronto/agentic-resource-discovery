@@ -28,9 +28,19 @@ class _Lru:
     def __init__(self, max_bytes: int):
         from collections import OrderedDict
         self._d = OrderedDict()
+        self._n = {}          # bytes charged per key, recorded at insert so removal never re-measures
         self._bytes = 0
         self._max = max_bytes
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _size(val) -> int:
+        body = val[1] if isinstance(val, (tuple, list)) and len(val) > 1 else None
+        return len(body) if isinstance(body, (str, bytes)) else 0
+
+    def _drop(self, key):
+        self._d.pop(key, None)
+        self._bytes -= self._n.pop(key, 0)
 
     def get(self, key, default=None):
         with self._lock:
@@ -41,30 +51,30 @@ class _Lru:
             return v
 
     def __setitem__(self, key, val):
-        n = len(val[1]) if val and isinstance(val[1], str) else 0
+        n = self._size(val)
         with self._lock:
-            old = self._d.pop(key, None)
-            if old is not None:
-                self._bytes -= len(old[1])
+            self._drop(key)
             if n > self._max // 4:
                 return
             self._d[key] = val
+            self._n[key] = n
             self._bytes += n
             while self._bytes > self._max and self._d:
-                _k, v = self._d.popitem(last=False)
-                self._bytes -= len(v[1])
+                k = next(iter(self._d))
+                self._drop(k)
 
     def pop(self, key, default=None):
         with self._lock:
-            v = self._d.pop(key, None)
+            v = self._d.get(key)
             if v is None:
                 return default
-            self._bytes -= len(v[1])
+            self._drop(key)
             return v
 
     def clear(self):
         with self._lock:
             self._d.clear()
+            self._n.clear()
             self._bytes = 0
 
     def __len__(self):
